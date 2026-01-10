@@ -1,0 +1,19 @@
+{
+  "name": "claude-code-deobfuscator",
+  "version": "1.0.0",
+  "description": "Pre-processor for CASCADE-style analysis of Claude Code",
+  "main": "analyze.js",
+  "scripts": {
+    "start": "node analyze.js",
+    "clean": "rm -rf claude_workspace"
+  },
+  "dependencies": {
+    "@babel/generator": "^7.28.5",
+    "@babel/parser": "^7.28.5",
+    "@babel/traverse": "^7.28.5"
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5",
+    "webcrack": "^2.14.0"
+  }
+}
