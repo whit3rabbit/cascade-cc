@@ -10,7 +10,8 @@
   "dependencies": {
     "@babel/generator": "^7.28.5",
     "@babel/parser": "^7.28.5",
-    "@babel/traverse": "^7.28.5"
+    "@babel/traverse": "^7.28.5",
+    "gpt-tokenizer": "^3.4.0"
   },
   "devDependencies": {
     "prettier": "^3.2.5",
