@@ -1,184 +1,237 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { encode } = require('gpt-tokenizer');
-
-/**
- * Calculates Shannon entropy of a string.
- */
-function calculateEntropy(str) {
-    const len = str.length;
-    const frequencies = {};
-    for (const char of str) {
-        frequencies[char] = (frequencies[char] || 0) + 1;
-    }
-    return Object.values(frequencies).reduce((sum, f) => {
-        const p = f / len;
-        return sum - p * Math.log2(p);
-    }, 0);
-}
-
-
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const generate = require('@babel/generator').default;
+const { encode } = require('gpt-tokenizer');
 
-// --- CONFIGURATION---
+// --- 1. CONFIGURATION ---
 const PACKAGE_NAME = '@anthropic-ai/claude-code';
-const ROOT_DIR = './analysis';
-const CHUNK_TOKEN_LIMIT = 40000; // Aim for 40k tokens per chunk
-const SEARCH_KEYWORDS = ['anthropic', 'claude', 'prompt', 'agent', 'protocol', 'terminal'];
+const ANALYSIS_DIR = './claude-analysis';
+const OUTPUT_BASE = './cascade_graph_analysis';
+const SIGNAL_KEYWORDS = ['anthropic', 'claude', 'mcp', 'agent', 'terminal', 'prompt', 'session', 'protocol', 'codeloop'];
 
-/**
- * 1. Version-Aware Workspace Setup
- */
-function getContext() {
-    console.log(`[*] Querying NPM for ${PACKAGE_NAME}...`);
-    const version = execSync(`npm view ${PACKAGE_NAME} version`).toString().trim();
-    const versionPath = path.join(ROOT_DIR, version);
+function ensureTargetExists() {
+    // 1. Check command line argument
+    if (process.argv[2]) {
+        return process.argv[2];
+    }
 
-    // Create directory structure
-    const dirs = ['chunks', 'priority_critical', 'metadata'];
-    dirs.forEach(d => fs.mkdirSync(path.join(versionPath, d), { recursive: true }));
+    // 2. Check current directory
+    if (fs.existsSync('./cli.js')) {
+        return './cli.js';
+    }
 
-    return { version, versionPath, stateFile: path.join(versionPath, 'state.json') };
-}
+    // 3. Search claude-analysis versioned folders
+    if (fs.existsSync(ANALYSIS_DIR)) {
+        const versions = fs.readdirSync(ANALYSIS_DIR);
+        for (const version of versions) {
+            const potentialPath = path.join(ANALYSIS_DIR, version, 'cli.js');
+            if (fs.existsSync(potentialPath)) {
+                return potentialPath;
+            }
+        }
+    }
 
-/**
- * 2. Symbol Extraction (Inspired by your knowledge_graph.py)
- * Uses Babel to find what a chunk actually DOES.
- */
-function extractChunkMetadata(code) {
-    const symbols = { exports: [], imports: [], hasCriticalLogic: false };
+    // 4. If not found, download latest from npm
+    console.log(`[*] Target cli.js not found. Downloading latest ${PACKAGE_NAME}...`);
     try {
-        const ast = parser.parse(code, { sourceType: 'module', plugins: ['jsx', 'typescript'] });
-        traverse(ast, {
-            ExportNamedDeclaration({ node }) {
-                if (node.declaration?.id) symbols.exports.push(node.declaration.id.name);
-                if (node.declaration?.declarations) {
-                    node.declaration.declarations.forEach(d => symbols.exports.push(d.id.name));
+        const version = execSync(`npm view ${PACKAGE_NAME} version`).toString().trim();
+        const versionPath = path.join(ANALYSIS_DIR, version);
+
+        if (!fs.existsSync(versionPath)) {
+            fs.mkdirSync(versionPath, { recursive: true });
+            console.log(`[*] Downloading version ${version} to ${versionPath}...`);
+            execSync(`npm pack ${PACKAGE_NAME}@${version}`, { cwd: versionPath });
+            const tarball = fs.readdirSync(versionPath).find(f => f.endsWith('.tgz'));
+            execSync(`tar -xzf "${tarball}" --strip-components=1`, { cwd: versionPath });
+        }
+
+        const downloadedCli = path.join(versionPath, 'cli.js');
+        if (fs.existsSync(downloadedCli)) {
+            return downloadedCli;
+        }
+    } catch (err) {
+        console.error(`[!] Failed to download bundle: ${err.message}`);
+    }
+
+    return null;
+}
+class CascadeGraph {
+    constructor() {
+        this.nodes = new Map(); // Name -> { code, tokens, type, neighbors: Set }
+        this.adjMatrix = {};    // For Markov calculations
+        this.totalTokens = 0;
+    }
+
+    // Step A: Initial Pass - Identify all logical chunks (Nodes)
+    identifyNodes(ast) {
+        console.log(`[*] Phase 1: Identifying Nodes...`);
+        ast.program.body.forEach((node, index) => {
+            let name = `chunk_${index.toString().padStart(4, '0')}`;
+
+            if (node.type === 'VariableDeclaration' && node.declarations[0].id.name) {
+                name = node.declarations[0].id.name;
+            } else if (node.type === 'FunctionDeclaration' && node.id) {
+                name = node.id.name;
+            }
+
+            const code = generate(node, { minified: false }).code;
+            const tokens = encode(code).length;
+
+            this.nodes.set(name, {
+                id: index,
+                name,
+                code,
+                tokens,
+                neighbors: new Set(),
+                score: 0, // Markov Centrality
+                category: 'unknown'
+            });
+        });
+    }
+
+    // Step B: Neighbor Detection (The Edges)
+    detectNeighbors() {
+        console.log(`[*] Phase 2: Neighbor Detection (Building Edges)...`);
+        const nodeNames = Array.from(this.nodes.keys());
+
+        for (const [name, nodeData] of this.nodes) {
+            // Optimization: Only search for names that actually exist in the bundle
+            nodeNames.forEach(potentialNeighbor => {
+                if (name === potentialNeighbor) return;
+
+                // Simple but effective check for neighbor calling
+                // e.g., if code calls 'require_lodash_es()'
+                if (nodeData.code.includes(potentialNeighbor)) {
+                    nodeData.neighbors.add(potentialNeighbor);
                 }
-            },
-            CallExpression({ node }) {
-                // Look for patterns like process.env or sensitive APIs
-                const callee = node.callee.name || "";
-                if (SEARCH_KEYWORDS.some(kw => callee.toLowerCase().includes(kw))) {
-                    symbols.hasCriticalLogic = true;
+            });
+        }
+    }
+
+    // Step C: Markov Chain Analysis
+    // We treat the bundle as a state machine. 
+    // Probability of "stepping" into a neighbor = 1 / total_neighbors.
+    applyMarkovAnalysis() {
+        console.log(`[*] Phase 3: Markov Chain Centrality Calculation...`);
+        const names = Array.from(this.nodes.keys());
+        const size = names.length;
+
+        // Initialize scores (Steady State Distribution)
+        let scores = new Array(size).fill(1 / size);
+
+        // Run 10 iterations of Power Iteration (PageRank style Markov Chain)
+        for (let iter = 0; iter < 10; iter++) {
+            let nextScores = new Array(size).fill(0);
+            for (let i = 0; i < size; i++) {
+                const node = this.nodes.get(names[i]);
+                const outDegree = node.neighbors.size;
+
+                if (outDegree > 0) {
+                    const contribution = scores[i] / outDegree;
+                    node.neighbors.forEach(neighborName => {
+                        const neighborIdx = names.indexOf(neighborName);
+                        nextScores[neighborIdx] += contribution;
+                    });
+                } else {
+                    // Sink node: redistribute to all
+                    for (let j = 0; j < size; j++) nextScores[j] += scores[i] / size;
                 }
             }
+            scores = nextScores;
+        }
+
+        // Map scores back to nodes
+        names.forEach((name, i) => {
+            this.nodes.get(name).score = scores[i];
         });
-    } catch (e) { /* Parsing tiny chunks might fail */ }
-    return symbols;
-}
-
-/**
- * 3. Token-Aware AST Chunker (Ported logic from your chunker.py)
- */
-function chunkLogic(ctx) {
-    const unpackedFile = path.join(ctx.versionPath, 'unpacked', 'deobfuscated.js');
-    const chunkDir = path.join(ctx.versionPath, 'chunks');
-
-    // Skip if already chunked
-    if (fs.readdirSync(chunkDir).length > 0) {
-        console.log("[+] Chunks already exist. Skipping AST slice.");
-        return;
     }
 
-    console.log(`[*] Slicing 11MB bundle into token-safe chunks...`);
-    const code = fs.readFileSync(unpackedFile, 'utf8');
-    const ast = parser.parse(code, { sourceType: 'module', errorRecovery: true });
+    // Step D: Logical Deobfuscation & Classification
+    classify() {
+        console.log(`[*] Phase 4: Classifier Logic (Vendor vs Logic)...`);
+        const avgScore = Array.from(this.nodes.values()).reduce((a, b) => a + b.score, 0) / this.nodes.size;
 
-    let currentChunkNodes = [];
-    let currentTokens = 0;
-    let chunkIdx = 0;
+        for (const [name, node] of this.nodes) {
+            const hasSignal = SIGNAL_KEYWORDS.some(kw => node.code.toLowerCase().includes(kw));
 
-    ast.program.body.forEach((node) => {
-        const nodeCode = generate(node).code;
-        const nodeTokens = encode(nodeCode).length;
-
-        if (currentTokens + nodeTokens > CHUNK_TOKEN_LIMIT && currentChunkNodes.length > 0) {
-            // Save Chunk
-            const output = generate({ type: 'File', program: { type: 'Program', body: currentChunkNodes } }).code;
-            fs.writeFileSync(path.join(chunkDir, `chunk_${chunkIdx}.js`), output);
-
-            chunkIdx++;
-            currentChunkNodes = [node];
-            currentTokens = nodeTokens;
-        } else {
-            currentChunkNodes.push(node);
-            currentTokens += nodeTokens;
+            /**
+             * HEURISTICS:
+             * 1. High Signal = Priority Logic
+             * 2. High Markov Score + No Signal = Vendor Library (it's a high-traffic utility)
+             * 3. Low Score + No Signal = Boilerplate/Noise
+             */
+            if (hasSignal) {
+                node.category = 'priority';
+            } else if (node.score > avgScore * 1.5) {
+                node.category = 'vendor';
+            } else {
+                node.category = 'utility';
+            }
         }
-    });
-}
+    }
 
-/**
- * 4. Knowledge-Graph Based Prioritization
- */
-function prioritize(ctx) {
-    const chunkDir = path.join(ctx.versionPath, 'chunks');
-    const priorityDir = path.join(ctx.versionPath, 'priority_critical');
-    const chunks = fs.readdirSync(chunkDir).filter(f => f.endsWith('.js'));
+    saveResults() {
+        const chunksDir = path.join(OUTPUT_BASE, 'chunks');
+        const metadataDir = path.join(OUTPUT_BASE, 'metadata');
 
-    console.log(`[*] Building Knowledge Map for ${chunks.length} chunks...`);
-    const knowledgeGraph = {};
+        [chunksDir, metadataDir].forEach(d => fs.mkdirSync(d, { recursive: true }));
 
-    chunks.forEach(file => {
-        const code = fs.readFileSync(path.join(chunkDir, file), 'utf8');
-        const meta = extractChunkMetadata(code);
-        const eScore = calculateEntropy(code);
+        const metadata = [];
 
-        const isCritical = meta.hasCriticalLogic ||
-            SEARCH_KEYWORDS.some(kw => code.toLowerCase().includes(kw)) ||
-            eScore > 5.5;
+        for (const [name, node] of this.nodes) {
+            // Sanitize name for filesystem
+            const safeName = name.replace(/[^a-z0-9_]/gi, '_');
+            fs.writeFileSync(path.join(chunksDir, `${safeName}.js`), node.code);
 
-        knowledgeGraph[file] = {
-            entropy: eScore,
-            exports: meta.exports,
-            critical: isCritical
-        };
-
-        if (isCritical) {
-            console.log(`[!] Critical Chunk Found: ${file} (Exports: ${meta.exports.slice(0, 3)}...)`);
-            fs.copyFileSync(path.join(chunkDir, file), path.join(priorityDir, file));
+            metadata.push({
+                name: node.name,
+                file: `chunks/${safeName}.js`,
+                tokens: node.tokens,
+                category: node.category,
+                centrality: node.score,
+                neighborCount: node.neighbors.size,
+                outbound: Array.from(node.neighbors)
+            });
         }
+
+        fs.writeFileSync(
+            path.join(metadataDir, 'graph_map.json'),
+            JSON.stringify(metadata, null, 2)
+        );
+    }
+}
+
+// --- 3. EXECUTION ---
+async function run() {
+    const targetFile = ensureTargetExists();
+
+    if (!targetFile || !fs.existsSync(targetFile)) {
+        console.error(`[!] Error: No input file found.`);
+        console.error(`    Checked: CLI arguments, ./cli.js, and ./claude-analysis/*/cli.js`);
+        console.error(`    Usage: node analyze.js [path-to-bundle.js]`);
+        process.exit(1);
+    }
+
+    console.log(`[*] Target identified: ${targetFile}`);
+    const code = fs.readFileSync(targetFile, 'utf8');
+    const ast = parser.parse(code, {
+        sourceType: 'unambiguous',
+        plugins: ['jsx', 'typescript'],
+        errorRecovery: true
     });
 
-    fs.writeFileSync(path.join(ctx.versionPath, 'knowledge_graph.json'), JSON.stringify(knowledgeGraph, null, 2));
+    const graph = new CascadeGraph();
+    graph.identifyNodes(ast);
+    graph.detectNeighbors();
+    graph.applyMarkovAnalysis();
+    graph.classify();
+    graph.saveResults();
+
+    console.log(`\n[COMPLETE]`);
+    console.log(`Analysis saved to: ${OUTPUT_BASE}`);
 }
 
-/**
- * Main Pipeline Orchestrator
- */
-async function main() {
-    const ctx = getContext();
-
-    // 1. Download (Idempotent)
-    const cliFile = path.join(ctx.versionPath, 'cli.js');
-    if (!fs.existsSync(cliFile)) {
-        console.log(`[*] Downloading ${PACKAGE_NAME}@${ctx.version}...`);
-        execSync(`npm pack ${PACKAGE_NAME}@${ctx.version}`, { cwd: ctx.versionPath });
-        const tarball = fs.readdirSync(ctx.versionPath).find(f => f.endsWith('.tgz'));
-        execSync(`tar -xzf "${tarball}" --strip-components=1`, { cwd: ctx.versionPath });
-    }
-
-    const unpackedDir = path.join(ctx.versionPath, 'unpacked');
-    if (!fs.existsSync(unpackedDir) || fs.readdirSync(unpackedDir).length === 0) {
-        console.log(`[*] Running Webcrack...`);
-        execSync(`npx webcrack "${cliFile}" -o "${unpackedDir}" -f`);
-    }
-
-    // 3. Chunk
-    chunkLogic(ctx);
-
-    // 4. Prioritize & Knowledge Graph
-    prioritize(ctx);
-
-    // 5. Beautify Priority
-    console.log(`[*] Beautifying priority files...`);
-    execSync(`npx prettier --write "${ctx.versionPath}/priority_critical/*.js"`);
-
-    console.log(`\n[COMPLETE] Knowledge Graph built: ${ctx.versionPath}/knowledge_graph.json`);
-    console.log(`[TARGET] Priority logic ready for Gemini in: ${ctx.versionPath}/priority_critical`);
-}
-
-main();
+run().catch(console.error);

@@ -4,17 +4,19 @@
   "description": "Pre-processor for CASCADE-style analysis of Claude Code",
   "main": "analyze.js",
   "scripts": {
-    "start": "node analyze.js",
-    "clean": "rm -rf claude_workspace"
+    "start": "node --max-old-space-size=8192 analyze.js",
+    "clean": "rm -rf cascade_analysis",
+    "lint": "prettier --write ."
   },
   "dependencies": {
     "@babel/generator": "^7.28.5",
     "@babel/parser": "^7.28.5",
     "@babel/traverse": "^7.28.5",
-    "gpt-tokenizer": "^3.4.0"
+    "fs-extra": "^11.2.0",
+    "gpt-tokenizer": "^3.4.0",
+    "webcrack": "^2.14.0"
   },
   "devDependencies": {
-    "prettier": "^3.2.5",
-    "webcrack": "^2.14.0"
+    "prettier": "^3.2.5"
   }
 }
