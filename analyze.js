@@ -5,12 +5,17 @@ const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const generate = require('@babel/generator').default;
 const { encode } = require('gpt-tokenizer');
+const { webcrack } = require('webcrack');
+const { AAdecode, jjdecode } = require('./deobfuscators');
+const t = require('@babel/types');
 
 // --- 1. CONFIGURATION ---
 const PACKAGE_NAME = '@anthropic-ai/claude-code';
 const ANALYSIS_DIR = './claude-analysis';
 const OUTPUT_BASE = './cascade_graph_analysis';
 const SIGNAL_KEYWORDS = ['anthropic', 'claude', 'mcp', 'agent', 'terminal', 'prompt', 'session', 'protocol', 'codeloop'];
+const NATIVE_PROPS = ['toString', 'hasOwnProperty', 'constructor', 'prototype', 'call', 'apply', 'bind'];
+const GLOBAL_VARS = ['console', 'window', 'document', 'process', 'module', 'require', 'exports', 'global', 'Buffer', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'];
 
 function ensureTargetExists() {
     // 1. Check command line argument
@@ -58,6 +63,68 @@ function ensureTargetExists() {
 
     return null;
 }
+
+/**
+ * Robustly find all strings in a node tree without requiring a full Babel path/scope.
+ */
+function findStrings(node, strings = []) {
+    if (!node) return strings;
+    if (node.type === 'StringLiteral') {
+        strings.push(node.value);
+    } else {
+        for (const key in node) {
+            const child = node[key];
+            if (child && typeof child === 'object') {
+                if (Array.isArray(child)) {
+                    child.forEach(c => findStrings(c, strings));
+                } else if (child.type) {
+                    findStrings(child, strings);
+                }
+            }
+        }
+    }
+    return strings;
+}
+
+// --- 2. DEOBFUSCATION HEURISTICS ---
+const removeDeadCodeVisitor = {
+    "IfStatement|ConditionalExpression"(path) {
+        try {
+            const testPath = path.get("test");
+            const evaluateTest = testPath.evaluateTruthy();
+            if (evaluateTest === true) {
+                path.replaceWith(path.node.consequent);
+            } else if (evaluateTest === false) {
+                if (path.node.alternate) path.replaceWith(path.node.alternate);
+                else path.remove();
+            }
+        } catch (e) {
+            // Evaluation failed due to missing scope, skip
+        }
+    },
+    LogicalExpression(path) {
+        try {
+            const { left, operator, right } = path.node;
+            const leftPath = path.get("left");
+            const evaluateLeft = leftPath.evaluateTruthy();
+
+            if ((operator === "||" && evaluateLeft === true) || (operator === "&&" && evaluateLeft === false)) {
+                path.replaceWith(left);
+            } else if ((operator === "||" && evaluateLeft === false) || (operator === "&&" && evaluateLeft === true)) {
+                path.replaceWith(right);
+            }
+        } catch (e) {
+            // Evaluation failed, skip
+        }
+    },
+    SequenceExpression(path) {
+        const { expressions } = path.node;
+        if (expressions.slice(0, -1).every(e => t.isLiteral(e))) {
+            path.replaceWith(expressions[expressions.length - 1]);
+        }
+    }
+};
+
 class CascadeGraph {
     constructor() {
         this.nodes = new Map(); // ChunkName -> { code, tokens, category, neighbors: Set }
@@ -97,6 +164,29 @@ class CascadeGraph {
         const finalizeChunk = () => {
             if (currentChunkNodes.length === 0) return;
             const chunkName = `chunk${chunkIndex.toString().padStart(3, '0')}`;
+
+            // Intelligent Naming Logic
+            let suggestedName = null;
+            const collectedStrings = [];
+            currentChunkNodes.forEach(node => {
+                // Apply DCR to this node and its children (silently skip if it fails)
+                try { traverse(node, { ...removeDeadCodeVisitor, noScope: true }); } catch (e) { }
+                findStrings(node, collectedStrings);
+            });
+
+            for (const val of collectedStrings) {
+                // Heuristics for a "good" module name
+                const isPath = val.includes('/') || val.includes('\\');
+                const isModule = val.includes('@') || val.endsWith('.js') || val.endsWith('.ts');
+                const isClaudeSignal = val.startsWith('tengu_') || val.startsWith('claude_') || val.toLowerCase().includes('anthropic');
+
+                if (isPath || isModule || isClaudeSignal) {
+                    if (!suggestedName || val.length < suggestedName.length) {
+                        if (val.length > 3 && val.length < 60) suggestedName = val;
+                    }
+                }
+            }
+
             const code = currentChunkNodes.map(n => generate(n, { minified: false }).code).join('\n\n');
             const tokens = encode(code).length;
 
@@ -110,6 +200,14 @@ class CascadeGraph {
                 category: currentCategory
             });
 
+            if (suggestedName) {
+                const sanitized = suggestedName.replace(/[^a-zA-Z0-9]/g, '_').replace(/^_+|_+$/g, '');
+                if (sanitized.length > 3) {
+                    const nodeData = this.nodes.get(chunkName);
+                    nodeData.displayName = sanitized;
+                }
+            }
+
             currentChunkNodes.forEach(node => {
                 this.extractInternalNames(node).forEach(name => {
                     this.internalNameToChunkId.set(name, chunkName);
@@ -122,27 +220,72 @@ class CascadeGraph {
             currentCategory = 'unknown';
         };
 
+        let currentChunkHasContent = false;
+
+        // Dynamically detect module wrappers (common in esbuild)
+        const wrapperNames = new Set();
+        statements.slice(0, 150).forEach(node => {
+            if (node.type === 'VariableDeclaration') {
+                node.declarations.forEach(decl => {
+                    const init = decl.init;
+                    if (init && (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression')) {
+                        const code = generate(decl, { minified: true }).code;
+                        // Detect w = (A, Q) => () => (A && (Q = A(A = 0)), Q)
+                        // Detect U = (A, Q) => () => (Q || A((Q = { exports: {} }).exports, Q), Q.exports)
+                        if (code.includes('exports:{}') || code.includes('A=0') || code.includes('exports: {}')) {
+                            wrapperNames.add(decl.id.name);
+                        }
+                    }
+                });
+            }
+        });
+        if (wrapperNames.size > 0) console.log(`[*] Detected module wrappers: ${Array.from(wrapperNames).join(', ')}`);
+
         statements.forEach((node) => {
             const nodeCode = generate(node, { minified: true }).code;
             const nodeTokens = encode(nodeCode).length;
             const hasSignal = SIGNAL_KEYWORDS.some(kw => nodeCode.toLowerCase().includes(kw));
             const nodeCategory = hasSignal ? 'priority' : 'vendor';
+
+            // Check if it's an import or a module wrapper call
             const isImport = node.type === 'ImportDeclaration' ||
                 (node.type === 'VariableDeclaration' && nodeCode.includes('require('));
 
+            const isModuleWrapperCall = node.type === 'VariableDeclaration' &&
+                node.declarations.length === 1 &&
+                node.declarations[0].init &&
+                node.declarations[0].init.type === 'CallExpression' &&
+                wrapperNames.has(node.declarations[0].init.callee.name);
+
+            const isBanal = node.type === 'ExpressionStatement' &&
+                node.expression.type === 'StringLiteral' &&
+                (node.expression.value === 'use strict' || node.expression.value.startsWith('__esModule'));
+
+            // JSimplifier-inspired: Detect library/utility patterns
+            const isUtility = node.type === 'VariableDeclaration' &&
+                node.declarations.some(d => d.id.name && (NATIVE_PROPS.includes(d.id.name) || d.id.name.startsWith('_')));
+
             // Heuristic Split Conditions
             const shouldSplit = currentChunkNodes.length > 0 && (
-                isImport ||
-                (nodeCategory === 'priority' && currentCategory === 'vendor') ||
-                (currentTokens + nodeTokens > 8000) // Slightly larger chunks for context
+                (isImport && currentChunkHasContent) ||
+                (isModuleWrapperCall && currentTokens > 3000) || // Slightly tighter for modules
+                (nodeCategory === 'priority' && currentCategory === 'vendor' && currentTokens > 1500) ||
+                (currentTokens + nodeTokens > 8000) || // Lower threshold for better granularity
+                (isUtility && currentTokens > 2000)
             );
 
             if (shouldSplit) {
                 finalizeChunk();
+                currentChunkHasContent = false;
             }
 
             currentChunkNodes.push(node);
             currentTokens += nodeTokens;
+
+            if (!isImport && !isBanal) {
+                currentChunkHasContent = true;
+            }
+
             // Upgrade category if priority signal found
             if (nodeCategory === 'priority') currentCategory = 'priority';
             else if (currentCategory === 'unknown') currentCategory = 'vendor';
@@ -229,11 +372,11 @@ class CascadeGraph {
         const metadata = [];
 
         for (const [name, node] of this.nodes) {
-            const fileName = `${name}.js`;
+            const fileName = node.displayName ? `${name}_${node.displayName}.js` : `${name}.js`;
             fs.writeFileSync(path.join(chunksDir, fileName), node.code);
 
             metadata.push({
-                name: node.name,
+                name: node.displayName ? `${name} (${node.displayName})` : node.name,
                 file: `chunks/${fileName}`,
                 tokens: node.tokens,
                 category: node.category,
@@ -267,8 +410,19 @@ async function run() {
     }
 
     console.log(`[*] Target identified: ${targetFile}`);
-    const code = fs.readFileSync(targetFile, 'utf8');
-    const ast = parser.parse(code, {
+    let code = fs.readFileSync(targetFile, 'utf8');
+
+    // Phase 0: Preprocessing with Webcrack
+    console.log(`[*] Phase 0: Preprocessing with Webcrack...`);
+    try {
+        const result = await webcrack(code);
+        code = result.code;
+        console.log(`[*] Preprocessing complete. Code cleaned and unminified.`);
+    } catch (err) {
+        console.error(`[!] Webcrack failed: ${err.message}. Proceeding with raw code.`);
+    }
+
+    let ast = parser.parse(code, {
         sourceType: 'unambiguous',
         plugins: ['jsx', 'typescript'],
         errorRecovery: true

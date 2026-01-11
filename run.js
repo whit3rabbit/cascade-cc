@@ -40,6 +40,20 @@ const child = spawn(config.cmd, config.args, {
     shell: true
 });
 
+if (command === 'visualize') {
+    const url = 'http://localhost:3000/visualizer/';
+    const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+
+    setTimeout(() => {
+        try {
+            console.log(`[*] Opening browser to: ${url}`);
+            execSync(`${openCmd} ${url}`);
+        } catch (e) {
+            console.warn(`[!] Failed to open browser automatically. Please visit ${url} manually.`);
+        }
+    }, 2000);
+}
+
 child.on('exit', (code) => {
     process.exit(code);
 });
