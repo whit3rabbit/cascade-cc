@@ -5,6 +5,14 @@ const axios = require('axios');
 
 const OUTPUT_ROOT = './cascade_graph_analysis';
 
+// --- KNOWLEDGE BASE ---
+const KB_PATH = './knowledge_base.json';
+let KB = null;
+if (fs.existsSync(KB_PATH)) {
+    KB = JSON.parse(fs.readFileSync(KB_PATH, 'utf8'));
+    console.log(`[*] Loaded Knowledge Base with ${KB.name_hints?.length || 0} name hints.`);
+}
+
 // --- LLM CONFIG ---
 const PROVIDER = process.env.LLM_PROVIDER || 'gemini'; // 'gemini' or 'openrouter'
 const MODEL = process.env.LLM_MODEL || (PROVIDER === 'gemini' ? 'gemini-2.0-flash' : 'google/gemini-2.0-flash-exp:free');
@@ -104,6 +112,12 @@ async function run() {
         console.log(`[*] Resuming with existing mapping (${Object.keys(mapping).length} entries)`);
     }
 
+    const graphMapPath = path.join(versionPath, 'metadata', 'graph_map.json');
+    let graphData = [];
+    if (fs.existsSync(graphMapPath)) {
+        graphData = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
+    }
+
     const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.endsWith('.js')).sort();
 
     console.log(`[*] Starting Deobfuscation for version: ${version}`);
@@ -114,10 +128,28 @@ async function run() {
         const file = chunkFiles[i];
         const code = fs.readFileSync(path.join(chunksDir, file), 'utf8');
 
+        // Find metadata for this chunk
+        const chunkMeta = graphData.find(m => m.file.endsWith(file));
+        const contextInfo = chunkMeta ? `
+CHUNK CONTEXT:
+- Role: ${chunkMeta.role}
+- Label: ${chunkMeta.label}
+- Category: ${chunkMeta.category}
+- State Touchpoints: ${chunkMeta.state_touchpoints.join(', ')}
+- Neighbors (Calls/Is Called By): ${chunkMeta.outbound.join(', ')}
+` : '';
+
         console.log(`[*] Stage 1 [${i + 1}/${chunkFiles.length}]: Analyzing ${file}...`);
 
         const prompt = `
 You are an expert JavaScript deobfuscator. Your task is to identify obfuscated variable names, function names, and property names in the provided code chunk and create a mapping to more meaningful names.
+
+${contextInfo}
+
+${KB && KB.name_hints ? `
+REFERENCE HINTS FROM PREVIOUS VERSIONS:
+${KB.name_hints.map(h => `- If the code performs this logic: "${h.logic_anchor}", use the name: "${h.suggested_name.replace(/`/g, '')}"`).join('\n')}
+` : ''}
 
 CURRENT MAPPING (JSON):
 ${JSON.stringify(mapping, null, 2)}
@@ -129,10 +161,15 @@ ${code}
 
 INSTRUCTIONS:
 1. Examine the code chunk for obfuscated names (e.g., 'a', 'b_1', 'q_0', etc.).
-2. Suggest better, descriptive names based on the context of the code.
-3. If a name is already in the CURRENT MAPPING, use it consistently.
-4. Only suggest mappings for names that are clearly obfuscated. Avoid mapping common short variable names if they are obvious (like 'i' in a loop).
-5. Return ONLY a JSON object containing the NEW mappings you found in this chunk. Do not include the old mappings unless you are updating them with better context.
+2. Since the role is '${chunkMeta.role}', prioritize names related to that:
+   - If 'STREAM_ORCHESTRATOR', names like 'stream', 'event', 'payload' are likely.
+   - If 'SHELL_EXECUTOR', names like 'command', 'args', 'stdout' are likely.
+   - If 'API_CLIENT', names like 'endpoint', 'headers', 'request' are likely.
+3. Use the following State DNA touchpoints to identify state-related variables:
+   ${chunkMeta.state_touchpoints.map(tp => `- Access to '${tp}' suggests logic managing ${tp.replace(/([A-Z])/g, ' $1')}`).join('\n')}
+4. If a name is already in the CURRENT MAPPING, use it consistently.
+5. If the logic matches a REFERENCE HINT above, you MUST use that suggested name.
+6. Return ONLY a JSON object containing the NEW mappings you found in this chunk. Do not include the old mappings unless you are updating them with better context.
 
 Format your response as a single JSON object:
 {

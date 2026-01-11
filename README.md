@@ -38,13 +38,44 @@ Then open: [http://localhost:3000/visualizer/](http://localhost:3000/visualizer/
 
 ## Workflow
 
-The analysis process follows a multi-stage pipeline designed to decrypt and structure minified Claude code:
+The analysis and deobfuscation process follows a multi-signal **Relational Identity System**:
 
-1.  **Phase 0: Preprocessing (Webcrack)**: The target bundle is processed via `webcrack` to unminify code, resolve shorthand arithmetic, and identify logical module boundaries.
-2.  **Phase 1: AST identification**: The unminified code is parsed into an Abstract Syntax Tree (AST). Heuristics (inspired by `JSimplifier`) are used to split the tree into logical functional chunks (~1000+ modules) based on module wrappers, keyword signals, and utility patterns.
-3.  **Phase 2: Neighbor Detection**: The analyzer builds a dependency graph by detecting cross-references between chunks. It tracks which chunks define internal names and which chunks reference them.
-4.  **Phase 3: Centrality Calculation**: A Markov Chain analysis is applied to the graph to calculate the relative importance (centrality) of each chunk, helping identify the core logic of the Claude "agent".
-5.  **Phase 4: Final Classification**: Chunks are categorized as `priority` (Claude logic) or `vendor` (library code) based on signal keywords and connectivity.
+```mermaid
+graph TD
+    A[Bundle: cli.js] --> B[Phase 0: Preprocessing]
+    B --> C{Phase 1: Identification}
+    C -- KB Anchors --> D[Priority Chunks]
+    C -- Error Anchors --> D
+    C -- Structural DNA --> D
+    D --> E[Phase 2: Neighbor Detection]
+    E --> F[Phase 3: Centrality Analysis]
+    F --> G[Phase 4: Relational Classification]
+    G -- Tengu Spreading --> H[Family Set]
+    H --> I[Stage 1: Context-Aware Mapping]
+    I -- LLM Analysis --> J[Translation Map]
+    J --> K[Stage 2: Final Rewrite]
+    K --> L[Deobfuscated Code]
+```
+
+### Phase 0: Preprocessing & AST Renaming
+The target bundle is processed via `webcrack` to unminify code. The analyzer then dynamically detects runtime helpers (lazy loaders, CommonJS wrappers) and the `INTERNAL_STATE` object, applying global renaming to the AST before chunking.
+
+### Phase 1: AST Identification (The DNA Scan)
+The tree is split into logical functional chunks. Each chunk is scanned for:
+- **Knowledge Base Anchors**: Trigger keywords from `knowledge_base.json`.
+- **Error Fingerprinting**: Plain-text error strings (e.g., "Sandbox violation") that survive minification.
+- **Structural DNA**: Chunks are tagged if they contain `async function*` (generators) or mutate `INTERNAL_STATE`.
+
+### Phase 2 & 3: Neighbor Detection & Centrality
+The analyzer builds a dependency graph of cross-references. A Markov Chain analysis calculates the centrality of each chunk, identifying the "Brain" of the application.
+
+### Phase 4: Final Classification (Relational Identity)
+- **Tengu Spreading**: Starting from "Founder" chunks (containing Tengu keywords or generators), the system iteratively infects neighbors. If 30% of a chunk's neighbors are "Family," it is categorized as Family.
+- **Capability Analysis**: Roles (e.g., `SHELL_EXECUTOR`, `API_CLIENT`) are assigned based on Node.js module imports and structural signatures.
+- **State DNA Mapping**: Accessors to `INTERNAL_STATE` (like `sessionId` or `totalCostUSD`) provide functional touchpoints.
+
+### Stage 1 & 2: LLM Deobfuscation
+The identified roles and State DNA are injected into LLM prompts. This leads to high-accuracy variable naming because the LLM knows, for example, that a `STREAM_ORCHESTRATOR` chunk is likely handling a `MessageStream`.
 
 ## Output
 

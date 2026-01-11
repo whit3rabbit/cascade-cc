@@ -9,6 +9,14 @@ const { webcrack } = require('webcrack');
 const { AAdecode, jjdecode } = require('./deobfuscators');
 const t = require('@babel/types');
 
+// --- 0. KNOWLEDGE BASE ---
+const KB_PATH = './knowledge_base.json';
+let KB = null;
+if (fs.existsSync(KB_PATH)) {
+    KB = JSON.parse(fs.readFileSync(KB_PATH, 'utf8'));
+    console.log(`[*] Loaded Knowledge Base with ${KB.file_anchors?.length || 0} file anchors.`);
+}
+
 // --- 1. CONFIGURATION ---
 const PACKAGE_NAME = '@anthropic-ai/claude-code';
 const ANALYSIS_DIR = './claude-analysis';
@@ -151,6 +159,142 @@ class CascadeGraph {
         this.nodes = new Map(); // ChunkName -> { code, tokens, category, neighbors: Set }
         this.internalNameToChunkId = new Map(); // Name -> ChunkName
         this.totalTokens = 0;
+        this.runtimeMap = {};
+    }
+
+    // Phase 0.5: Detect the names of common obfuscated helpers based on their shape
+    detectRuntimeHelpers(ast) {
+        const helpers = {};
+        const statements = ast.program.body;
+
+        console.log(`[*] Phase 0.5: Dynamically detecting runtime helpers...`);
+
+        // We only need to check the top of the file where esbuild puts its runtime
+        for (let i = 0; i < Math.min(statements.length, 500); i++) {
+            const node = statements[i];
+            if (node.type !== 'VariableDeclaration') continue;
+
+            node.declarations.forEach(decl => {
+                if (!decl.init) return;
+                const code = generate(decl.init, { minified: true }).code;
+                const name = decl.id.name;
+
+                // 1. Detect Lazy Loader (w)
+                // Fingerprint: (A,Q)=>()=>(A&&(Q=A(A=0)),Q)
+                if (code.includes('A=0') && (code.includes('Q=A(') || code.includes('Q = A('))) {
+                    helpers[name] = '__lazyInit';
+                }
+
+                // 2. Detect CommonJS Wrapper (U)
+                // Fingerprint: (A,Q)=>()=>(Q||A((Q={exports:{}}).exports,Q),Q.exports)
+                if (code.includes('exports:{}') && (code.includes('Q.exports') || code.includes('Q .exports'))) {
+                    helpers[name] = '__commonJS';
+                }
+
+                // 3. Detect ESM Export (U5)
+                // Fingerprint: (A,Q)=>{for(var B in Q)Object.defineProperty(A,B,{...})}
+                if (code.includes('defineProperty') && code.includes('enumerable:true') && code.includes('configurable:true')) {
+                    // Check if it looks like a loop assigning properties
+                    if (code.includes('for(var') || code.includes('.map(')) {
+                        helpers[name] = '__export';
+                    }
+                }
+
+                // 4. Detect toESM Interop (c)
+                if (code.includes('__esModule') && code.includes('getPrototypeOf') && code.includes('default:A')) {
+                    helpers[name] = '__toESM';
+                }
+            });
+        }
+
+        console.log(`[*] Dynamically identified helpers:`, helpers);
+        this.runtimeMap = helpers;
+        return helpers;
+    }
+
+    // Phase 0.6: Detect the internal state object
+    detectInternalState(ast) {
+        let stateVarName = null;
+        let creatorFunctionName = null;
+        const statements = ast.program.body;
+
+        console.log(`[*] Phase 0.6: Detecting internal state object...`);
+
+        // 1. Find the function that returns an object with "sessionId"
+        for (let i = 0; i < Math.min(statements.length, 2000); i++) {
+            const node = statements[i];
+
+            if (node.type === 'FunctionDeclaration') {
+                const code = generate(node, { minified: true }).code;
+                if (code.includes('sessionId') && code.includes('totalCostUSD')) {
+                    creatorFunctionName = node.id.name;
+                    console.log(`[*] Found state creator function: ${creatorFunctionName}`);
+                    break;
+                }
+            }
+
+            if (node.type === 'VariableDeclaration') {
+                for (const decl of node.declarations) {
+                    if (decl.init && (decl.init.type === 'FunctionExpression' || decl.init.type === 'ArrowFunctionExpression')) {
+                        const code = generate(decl.init, { minified: true }).code;
+                        if (code.includes('sessionId') && code.includes('totalCostUSD')) {
+                            creatorFunctionName = decl.id.name;
+                            console.log(`[*] Found state creator function: ${creatorFunctionName}`);
+                            break;
+                        }
+                    }
+                }
+                if (creatorFunctionName) break;
+            }
+        }
+
+        if (!creatorFunctionName) {
+            // Fallback: look for direct assignment of the object literal
+            for (let i = 0; i < Math.min(statements.length, 2000); i++) {
+                const node = statements[i];
+                if (node.type === 'VariableDeclaration') {
+                    for (const decl of node.declarations) {
+                        if (decl.init && decl.init.type === 'ObjectExpression') {
+                            const code = generate(decl.init, { minified: true }).code;
+                            if (code.includes('sessionId') && code.includes('totalCostUSD')) {
+                                stateVarName = decl.id.name;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (stateVarName) break;
+            }
+        } else {
+            // 2. Find where this function is called and assigned
+            // The assignment might be inside a lazy init wrapper, so we use traverse
+            console.log(`[*] Searching for call to ${creatorFunctionName} and assignment...`);
+            traverse(ast, {
+                AssignmentExpression(path) {
+                    if (path.node.right.type === 'CallExpression' &&
+                        path.node.right.callee.name === creatorFunctionName &&
+                        path.node.left.type === 'Identifier') {
+                        stateVarName = path.node.left.name;
+                        path.stop();
+                    }
+                },
+                VariableDeclarator(path) {
+                    if (path.node.init && path.node.init.type === 'CallExpression' &&
+                        path.node.init.callee.name === creatorFunctionName &&
+                        path.node.id.type === 'Identifier') {
+                        stateVarName = path.node.id.name;
+                        path.stop();
+                    }
+                }
+            });
+        }
+
+        if (stateVarName) {
+            console.log(`[*] Detected internal state variable: ${stateVarName} -> INTERNAL_STATE`);
+            this.runtimeMap[stateVarName] = 'INTERNAL_STATE';
+        }
+
+        return stateVarName;
     }
 
     // Helper to extract names defined in a statement
@@ -185,30 +329,85 @@ class CascadeGraph {
         const finalizeChunk = () => {
             if (currentChunkNodes.length === 0) return;
             const chunkName = `chunk${chunkIndex.toString().padStart(3, '0')}`;
+            const code = currentChunkNodes.map(n => generate(n, { minified: false }).code).join('\n\n');
 
-            // Intelligent Naming Logic
             let suggestedName = null;
-            const collectedStrings = [];
-            currentChunkNodes.forEach(node => {
-                // Apply DCR to this node and its children (silently skip if it fails)
-                try { traverse(node, { ...removeDeadCodeVisitor, noScope: true }); } catch (e) { }
-                findStrings(node, collectedStrings);
-            });
+            let category = currentCategory;
+            let kbInfo = null;
+            let errorSignature = null;
+            const hints = [];
 
-            for (const val of collectedStrings) {
-                // Heuristics for a "good" module name
-                const isPath = val.includes('/') || val.includes('\\');
-                const isModule = val.includes('@') || val.endsWith('.js') || val.endsWith('.ts');
-                const isClaudeSignal = val.startsWith('tengu_') || val.startsWith('claude_') || val.toLowerCase().includes('anthropic');
+            // --- NEW: ENHANCED KB METADATA ---
+            if (KB) {
+                // 1. Check File Anchors
+                if (KB.file_anchors) {
+                    for (const anchor of KB.file_anchors) {
+                        const matchCount = anchor.trigger_keywords.filter(kw => code.includes(kw)).length;
+                        const threshold = Math.max(2, Math.floor(anchor.trigger_keywords.length * 0.6));
 
-                if (isPath || isModule || isClaudeSignal) {
-                    if (!suggestedName || val.length < suggestedName.length) {
-                        if (val.length > 3 && val.length < 60) suggestedName = val;
+                        if (matchCount >= threshold) {
+                            suggestedName = anchor.suggested_name.replace(/`/g, '');
+                            category = 'priority';
+                            kbInfo = {
+                                suggested_path: anchor.suggested_path,
+                                description: anchor.description,
+                                match_count: matchCount
+                            };
+                            console.log(`    [+] KB Match: Found ${suggestedName} (${matchCount} keywords)`);
+                            break;
+                        }
+                    }
+                }
+
+                // 2. Scan for Name Hints (Logic Anchors)
+                if (KB.name_hints) {
+                    for (const hint of KB.name_hints) {
+                        if (hint.logic_anchor && hint.logic_anchor.length > 0 && code.includes(hint.logic_anchor)) {
+                            hints.push({
+                                suggested_name: hint.suggested_name.replace(/`/g, ''),
+                                logic_anchor: hint.logic_anchor
+                            });
+                        }
+                    }
+                }
+
+                // 3. Scan for Error Anchors
+                if (KB.error_anchors) {
+                    for (const anchor of KB.error_anchors) {
+                        if (code.includes(anchor.content)) {
+                            errorSignature = anchor.role;
+                            console.log(`    [!] Error Anchor: Found ${anchor.role}`);
+                        }
                     }
                 }
             }
 
-            const code = currentChunkNodes.map(n => generate(n, { minified: false }).code).join('\n\n');
+            // Detect Structural Signals (DNA)
+            const hasGenerator = code.includes('async function*') || code.includes('yield*');
+            const hasStateMutator = code.includes('INTERNAL_STATE.') && code.includes('=');
+            // ---------------------------------
+
+            // Intelligent Naming Logic (Fallback)
+            if (!suggestedName) {
+                const collectedStrings = [];
+                currentChunkNodes.forEach(node => {
+                    try { traverse(node, { ...removeDeadCodeVisitor, noScope: true }); } catch (e) { }
+                    findStrings(node, collectedStrings);
+                });
+
+                for (const val of collectedStrings) {
+                    const isPath = val.includes('/') || val.includes('\\');
+                    const isModule = val.includes('@') || val.endsWith('.js') || val.endsWith('.ts');
+                    const isClaudeSignal = val.startsWith('tengu_') || val.startsWith('claude_') || val.toLowerCase().includes('anthropic');
+
+                    if (isPath || isModule || isClaudeSignal) {
+                        if (!suggestedName || val.length < suggestedName.length) {
+                            if (val.length > 3 && val.length < 60) suggestedName = val;
+                        }
+                    }
+                }
+            }
+
             const tokens = encode(code).length;
 
             this.nodes.set(chunkName, {
@@ -218,7 +417,12 @@ class CascadeGraph {
                 tokens,
                 neighbors: new Set(),
                 score: 0,
-                category: currentCategory
+                category: currentCategory,
+                kb_info: kbInfo,
+                hints: hints,
+                hasGenerator,
+                hasStateMutator,
+                error_signature: errorSignature
             });
 
             if (suggestedName) {
@@ -242,25 +446,13 @@ class CascadeGraph {
         };
 
         let currentChunkHasContent = false;
+        const wrapperNames = new Set(
+            Object.keys(this.runtimeMap).filter(name =>
+                this.runtimeMap[name] === '__commonJS' || this.runtimeMap[name] === '__lazyInit'
+            )
+        );
 
-        // Dynamically detect module wrappers (common in esbuild)
-        const wrapperNames = new Set();
-        statements.slice(0, 150).forEach(node => {
-            if (node.type === 'VariableDeclaration') {
-                node.declarations.forEach(decl => {
-                    const init = decl.init;
-                    if (init && (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression')) {
-                        const code = generate(decl, { minified: true }).code;
-                        // Detect w = (A, Q) => () => (A && (Q = A(A = 0)), Q)
-                        // Detect U = (A, Q) => () => (Q || A((Q = { exports: {} }).exports, Q), Q.exports)
-                        if (code.includes('exports:{}') || code.includes('A=0') || code.includes('exports: {}')) {
-                            wrapperNames.add(decl.id.name);
-                        }
-                    }
-                });
-            }
-        });
-        if (wrapperNames.size > 0) console.log(`[*] Detected module wrappers: ${Array.from(wrapperNames).join(', ')}`);
+        if (wrapperNames.size > 0) console.log(`[*] Using detected module wrappers for splitting: ${Array.from(wrapperNames).join(', ')}`);
 
         statements.forEach((node) => {
             const nodeCode = generate(node, { minified: true }).code;
@@ -268,7 +460,6 @@ class CascadeGraph {
             const hasSignal = SIGNAL_KEYWORDS.some(kw => nodeCode.toLowerCase().includes(kw));
             const nodeCategory = hasSignal ? 'priority' : 'vendor';
 
-            // Check if it's an import or a module wrapper call
             const isImport = node.type === 'ImportDeclaration' ||
                 (node.type === 'VariableDeclaration' && nodeCode.includes('require('));
 
@@ -282,16 +473,14 @@ class CascadeGraph {
                 node.expression.type === 'StringLiteral' &&
                 (node.expression.value === 'use strict' || node.expression.value.startsWith('__esModule'));
 
-            // JSimplifier-inspired: Detect library/utility patterns
             const isUtility = node.type === 'VariableDeclaration' &&
                 node.declarations.some(d => d.id.name && (NATIVE_PROPS.includes(d.id.name) || d.id.name.startsWith('_')));
 
-            // Heuristic Split Conditions
             const shouldSplit = currentChunkNodes.length > 0 && (
                 (isImport && currentChunkHasContent) ||
-                (isModuleWrapperCall && currentTokens > 3000) || // Slightly tighter for modules
+                (isModuleWrapperCall && currentTokens > 3000) ||
                 (nodeCategory === 'priority' && currentCategory === 'vendor' && currentTokens > 1500) ||
-                (currentTokens + nodeTokens > 8000) || // Lower threshold for better granularity
+                (currentTokens + nodeTokens > 8000) ||
                 (isUtility && currentTokens > 2000)
             );
 
@@ -307,7 +496,6 @@ class CascadeGraph {
                 currentChunkHasContent = true;
             }
 
-            // Upgrade category if priority signal found
             if (nodeCategory === 'priority') currentCategory = 'priority';
             else if (currentCategory === 'unknown') currentCategory = 'vendor';
         });
@@ -325,10 +513,7 @@ class CascadeGraph {
                 const targetChunk = this.internalNameToChunkId.get(definedName);
                 if (chunkName === targetChunk) return;
 
-                // Check if this chunk references a name defined in another chunk
-                // We use a simple regex-like search but check for word boundaries to avoid partial matches
                 if (nodeData.code.includes(definedName)) {
-                    // Quick check for word boundary if possible, else just include
                     const regex = new RegExp(`\\b${definedName}\\b`);
                     if (regex.test(nodeData.code)) {
                         nodeData.neighbors.add(targetChunk);
@@ -371,11 +556,101 @@ class CascadeGraph {
         });
     }
 
-    // Phase 4: Re-classify based on aggregated chunk data
+    // Phase 4: Re-classify based on aggregated chunk data (Relational Identity)
     classify() {
-        console.log(`[*] Phase 4: Final Classification...`);
-        // Categories are already partially set in Phase 1, but we can refine
-        // based on score or other metrics if needed.
+        console.log(`[*] Phase 4: Final Classification (Relational Identity System)...`);
+
+        // 1. Pre-calculate Metrics (In-Degree)
+        const inDegree = new Map();
+        for (const [name, node] of this.nodes) {
+            for (const neighbor of node.neighbors) {
+                inDegree.set(neighbor, (inDegree.get(neighbor) || 0) + 1);
+            }
+        }
+
+        // 2. Identify "Founder Seeds" (Keywords + Async Generators + State DNA)
+        const familySet = new Set();
+        for (const [name, node] of this.nodes) {
+            const code = node.code;
+            const hasTengu = code.toLowerCase().includes('tengu_');
+            const hasGenerator = node.hasGenerator;
+            const isStateMutator = node.hasStateMutator;
+            const hasErrorSignature = !!node.error_signature;
+
+            if (hasTengu || hasGenerator || isStateMutator || hasErrorSignature) {
+                familySet.add(name);
+                node.category = 'founder';
+            }
+        }
+        console.log(`    [+] Identified ${familySet.size} founder chunks.`);
+
+        // 3. Spreading Activation (Tengu Spreading / Neighbor Collision)
+        let changed = true;
+        let iteration = 0;
+        while (changed && iteration < 10) {
+            iteration++;
+            let startSize = familySet.size;
+            for (const [name, node] of this.nodes) {
+                if (familySet.has(name)) continue;
+
+                const neighbors = Array.from(node.neighbors);
+                const familyNeighbors = neighbors.filter(n => familySet.has(n));
+
+                if (neighbors.length > 0 && (familyNeighbors.length / neighbors.length >= 0.3 || familyNeighbors.length >= 2)) {
+                    familySet.add(name);
+                }
+            }
+            changed = familySet.size > startSize;
+        }
+        console.log(`    [+] Spreading complete: ${familySet.size} chunks in family set after ${iteration} iterations.`);
+
+        // 4. Role Assignment via Capability & Modularity
+        for (const [name, node] of this.nodes) {
+            const inCount = inDegree.get(name) || 0;
+            const outCount = node.neighbors.size;
+            const isFamily = familySet.has(name);
+
+            if (isFamily && node.category !== 'founder') {
+                node.category = 'family';
+            } else if (!isFamily) {
+                node.category = 'vendor';
+            }
+
+            if (!isFamily && inCount > 15 && outCount < 5) {
+                node.label = 'VENDOR_LIBRARY';
+            } else if (isFamily && inCount > 5 && outCount > 5) {
+                node.label = 'CORE_ORCHESTRATOR';
+            }
+
+            let role = node.role || 'MODULE';
+
+            if (node.hasGenerator) {
+                role = 'STREAM_ORCHESTRATOR';
+            } else if (node.code.includes('child_process') || node.code.includes('spawn')) {
+                role = 'SHELL_EXECUTOR';
+            } else if (node.code.includes('anthropic-beta') || node.code.includes('https://api.anthropic.com')) {
+                role = 'API_CLIENT';
+            } else if (node.code.includes('statsig')) {
+                role = 'FEATURE_FLAGS';
+            } else if (node.code.includes('Box') || node.code.includes('Text') || node.code.includes('ink')) {
+                role = 'UI_COMPONENT';
+            } else if (node.error_signature) {
+                role = node.error_signature;
+            } else if (isFamily) {
+                role = 'CORE_LOGIC';
+            }
+
+            node.role = role;
+
+            node.state_touchpoints = [];
+            const stateMatches = node.code.match(/INTERNAL_STATE\.(\w+)/g);
+            if (stateMatches) {
+                node.state_touchpoints = [...new Set(stateMatches.map(m => m.split('.')[1]))];
+            }
+
+            if (node.code.includes('totalCostUSD')) node.state_touchpoints.push('FINANCIAL_LOGIC');
+            if (node.code.includes('invokedSkills')) node.state_touchpoints.push('TOOL_DISPATCHER');
+        }
     }
 
     saveResults(versionDir) {
@@ -383,11 +658,9 @@ class CascadeGraph {
         const metadataDir = path.join(versionDir, 'metadata');
 
         [chunksDir, metadataDir].forEach(d => {
-            if (fs.existsSync(d)) {
-                // Clear old results (shouldn't happen with new versioning, but for safety)
-                fs.readdirSync(d).forEach(f => fs.unlinkSync(path.join(d, f)));
+            if (!fs.existsSync(d)) {
+                fs.mkdirSync(d, { recursive: true });
             }
-            fs.mkdirSync(d, { recursive: true });
         });
 
         const metadata = [];
@@ -401,9 +674,14 @@ class CascadeGraph {
                 file: `chunks/${fileName}`,
                 tokens: node.tokens,
                 category: node.category,
+                label: node.label || 'UNKNOWN',
+                role: node.role || 'MODULE',
+                state_touchpoints: node.state_touchpoints || [],
                 centrality: node.score,
                 neighborCount: node.neighbors.size,
-                outbound: Array.from(node.neighbors)
+                outbound: Array.from(node.neighbors),
+                kb_info: node.kb_info,
+                hints: node.hints
             });
         }
 
@@ -450,6 +728,67 @@ async function run() {
     });
 
     const graph = new CascadeGraph();
+
+    // NEW: Dynamic Helper Detection
+    const runtimeMap = graph.detectRuntimeHelpers(ast);
+    graph.detectInternalState(ast);
+
+    // Apply Global Renaming before chunking
+    console.log(`[*] Phase 0.7: Applying dynamic renaming to AST...`);
+    const { applyDynamicRenaming } = require('./deobfuscators');
+
+    const namesToRename = Object.keys(runtimeMap);
+    if (namesToRename.length > 0) {
+        traverse(ast, {
+            Program(path) {
+                namesToRename.forEach(oldName => {
+                    const newName = runtimeMap[oldName];
+                    if (path.scope.hasBinding(oldName)) {
+                        path.scope.rename(oldName, newName);
+                        console.log(`[RENAME] Global: ${oldName} -> ${newName}`);
+                    }
+                });
+                path.stop(); // Only need to process Program scope once
+            }
+        });
+    }
+
+    if (Object.values(runtimeMap).includes('INTERNAL_STATE')) {
+        console.log(`[*] Phase 0.8: Applying structural renaming to state accessors...`);
+        const stateAccessors = {};
+        const stateKeys = ['sessionId', 'cwd', 'totalCostUSD', 'startTime', 'originalCwd', 'meter', 'sessionCounter', 'locCounter', 'prCounter', 'commitCounter', 'costCounter', 'tokenCounter', 'loggerProvider', 'eventLogger', 'meterProvider', 'tracerProvider', 'isInteractive', 'clientType', 'agentColorMap', 'flagSettingsPath', 'sessionIngressToken', 'oauthTokenFromFd', 'apiKeyFromFd', 'envVarValidators', 'lastAPIRequest', 'allowedSettingSources', 'inlinePlugins', 'sessionBypassPermissionsMode', 'sessionTrustAccepted', 'sessionPersistenceDisabled', 'hasExitedPlanMode', 'needsPlanModeExitAttachment', 'hasExitedDelegateMode', 'needsDelegateModeExitAttachment', 'lspRecommendationShownThisSession', 'initJsonSchema', 'registeredHooks', 'planSlugCache', 'teleportedSessionInfo', 'invokedSkills', 'mainThreadAgentType'];
+
+        traverse(ast, {
+            FunctionDeclaration(path) {
+                const body = path.node.body.body;
+                if (body.length === 1 && t.isReturnStatement(body[0])) {
+                    const arg = body[0].argument;
+                    if (t.isMemberExpression(arg) && t.isIdentifier(arg.object) && arg.object.name === 'INTERNAL_STATE' && t.isIdentifier(arg.property)) {
+                        const propName = arg.property.name;
+                        if (stateKeys.includes(propName)) {
+                            stateAccessors[path.node.id.name] = `get_${propName}`;
+                        }
+                    }
+                }
+            }
+        });
+
+        if (Object.keys(stateAccessors).length > 0) {
+            traverse(ast, {
+                Program(path) {
+                    Object.keys(stateAccessors).forEach(oldName => {
+                        const newName = stateAccessors[oldName];
+                        if (path.scope.hasBinding(oldName)) {
+                            console.log(`    [RENAME] State Accessor: ${oldName} -> ${newName}`);
+                            path.scope.rename(oldName, newName);
+                        }
+                    });
+                    path.stop();
+                }
+            });
+        }
+    }
+
     graph.identifyNodes(ast);
     graph.detectNeighbors();
     graph.applyMarkovAnalysis();

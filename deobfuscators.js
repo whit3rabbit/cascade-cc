@@ -50,7 +50,23 @@ function jjdecode(text) {
     return text;
 }
 
+/**
+ * Now accepts a dynamic map discovered during analysis
+ */
+function applyDynamicRenaming(path, dynamicMap) {
+    const t = require('@babel/types');
+    if (t.isIdentifier(path.node) && dynamicMap[path.node.name]) {
+        // Only rename if it's a top-level binding or a reference to one
+        const binding = path.scope.getBinding(path.node.name);
+        if (binding) {
+            path.scope.rename(path.node.name, dynamicMap[path.node.name]);
+            console.log(`[RENAME] ${path.node.name} -> ${dynamicMap[path.node.name]}`);
+        }
+    }
+}
+
 module.exports = {
     AAdecode,
-    jjdecode
+    jjdecode,
+    applyDynamicRenaming
 };
