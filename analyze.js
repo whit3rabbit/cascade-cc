@@ -12,56 +12,76 @@ const t = require('@babel/types');
 // --- 1. CONFIGURATION ---
 const PACKAGE_NAME = '@anthropic-ai/claude-code';
 const ANALYSIS_DIR = './claude-analysis';
-const OUTPUT_BASE = './cascade_graph_analysis';
+const OUTPUT_ROOT = './cascade_graph_analysis';
+let OUTPUT_BASE = OUTPUT_ROOT; // Will be updated with version
 const SIGNAL_KEYWORDS = ['anthropic', 'claude', 'mcp', 'agent', 'terminal', 'prompt', 'session', 'protocol', 'codeloop'];
 const NATIVE_PROPS = ['toString', 'hasOwnProperty', 'constructor', 'prototype', 'call', 'apply', 'bind'];
 const GLOBAL_VARS = ['console', 'window', 'document', 'process', 'module', 'require', 'exports', 'global', 'Buffer', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'];
 
 function ensureTargetExists() {
+    let targetFile = null;
+    let version = 'unknown';
+
     // 1. Check command line argument
     if (process.argv[2]) {
-        return process.argv[2];
+        targetFile = process.argv[2];
+        // Try to infer version from path
+        const match = targetFile.match(/claude-analysis\/([^/]+)\/cli\.js/);
+        if (match) version = match[1];
+        return { targetFile, version };
     }
 
-    // 2. Check current directory
-    if (fs.existsSync('./cli.js')) {
-        return './cli.js';
-    }
-
-    // 3. Search claude-analysis versioned folders
-    if (fs.existsSync(ANALYSIS_DIR)) {
-        const versions = fs.readdirSync(ANALYSIS_DIR);
-        for (const version of versions) {
-            const potentialPath = path.join(ANALYSIS_DIR, version, 'cli.js');
-            if (fs.existsSync(potentialPath)) {
-                return potentialPath;
+    // 2. Fetch latest version from NPM
+    console.log(`[*] Checking latest version of ${PACKAGE_NAME}...`);
+    try {
+        version = execSync(`npm view ${PACKAGE_NAME} version`).toString().trim();
+    } catch (err) {
+        console.warn(`[!] Failed to fetch NPM version: ${err.message}`);
+        // Fallback to locally existing if any
+        if (fs.existsSync(ANALYSIS_DIR)) {
+            const versions = fs.readdirSync(ANALYSIS_DIR).filter(v => /^\d+\.\d+\.\d+/.test(v)).sort().reverse();
+            for (const v of versions) {
+                const potentialPath = path.join(ANALYSIS_DIR, v, 'cli.js');
+                if (fs.existsSync(potentialPath)) {
+                    console.log(`[*] Using locally found version: ${v} (NPM check failed)`);
+                    return { targetFile: potentialPath, version: v };
+                }
             }
         }
     }
 
-    // 4. If not found, download latest from npm
-    console.log(`[*] Target cli.js not found. Downloading latest ${PACKAGE_NAME}...`);
-    try {
-        const version = execSync(`npm view ${PACKAGE_NAME} version`).toString().trim();
+    // 3. Check if versioned folder already exists
+    if (version !== 'unknown') {
         const versionPath = path.join(ANALYSIS_DIR, version);
-
-        if (!fs.existsSync(versionPath)) {
-            fs.mkdirSync(versionPath, { recursive: true });
-            console.log(`[*] Downloading version ${version} to ${versionPath}...`);
-            execSync(`npm pack ${PACKAGE_NAME}@${version}`, { cwd: versionPath });
-            const tarball = fs.readdirSync(versionPath).find(f => f.endsWith('.tgz'));
-            execSync(`tar -xzf "${tarball}" --strip-components=1`, { cwd: versionPath });
+        const potentialPath = path.join(versionPath, 'cli.js');
+        if (fs.existsSync(potentialPath)) {
+            console.log(`[*] Version ${version} already present. Skipping download.`);
+            return { targetFile: potentialPath, version };
         }
-
-        const downloadedCli = path.join(versionPath, 'cli.js');
-        if (fs.existsSync(downloadedCli)) {
-            return downloadedCli;
-        }
-    } catch (err) {
-        console.error(`[!] Failed to download bundle: ${err.message}`);
     }
 
-    return null;
+    // 4. If not found or if version check succeeded but folder doesn't exist, download latest from npm
+    if (version !== 'unknown') {
+        console.log(`[*] Downloading version ${version} of ${PACKAGE_NAME}...`);
+        try {
+            const versionPath = path.join(ANALYSIS_DIR, version);
+            if (!fs.existsSync(versionPath)) {
+                fs.mkdirSync(versionPath, { recursive: true });
+                execSync(`npm pack ${PACKAGE_NAME}@${version}`, { cwd: versionPath });
+                const tarball = fs.readdirSync(versionPath).find(f => f.endsWith('.tgz'));
+                execSync(`tar -xzf "${tarball}" --strip-components=1`, { cwd: versionPath });
+            }
+
+            const downloadedCli = path.join(versionPath, 'cli.js');
+            if (fs.existsSync(downloadedCli)) {
+                return { targetFile: downloadedCli, version };
+            }
+        } catch (err) {
+            console.error(`[!] Failed to download bundle: ${err.message}`);
+        }
+    }
+
+    return { targetFile: null, version: 'unknown' };
 }
 
 /**
@@ -124,6 +144,7 @@ const removeDeadCodeVisitor = {
         }
     }
 };
+
 
 class CascadeGraph {
     constructor() {
@@ -357,13 +378,13 @@ class CascadeGraph {
         // based on score or other metrics if needed.
     }
 
-    saveResults() {
-        const chunksDir = path.join(OUTPUT_BASE, 'chunks');
-        const metadataDir = path.join(OUTPUT_BASE, 'metadata');
+    saveResults(versionDir) {
+        const chunksDir = path.join(versionDir, 'chunks');
+        const metadataDir = path.join(versionDir, 'metadata');
 
         [chunksDir, metadataDir].forEach(d => {
             if (fs.existsSync(d)) {
-                // Clear old results
+                // Clear old results (shouldn't happen with new versioning, but for safety)
                 fs.readdirSync(d).forEach(f => fs.unlinkSync(path.join(d, f)));
             }
             fs.mkdirSync(d, { recursive: true });
@@ -400,7 +421,7 @@ class CascadeGraph {
 
 // --- 3. EXECUTION ---
 async function run() {
-    const targetFile = ensureTargetExists();
+    const { targetFile, version } = ensureTargetExists();
 
     if (!targetFile || !fs.existsSync(targetFile)) {
         console.error(`[!] Error: No input file found.`);
@@ -433,10 +454,15 @@ async function run() {
     graph.detectNeighbors();
     graph.applyMarkovAnalysis();
     graph.classify();
-    graph.saveResults();
+
+    OUTPUT_BASE = path.join(OUTPUT_ROOT, version);
+    console.log(`[*] Output directory: ${OUTPUT_BASE}`);
+
+    graph.saveResults(OUTPUT_BASE);
 
     console.log(`\n[COMPLETE]`);
     console.log(`Analysis saved to: ${OUTPUT_BASE}`);
+    return { version, path: OUTPUT_BASE };
 }
 
 run().catch(console.error);

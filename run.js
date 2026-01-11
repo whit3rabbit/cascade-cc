@@ -20,6 +20,11 @@ const scripts = {
         cmd: 'rm',
         args: ['-rf', 'cascade_graph_analysis', 'claude-analysis'],
         desc: 'Clean analysis outputs'
+    },
+    'deobfuscate': {
+        cmd: 'node',
+        args: ['deobfuscate.js', ...args],
+        desc: 'Run LLM-based deobfuscation (Stage 1 & 2)'
     }
 };
 
