@@ -60,69 +60,129 @@ function ensureTargetExists() {
 }
 class CascadeGraph {
     constructor() {
-        this.nodes = new Map(); // Name -> { code, tokens, type, neighbors: Set }
-        this.adjMatrix = {};    // For Markov calculations
+        this.nodes = new Map(); // ChunkName -> { code, tokens, category, neighbors: Set }
+        this.internalNameToChunkId = new Map(); // Name -> ChunkName
         this.totalTokens = 0;
     }
 
-    // Step A: Initial Pass - Identify all logical chunks (Nodes)
+    // Helper to extract names defined in a statement
+    extractInternalNames(node) {
+        const names = [];
+        if (node.type === 'VariableDeclaration') {
+            node.declarations.forEach(d => {
+                if (d.id && d.id.name) names.push(d.id.name);
+                if (d.id && d.id.type === 'ObjectPattern') {
+                    d.id.properties.forEach(p => {
+                        if (p.value && p.value.name) names.push(p.value.name);
+                    });
+                }
+            });
+        } else if (node.type === 'FunctionDeclaration' && node.id) {
+            names.push(node.id.name);
+        } else if (node.type === 'ClassDeclaration' && node.id) {
+            names.push(node.id.name);
+        }
+        return names;
+    }
+
+    // Step A: Initial Pass - Group logical chunks
     identifyNodes(ast) {
-        console.log(`[*] Phase 1: Identifying Nodes...`);
-        ast.program.body.forEach((node, index) => {
-            let name = `chunk_${index.toString().padStart(4, '0')}`;
+        console.log(`[*] Phase 1: Identifying Chunks...`);
+        const statements = ast.program.body;
+        let currentChunkNodes = [];
+        let currentTokens = 0;
+        let currentCategory = 'unknown';
+        let chunkIndex = 1;
 
-            if (node.type === 'VariableDeclaration' && node.declarations[0].id.name) {
-                name = node.declarations[0].id.name;
-            } else if (node.type === 'FunctionDeclaration' && node.id) {
-                name = node.id.name;
-            }
-
-            const code = generate(node, { minified: false }).code;
+        const finalizeChunk = () => {
+            if (currentChunkNodes.length === 0) return;
+            const chunkName = `chunk${chunkIndex.toString().padStart(3, '0')}`;
+            const code = currentChunkNodes.map(n => generate(n, { minified: false }).code).join('\n\n');
             const tokens = encode(code).length;
 
-            this.nodes.set(name, {
-                id: index,
-                name,
+            this.nodes.set(chunkName, {
+                id: chunkIndex,
+                name: chunkName,
                 code,
                 tokens,
                 neighbors: new Set(),
-                score: 0, // Markov Centrality
-                category: 'unknown'
+                score: 0,
+                category: currentCategory
             });
+
+            currentChunkNodes.forEach(node => {
+                this.extractInternalNames(node).forEach(name => {
+                    this.internalNameToChunkId.set(name, chunkName);
+                });
+            });
+
+            chunkIndex++;
+            currentChunkNodes = [];
+            currentTokens = 0;
+            currentCategory = 'unknown';
+        };
+
+        statements.forEach((node) => {
+            const nodeCode = generate(node, { minified: true }).code;
+            const nodeTokens = encode(nodeCode).length;
+            const hasSignal = SIGNAL_KEYWORDS.some(kw => nodeCode.toLowerCase().includes(kw));
+            const nodeCategory = hasSignal ? 'priority' : 'vendor';
+            const isImport = node.type === 'ImportDeclaration' ||
+                (node.type === 'VariableDeclaration' && nodeCode.includes('require('));
+
+            // Heuristic Split Conditions
+            const shouldSplit = currentChunkNodes.length > 0 && (
+                isImport ||
+                (nodeCategory === 'priority' && currentCategory === 'vendor') ||
+                (currentTokens + nodeTokens > 8000) // Slightly larger chunks for context
+            );
+
+            if (shouldSplit) {
+                finalizeChunk();
+            }
+
+            currentChunkNodes.push(node);
+            currentTokens += nodeTokens;
+            // Upgrade category if priority signal found
+            if (nodeCategory === 'priority') currentCategory = 'priority';
+            else if (currentCategory === 'unknown') currentCategory = 'vendor';
         });
+
+        finalizeChunk();
     }
 
     // Step B: Neighbor Detection (The Edges)
     detectNeighbors() {
         console.log(`[*] Phase 2: Neighbor Detection (Building Edges)...`);
-        const nodeNames = Array.from(this.nodes.keys());
+        const internalNames = Array.from(this.internalNameToChunkId.keys());
 
-        for (const [name, nodeData] of this.nodes) {
-            // Optimization: Only search for names that actually exist in the bundle
-            nodeNames.forEach(potentialNeighbor => {
-                if (name === potentialNeighbor) return;
+        for (const [chunkName, nodeData] of this.nodes) {
+            internalNames.forEach(definedName => {
+                const targetChunk = this.internalNameToChunkId.get(definedName);
+                if (chunkName === targetChunk) return;
 
-                // Simple but effective check for neighbor calling
-                // e.g., if code calls 'require_lodash_es()'
-                if (nodeData.code.includes(potentialNeighbor)) {
-                    nodeData.neighbors.add(potentialNeighbor);
+                // Check if this chunk references a name defined in another chunk
+                // We use a simple regex-like search but check for word boundaries to avoid partial matches
+                if (nodeData.code.includes(definedName)) {
+                    // Quick check for word boundary if possible, else just include
+                    const regex = new RegExp(`\\b${definedName}\\b`);
+                    if (regex.test(nodeData.code)) {
+                        nodeData.neighbors.add(targetChunk);
+                    }
                 }
             });
         }
     }
 
     // Step C: Markov Chain Analysis
-    // We treat the bundle as a state machine. 
-    // Probability of "stepping" into a neighbor = 1 / total_neighbors.
     applyMarkovAnalysis() {
         console.log(`[*] Phase 3: Markov Chain Centrality Calculation...`);
         const names = Array.from(this.nodes.keys());
         const size = names.length;
+        if (size === 0) return;
 
-        // Initialize scores (Steady State Distribution)
         let scores = new Array(size).fill(1 / size);
 
-        // Run 10 iterations of Power Iteration (PageRank style Markov Chain)
         for (let iter = 0; iter < 10; iter++) {
             let nextScores = new Array(size).fill(0);
             for (let i = 0; i < size; i++) {
@@ -133,62 +193,48 @@ class CascadeGraph {
                     const contribution = scores[i] / outDegree;
                     node.neighbors.forEach(neighborName => {
                         const neighborIdx = names.indexOf(neighborName);
-                        nextScores[neighborIdx] += contribution;
+                        if (neighborIdx !== -1) nextScores[neighborIdx] += contribution;
                     });
                 } else {
-                    // Sink node: redistribute to all
                     for (let j = 0; j < size; j++) nextScores[j] += scores[i] / size;
                 }
             }
             scores = nextScores;
         }
 
-        // Map scores back to nodes
         names.forEach((name, i) => {
             this.nodes.get(name).score = scores[i];
         });
     }
 
-    // Step D: Logical Deobfuscation & Classification
+    // Phase 4: Re-classify based on aggregated chunk data
     classify() {
-        console.log(`[*] Phase 4: Classifier Logic (Vendor vs Logic)...`);
-        const avgScore = Array.from(this.nodes.values()).reduce((a, b) => a + b.score, 0) / this.nodes.size;
-
-        for (const [name, node] of this.nodes) {
-            const hasSignal = SIGNAL_KEYWORDS.some(kw => node.code.toLowerCase().includes(kw));
-
-            /**
-             * HEURISTICS:
-             * 1. High Signal = Priority Logic
-             * 2. High Markov Score + No Signal = Vendor Library (it's a high-traffic utility)
-             * 3. Low Score + No Signal = Boilerplate/Noise
-             */
-            if (hasSignal) {
-                node.category = 'priority';
-            } else if (node.score > avgScore * 1.5) {
-                node.category = 'vendor';
-            } else {
-                node.category = 'utility';
-            }
-        }
+        console.log(`[*] Phase 4: Final Classification...`);
+        // Categories are already partially set in Phase 1, but we can refine
+        // based on score or other metrics if needed.
     }
 
     saveResults() {
         const chunksDir = path.join(OUTPUT_BASE, 'chunks');
         const metadataDir = path.join(OUTPUT_BASE, 'metadata');
 
-        [chunksDir, metadataDir].forEach(d => fs.mkdirSync(d, { recursive: true }));
+        [chunksDir, metadataDir].forEach(d => {
+            if (fs.existsSync(d)) {
+                // Clear old results
+                fs.readdirSync(d).forEach(f => fs.unlinkSync(path.join(d, f)));
+            }
+            fs.mkdirSync(d, { recursive: true });
+        });
 
         const metadata = [];
 
         for (const [name, node] of this.nodes) {
-            // Sanitize name for filesystem
-            const safeName = name.replace(/[^a-z0-9_]/gi, '_');
-            fs.writeFileSync(path.join(chunksDir, `${safeName}.js`), node.code);
+            const fileName = `${name}.js`;
+            fs.writeFileSync(path.join(chunksDir, fileName), node.code);
 
             metadata.push({
                 name: node.name,
-                file: `chunks/${safeName}.js`,
+                file: `chunks/${fileName}`,
                 tokens: node.tokens,
                 category: node.category,
                 centrality: node.score,
@@ -200,6 +246,11 @@ class CascadeGraph {
         fs.writeFileSync(
             path.join(metadataDir, 'graph_map.json'),
             JSON.stringify(metadata, null, 2)
+        );
+
+        fs.writeFileSync(
+            path.join(metadataDir, 'graph_map.js'),
+            `window.GRAPH_DATA = ${JSON.stringify(metadata, null, 2)};`
         );
     }
 }

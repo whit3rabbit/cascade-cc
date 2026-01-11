@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cascade Graph Visualizer (Sigma.js)</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Sigma.js and Graphology Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/graphology@0.26.0/dist/graphology.umd.min.js"></script>
+    <script src="https://unpkg.com/graphology-library@0.8.0/dist/graphology-library.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
+</head>
+
+<body>
+    <div id="graph-container"></div>
+    <div id="sidebar">
+        <div id="info">
+            <h1>Graph Analysis</h1>
+            <p>Select a node to see details.</p>
+        </div>
+        <div id="controls">
+            <div class="control-group">
+                <label for="file-input">Source File (.json)</label>
+                <div class="input-with-go">
+                    <input type="text" id="file-input" placeholder="graph_map.json">
+                    <button id="load-file-btn">Go</button>
+                </div>
+            </div>
+            <div class="control-group">
+                <label for="search-input">Search Node</label>
+                <input type="text" id="search-input" placeholder="Enter chunk name...">
+            </div>
+            <div class="control-group">
+                <label for="centrality-filter">Centrality Filter</label>
+                <input type="range" id="centrality-filter" min="0" max="100" value="20">
+                <span id="filter-value">Top 20%</span>
+            </div>
+            <div class="control-group">
+                <label>Layout</label>
+                <div class="btn-group">
+                    <button class="layout-btn" data-layout="force">ForceAtlas2</button>
+                    <button class="layout-btn" data-layout="circular">Circular</button>
+                </div>
+            </div>
+            <button id="reset-btn">Reset View</button>
+        </div>
+    </div>
+    <script src="../cascade_graph_analysis/metadata/graph_map.js"
+        onerror="console.warn('graph_map.js not found, falling back to fetch')"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
