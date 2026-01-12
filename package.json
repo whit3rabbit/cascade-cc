@@ -2,7 +2,7 @@
   "name": "claude-code-deobfuscator",
   "version": "1.0.0",
   "description": "Pre-processor for CASCADE-style analysis of Claude Code",
-  "main": "analyze.js",
+  "main": "src/analyze.js",
   "scripts": {
     "start": "node run analyze",
     "clean": "node run clean",
@@ -14,7 +14,8 @@
     "@babel/parser": "^7.28.5",
     "@babel/traverse": "^7.28.5",
     "@babel/types": "^7.26.5",
-    "axios": "^1.13.2",
+    "@google/generative-ai": "^0.24.1",
+    "@openrouter/sdk": "^0.3.12",
     "dotenv": "^16.6.1",
     "gpt-tokenizer": "^3.4.0",
     "graphology": "^0.26.0",

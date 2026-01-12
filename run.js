@@ -8,7 +8,7 @@ const args = process.argv.slice(3);
 const scripts = {
     'analyze': {
         cmd: 'node',
-        args: ['--max-old-space-size=8192', 'analyze.js', ...args],
+        args: ['--max-old-space-size=8192', 'src/analyze.js', ...args],
         desc: 'Run CASCADE analysis'
     },
     'visualize': {
@@ -23,7 +23,7 @@ const scripts = {
     },
     'deobfuscate': {
         cmd: 'node',
-        args: ['deobfuscate.js', ...args],
+        args: ['src/deobfuscate_pipeline.js', ...args],
         desc: 'Run LLM-based deobfuscation (Stage 1 & 2)'
     }
 };

@@ -6,7 +6,7 @@ const traverse = require('@babel/traverse').default;
 const generate = require('@babel/generator').default;
 const { encode } = require('gpt-tokenizer');
 const { webcrack } = require('webcrack');
-const { AAdecode, jjdecode } = require('./deobfuscators');
+const { AAdecode, jjdecode } = require('./deobfuscation_helpers');
 const t = require('@babel/types');
 
 // --- 0. KNOWLEDGE BASE ---
@@ -735,7 +735,7 @@ async function run() {
 
     // Apply Global Renaming before chunking
     console.log(`[*] Phase 0.7: Applying dynamic renaming to AST...`);
-    const { applyDynamicRenaming } = require('./deobfuscators');
+    const { applyDynamicRenaming } = require('./deobfuscation_helpers');
 
     const namesToRename = Object.keys(runtimeMap);
     if (namesToRename.length > 0) {

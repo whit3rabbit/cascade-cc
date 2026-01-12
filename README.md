@@ -23,7 +23,7 @@ npm start
 To specify a path:
 
 ```bash
-node analyze.js path/to/bundle.js
+node run analyze path/to/bundle.js
 ```
 
 ### Visualize
@@ -35,6 +35,35 @@ npm run visualize
 ```
 
 Then open: [http://localhost:3000/visualizer/](http://localhost:3000/visualizer/)
+
+### Deobfuscate (LLM Pipeline)
+
+Start the context-aware deobfuscation pipeline. This requires an LLM API key.
+
+1. **Setup `.env`**: Create a `.env` file in the root based on `.env.example`.
+2. **Run Pipeline**: This process builds a global `mapping.json` using LLM analysis and then physically renames variables using Babel.
+
+```bash
+# Deobfuscate latest analysis
+node run deobfuscate
+
+# Specify a target version
+node run deobfuscate 2.1.5
+```
+
+The deobfuscated chunks will be saved to `cascade_graph_analysis/<version>/deobfuscated_chunks/`.
+
+#### LLM Pipeline Details
+
+The pipeline consists of two primary stages, orchestrated by `src/deobfuscate_pipeline.js`:
+
+*   **Stage 1: Semantic Mapping (`src/deobfuscate_pipeline.js`)**
+    *   **Logic**: Iterates through code chunks in order of **Centrality** (importance).
+    *   **Prompt**: The core deobfuscation prompt is located in `src/deobfuscate_pipeline.js`. It injects metadata derived from `analyze.js` (Role, Label, State DNA) and existing mappings for consistency.
+    *   **Persistence**: Discovered mappings are saved to `cascade_graph_analysis/<version>/metadata/mapping.json`.
+*   **Stage 2: Safe Renaming (`src/rename_chunks.js`)**
+    *   **Logic**: Uses Babel to perform scope-aware renaming of all identifiers found in `mapping.json`.
+    *   **Output**: Generates readable JavaScript files in the `deobfuscated_chunks/` directory.
 
 ## Workflow
 
@@ -96,3 +125,16 @@ The code is **minified but not aggressively obfuscated**. It does not use advanc
 - **Dependency Aggregation**: The 11MB file is a standalone bundle containing numerous integrated dependencies, including `lodash`, `rxjs`, and various Node.js polyfills.
 - **Internal Logic**: Logic for components like the native host (Chrome integration) and MCP (Model Context Protocol) clients is clearly visible as distinct classes (e.g., `Mz9`, `Rz9`).
 - **Transparency**: Includes clear metadata such as build timestamps, versioning info, and even a recruitment message in the comments, suggesting the minification is for efficiency rather than secrecy.
+
+## Project Structure
+
+- `src/`: Core logic and helper scripts.
+  - `analyze.js`: Entry point for codebase analysis and chunking.
+  - `deobfuscate_pipeline.js`: Orchestrates the LLM deobfuscation stages.
+  - `deobfuscation_helpers.js`: Specialized decoders and AST transformation utilities.
+  - `llm_client.js`: Generic interface for LLM providers.
+  - `rename_chunks.js`: Babel-powered variable renaming script.
+- `visualizer/`: WebGL-based graph visualization tool.
+- `run.js`: Central command runner and script orchestrator.
+- `knowledge_base.json`: Seed data for functional identification.
+- `cascade_graph_analysis/`: Output directory for analysis results and deobfuscated code.
