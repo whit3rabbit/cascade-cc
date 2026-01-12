@@ -110,8 +110,6 @@ async function run() {
         process.exit(1);
     }
 
-    if (!fs.existsSync(deobfuscatedDir)) fs.mkdirSync(deobfuscatedDir, { recursive: true });
-
     let globalMapping = {};
     if (fs.existsSync(mappingPath)) {
         try {
@@ -169,9 +167,11 @@ async function run() {
             const code = fs.readFileSync(chunkPath, 'utf8');
             const identifiers = extractIdentifiers(code);
             const filteredMapping = {};
-            identifiers.forEach(id => {
-                if (globalMapping[id]) filteredMapping[id] = globalMapping[id];
-            });
+            for (const key of identifiers) {
+                if (Object.prototype.hasOwnProperty.call(globalMapping, key)) {
+                    filteredMapping[key] = globalMapping[key];
+                }
+            }
 
             console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Naming Pass for ${file}...`);
 
@@ -201,14 +201,16 @@ INSTRUCTIONS:
 1. Identify the purpose of obfuscated variables based on their usage, logic, and metadata.
 2. If a variable stores a value related to a State DNA property, Name it descriptively (e.g., 'sessionId' -> 'activeSessionId').
 3. If the role is '${chunkMeta.role}', prioritize domain-specific names.
-4. Return ONLY a JSON object of NEW or IMPROVED mappings. If you are updating an existing mapping, explain why in the rationale.
-5. If the logic matches a REFERENCE HINT, you MUST use that suggested name.
+4. Suggest a concise, descriptive FILENAME for this chunk (e.g., 'anthropicApiClient', 'flowController').
+5. Return ONLY a JSON object of NEW or IMPROVED mappings and the suggested filename. If you are updating an existing mapping, explain why in the rationale.
+6. If the logic matches a REFERENCE HINT, you MUST use that suggested name for both mapping and filename (if applicable).
 
 RESPONSE FORMAT (JSON ONLY):
 {
   "mappings": {
      "obfuscatedName": "descriptiveName"
   },
+  "suggestedFilename": "descriptive_name",
   "rationale": "Brief explanation of why these names were chosen."
 }
 `;
@@ -228,9 +230,17 @@ RESPONSE FORMAT (JSON ONLY):
                         }
                     }
 
-                    if (added > 0) {
-                        fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
-                        console.log(`    - Added/Updated ${added} mappings. Rationale: ${responseData.rationale}`);
+                    if (added > 0 || responseData.suggestedFilename) {
+                        if (added > 0) {
+                            fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
+                        }
+
+                        if (responseData.suggestedFilename) {
+                            chunkMeta.suggestedFilename = responseData.suggestedFilename;
+                            fs.writeFileSync(graphMapPath, JSON.stringify(graphData, null, 2));
+                        }
+
+                        console.log(`    - Added/Updated ${added} mappings. [File Suggestion: ${responseData.suggestedFilename || 'None'}] Rationale: ${responseData.rationale}`);
                     }
 
                     // Throttle to strictly abide by 10 RPM free tier limits (6s baseline + 1s jitter)

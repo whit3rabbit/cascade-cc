@@ -2,6 +2,18 @@
 
 Pre-processor for CASCADE-style analysis of Claude Code bundles.
 
+## Quickstart
+
+```bash
+cp .env.example .env
+# Update .env with LLM api keys/model names
+npm install
+npm start
+node run deobfuscate
+node run deobfuscate <version> --rename-only
+# Output will be in cascade_graph_analysis/<version>/deobfuscated_chunks/
+```
+
 ## Setup
 
 Install dependencies:

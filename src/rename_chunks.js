@@ -17,11 +17,13 @@ function renameIdentifiers(code, mapping) {
         traverse(ast, {
             Identifier(path) {
                 const oldName = path.node.name;
-                if (mapping[oldName]) {
+                // Use Object.prototype.hasOwnProperty.call to safely check if oldName is a key in mapping
+                // This prevents picking up inherited properties like 'toString' or 'hasOwnProperty'
+                if (Object.prototype.hasOwnProperty.call(mapping, oldName)) {
                     const newName = mapping[oldName];
-                    // Use path.scope.rename to safely rename all occurrences in the scope
-                    // This handles variable shadowing and other scope-related complexities
-                    path.scope.rename(oldName, newName);
+                    if (typeof newName === 'string') {
+                        path.scope.rename(oldName, newName);
+                    }
                 }
             }
         });
@@ -31,8 +33,7 @@ function renameIdentifiers(code, mapping) {
             compact: false
         }).code;
     } catch (err) {
-        console.error(`[!] Babel error: ${err.message}`);
-        return null;
+        throw new Error(`Babel transform error: ${err.message}`);
     }
 }
 
@@ -45,6 +46,7 @@ async function main() {
 
     const chunksDir = path.join(versionPath, 'chunks');
     const mappingPath = path.join(versionPath, 'metadata', 'mapping.json');
+    const graphMapPath = path.join(versionPath, 'metadata', 'graph_map.json');
     const deobfuscatedDir = path.join(versionPath, 'deobfuscated_chunks');
 
     if (!fs.existsSync(mappingPath)) {
@@ -53,31 +55,63 @@ async function main() {
     }
 
     const mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
+    const graphData = fs.existsSync(graphMapPath) ? JSON.parse(fs.readFileSync(graphMapPath, 'utf8')) : [];
     const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.endsWith('.js'));
 
     if (!fs.existsSync(deobfuscatedDir)) fs.mkdirSync(deobfuscatedDir, { recursive: true });
 
     console.log(`[*] Renaming ${chunkFiles.length} chunks...`);
 
+    let successCount = 0;
+    let failCount = 0;
+
     for (const file of chunkFiles) {
-        const inputPath = path.join(chunksDir, file);
-        const outputPath = path.join(deobfuscatedDir, file);
-        const code = fs.readFileSync(inputPath, 'utf8');
+        try {
+            const inputPath = path.join(chunksDir, file);
+            const code = fs.readFileSync(inputPath, 'utf8');
 
-        // Note: For large mappings, we might want to optimize this, 
-        // but path.scope.rename is already quite efficient.
-        const renamedCode = renameIdentifiers(code, mapping);
+            // Find metadata for this chunk
+            const chunkMeta = graphData.find(m => path.basename(m.file) === file);
 
-        if (renamedCode) {
-            fs.writeFileSync(outputPath, renamedCode);
-            // console.log(`    - Renamed ${file}`);
-        } else {
-            console.error(`    [!] Failed to rename ${file}, copying original.`);
-            fs.writeFileSync(outputPath, code);
+            let logicalName = "";
+            if (chunkMeta) {
+                if (chunkMeta.suggestedFilename) {
+                    logicalName = chunkMeta.suggestedFilename;
+                } else if (chunkMeta.kb_info && chunkMeta.kb_info.suggested_path) {
+                    // Extract basename from suggested_path (e.g., `src/utils/foo.ts` -> foo)
+                    logicalName = path.basename(chunkMeta.kb_info.suggested_path.replace(/`/g, ''), '.ts').replace('.js', '');
+                }
+            }
+
+            // Sanitize logicalName: replace slashes and other dangerous characters with underscore
+            logicalName = logicalName.replace(/[\/\\?%*:|"<>]/g, '_');
+
+            const chunkBase = path.basename(file, '.js');
+            const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
+            const outputPath = path.join(deobfuscatedDir, finalName);
+
+            const renamedCode = renameIdentifiers(code, mapping);
+
+            if (renamedCode) {
+                fs.writeFileSync(outputPath, renamedCode);
+                successCount++;
+            } else {
+                console.error(`    [!] Failed to transform ${file}, copying original.`);
+                fs.writeFileSync(outputPath, code);
+                failCount++;
+            }
+        } catch (err) {
+            console.error(`    [!] Error processing ${file}: ${err.message}`);
+            // Attempt to write original as fallback
+            try {
+                const chunkBase = path.basename(file, '.js');
+                fs.writeFileSync(path.join(deobfuscatedDir, file), fs.readFileSync(path.join(chunksDir, file), 'utf8'));
+            } catch (e) { }
+            failCount++;
         }
     }
 
-    console.log(`[OK] Stage 2: Babel renaming complete.`);
+    console.log(`[OK] Stage 2 Complete: ${successCount} succeeded, ${failCount} failed.`);
 }
 
 main().catch(console.error);
