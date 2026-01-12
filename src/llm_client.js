@@ -39,42 +39,72 @@ async function callLLM(prompt, retryCount = 0) {
             const response = await result.response;
             return response.text();
         } else {
-            // Official OpenRouter SDK
-            const response = await openrouterClient.chat.send({
-                model: MODEL,
-                messages: [{ role: 'user', content: prompt }],
-                // Note: response_format handling might differ in the beta SDK, 
-                // but usually stays consistent with the underlying API.
+            // Using fetch directly for OpenRouter to ensure we see the full error body
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${API_KEY}`,
+                    "HTTP-Referer": "https://github.com/whit3rabbit/cascade-like",
+                    "X-Title": "Cascade-Like Deobfuscator",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: MODEL,
+                    messages: [{ role: 'user', content: prompt }]
+                })
             });
 
-            if (!response.choices || !response.choices[0].message) {
-                throw new Error(`Unexpected OpenRouter response format: ${JSON.stringify(response)}`);
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({}));
+                const status = response.status;
+                let detailedMessage = errorBody.error ? errorBody.error.message : JSON.stringify(errorBody);
+
+                if (status === 401 || status === 403) {
+                    throw new Error(`[!] API Key error (${status}): ${detailedMessage}. Please check your OPENROUTER_API_KEY in .env.`);
+                }
+                if (status === 429) {
+                    const isQuota = detailedMessage.toLowerCase().includes('quota') || detailedMessage.toLowerCase().includes('credit');
+                    if (isQuota) throw new Error(`[!] Quota/Credit Exceeded (429): ${detailedMessage}`);
+
+                    if (retryCount < 7) {
+                        const delay = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
+                        console.warn(`[!] Rate limited (429): ${detailedMessage}. Retrying in ${Math.round(delay / 1000)}s...`);
+                        await sleep(delay);
+                        return callLLM(prompt, retryCount + 1);
+                    }
+                }
+                throw new Error(`OpenRouter error (${status}): ${detailedMessage}`);
             }
-            return response.choices[0].message.content;
+
+            const data = await response.json();
+            if (!data.choices || !data.choices[0].message) {
+                throw new Error(`Unexpected OpenRouter response format: ${JSON.stringify(data)}`);
+            }
+            return data.choices[0].message.content;
         }
     } catch (err) {
-        // SDKs often have their own error structures
-        const status = err.status || (err.response ? err.response.status : null);
-
-        // Handle Rate Limiting (429) or Server Errors (5xx) with retry
-        if ((status === 429 || (status >= 500 && status < 600)) && retryCount < 7) {
-            const delay = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
-            console.warn(`[!] ${status === 429 ? 'Rate limited (429)' : `Server error (${status})`}. Retrying in ${Math.round(delay / 1000)}s (Attempt ${retryCount + 1}/7)...`);
-            await sleep(delay);
-            return callLLM(prompt, retryCount + 1);
-        }
-
-        // Handle specific API key errors
-        if (status === 401 || status === 403) {
-            throw new Error(`[!] API Key error (${status}): Authentication failed. Please check your ${PROVIDER === 'gemini' ? 'GEMINI_API_KEY' : 'OPENROUTER_API_KEY'}.`);
-        }
-
+        // Log the final error
         throw err;
+    }
+}
+
+async function validateKey() {
+    console.log(`[*] Validating API Key for ${PROVIDER} (${MODEL})...`);
+    try {
+        // Simple health check request
+        await callLLM("Respond with 'OK' and nothing else.");
+        console.log(`[+] API Key validated successfully.`);
+        return true;
+    } catch (err) {
+        console.error(`\n[!] API KEY VALIDATION FAILED:`);
+        console.error(`    ${err.message}`);
+        return false;
     }
 }
 
 module.exports = {
     callLLM,
+    validateKey,
     PROVIDER,
     MODEL
 };

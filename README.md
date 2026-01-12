@@ -49,6 +49,9 @@ node run deobfuscate
 
 # Specify a target version
 node run deobfuscate 2.1.5
+
+# Final Run: Rename Only (Skip LLM if mapping.json is already built)
+node run deobfuscate 2.1.5 --rename-only
 ```
 
 The deobfuscated chunks will be saved to `cascade_graph_analysis/<version>/deobfuscated_chunks/`.
@@ -56,7 +59,6 @@ The deobfuscated chunks will be saved to `cascade_graph_analysis/<version>/deobf
 #### LLM Pipeline Details
 
 The pipeline consists of two primary stages, orchestrated by `src/deobfuscate_pipeline.js`:
-
 *   **Stage 1: Semantic Mapping (`src/deobfuscate_pipeline.js`)**
     *   **Logic**: Iterates through code chunks in order of **Centrality** (importance).
     *   **Prompt**: The core deobfuscation prompt is located in `src/deobfuscate_pipeline.js`. It injects metadata derived from `analyze.js` (Role, Label, State DNA) and existing mappings for consistency.

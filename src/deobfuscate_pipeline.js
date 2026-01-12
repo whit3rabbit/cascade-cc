@@ -2,7 +2,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { callLLM, PROVIDER, MODEL } = require('./llm_client');
+const { callLLM, validateKey, PROVIDER, MODEL } = require('./llm_client');
 
 const OUTPUT_ROOT = './cascade_graph_analysis';
 
@@ -47,9 +47,40 @@ function extractIdentifiers(code) {
     return Array.from(unique).filter(id => !keywords.has(id));
 }
 
+function filterKBHints(code, kb, maxHints = 100) {
+    if (!kb || !kb.name_hints) return 'None';
+
+    // Simple relevance check: does the logic anchor or suggested name share keywords with the code?
+    const codeWords = new Set(code.toLowerCase().match(/[a-z0-9]+/g) || []);
+
+    const hints = kb.name_hints.map(h => {
+        const hintText = `${h.logic_anchor} ${h.suggested_name}`.toLowerCase();
+        const hintWords = hintText.match(/[a-z0-9]+/g) || [];
+        let score = 0;
+        hintWords.forEach(w => {
+            if (w.length > 3 && codeWords.has(w)) score++;
+        });
+        return { ...h, score };
+    });
+
+    const relevantHints = hints
+        .filter(h => h.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxHints);
+
+    if (relevantHints.length === 0) return 'None (No relevant hints found for this chunk)';
+
+    return relevantHints.map(h => `- Logic: "${h.logic_anchor}" -> Suggested Name: "${h.suggested_name}"`).join('\n');
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // --- MAIN STAGES ---
 async function run() {
-    let version = process.argv[2];
+    let version = process.argv.filter(arg => !arg.startsWith('-'))[2];
+    const isRenameOnly = process.argv.includes('--rename-only') || process.argv.includes('-r');
 
     if (!version) {
         version = getLatestVersion(OUTPUT_ROOT);
@@ -105,33 +136,46 @@ async function run() {
         process.exit(1);
     }
 
-    // Sort by centrality (High to Low)
-    const sortedChunks = graphData.slice().sort((a, b) => b.centrality - a.centrality);
+    // Sort by name (sequential order)
+    const sortedChunks = graphData.slice().sort((a, b) => {
+        const fileA = path.basename(a.file);
+        const fileB = path.basename(b.file);
+        return fileA.localeCompare(fileB, undefined, { numeric: true, sensitivity: 'base' });
+    });
 
     console.log(`[*] Starting Deobfuscation Pipeline [Provider: ${PROVIDER}, Model: ${MODEL}]`);
-    console.log(`[*] Processing ${sortedChunks.length} chunks by Centrality order.`);
+    console.log(`[*] Processing ${sortedChunks.length} chunks by Sequential order.`);
+
+    // --- KEY VALIDATION ---
+    const isValid = await validateKey();
+    if (!isValid) {
+        process.exit(1);
+    }
 
     // Stage 1: Incremental Mapping
-    for (let i = 0; i < sortedChunks.length; i++) {
-        const chunkMeta = sortedChunks[i];
-        const file = path.basename(chunkMeta.file);
-        const chunkPath = path.join(chunksDir, file);
+    if (isRenameOnly) {
+        console.log(`[*] Skipping Stage 1 (LLM Pass) as --rename-only is set.`);
+    } else {
+        for (let i = 0; i < sortedChunks.length; i++) {
+            const chunkMeta = sortedChunks[i];
+            const file = path.basename(chunkMeta.file);
+            const chunkPath = path.join(chunksDir, file);
 
-        if (!fs.existsSync(chunkPath)) {
-            console.warn(`[!] Skip: Chunk file not found: ${chunkPath}`);
-            continue;
-        }
+            if (!fs.existsSync(chunkPath)) {
+                console.warn(`[!] Skip: Chunk file not found: ${chunkPath}`);
+                continue;
+            }
 
-        const code = fs.readFileSync(chunkPath, 'utf8');
-        const identifiers = extractIdentifiers(code);
-        const filteredMapping = {};
-        identifiers.forEach(id => {
-            if (globalMapping[id]) filteredMapping[id] = globalMapping[id];
-        });
+            const code = fs.readFileSync(chunkPath, 'utf8');
+            const identifiers = extractIdentifiers(code);
+            const filteredMapping = {};
+            identifiers.forEach(id => {
+                if (globalMapping[id]) filteredMapping[id] = globalMapping[id];
+            });
 
-        console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Naming Pass for ${file} (Centrality: ${chunkMeta.centrality.toFixed(4)})...`);
+            console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Naming Pass for ${file}...`);
 
-        const prompt = `
+            const prompt = `
 Role: Senior Reverse Engineer
 Task: Semantic Variable Mapping
 
@@ -146,7 +190,7 @@ EXISTING MAPPINGS (Use these names for consistency):
 ${JSON.stringify(filteredMapping, null, 2)}
 
 REFERENCE HINTS FROM KNOWLEDGE BASE:
-${KB && KB.name_hints ? KB.name_hints.map(h => `- Logic: "${h.logic_anchor}" -> Suggested Name: "${h.suggested_name}"`).join('\n') : 'None'}
+${filterKBHints(code, KB)}
 
 CODE:
 \`\`\`javascript
@@ -169,35 +213,40 @@ RESPONSE FORMAT (JSON ONLY):
 }
 `;
 
-        try {
-            const llmResponse = await callLLM(prompt);
-            const jsonMatch = llmResponse.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const responseData = JSON.parse(jsonMatch[0]);
-                const newMappings = responseData.mappings || {};
+            try {
+                const llmResponse = await callLLM(prompt);
+                const jsonMatch = llmResponse.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    const responseData = JSON.parse(jsonMatch[0]);
+                    const newMappings = responseData.mappings || {};
 
-                let added = 0;
-                for (const [key, val] of Object.entries(newMappings)) {
-                    if (globalMapping[key] !== val) {
-                        globalMapping[key] = val;
-                        added++;
+                    let added = 0;
+                    for (const [key, val] of Object.entries(newMappings)) {
+                        if (globalMapping[key] !== val) {
+                            globalMapping[key] = val;
+                            added++;
+                        }
                     }
-                }
 
-                if (added > 0) {
-                    fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
-                    console.log(`    - Added/Updated ${added} mappings. Rationale: ${responseData.rationale}`);
+                    if (added > 0) {
+                        fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
+                        console.log(`    - Added/Updated ${added} mappings. Rationale: ${responseData.rationale}`);
+                    }
+
+                    // Throttle to strictly abide by 10 RPM free tier limits (6s baseline + 1s jitter)
+                    const throttleDelay = 6000 + Math.random() * 1000;
+                    await sleep(throttleDelay);
+                } else {
+                    console.warn(`    [!] Could not parse JSON from LLM response for ${file}`);
                 }
-            } else {
-                console.warn(`    [!] Could not parse JSON from LLM response for ${file}`);
+            } catch (err) {
+                console.error(`    [!] Critical error processing ${file}: ${err.message}`);
+                // We continue to the next chunk instead of crashing the whole process
             }
-        } catch (err) {
-            console.error(`    [!] Critical error processing ${file}: ${err.message}`);
-            // We continue to the next chunk instead of crashing the whole process
         }
-    }
 
-    console.log(`[*] Stage 1 Complete. Final mapping preserved at ${mappingPath}`);
+        console.log(`[*] Stage 1 Complete. Final mapping preserved at ${mappingPath}`);
+    }
 
     // Stage 2: Safe Babel Renaming
     console.log(`[*] Starting Stage 2: Safe Renaming with Babel...`);
