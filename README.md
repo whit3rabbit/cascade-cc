@@ -61,10 +61,19 @@ Start the context-aware deobfuscation pipeline. This requires an LLM API key.
 npm run deobfuscate
 
 # Specify a target version (use -- to pass args to the script)
-npm run deobfuscate -- 2.1.5
+npm run deobfuscate -- 2.1.6
+
+# Resume with limit (only process top 50 chunks)
+npm run deobfuscate -- --limit 50
+
+# Skip vendor libraries
+npm run deobfuscate -- --skip-vendor
+
+# Force re-scan (Ignore resume tracking)
+npm run deobfuscate -- --force
 
 # Final Run: Rename Only (Skip LLM if mapping.json is already built)
-npm run deobfuscate -- 2.1.5 --rename-only
+npm run deobfuscate -- 2.1.6 --rename-only
 ```
 
 The deobfuscated chunks will be saved to `cascade_graph_analysis/<version>/deobfuscated_chunks/`.
@@ -90,9 +99,10 @@ The final structured codebase will be located in `cascade_graph_analysis/<versio
 
 The pipeline consists of two primary stages, orchestrated by `src/deobfuscate_pipeline.js`:
 *   **Stage 1: Semantic Mapping (`src/deobfuscate_pipeline.js`)**
-    *   **Logic**: Iterates through code chunks in order of **Centrality** (importance).
+    *   **Logic**: Iterates through code chunks in order of **Centrality** (importance) and **Category** (Founder > Family > Vendor).
+    *   **Resume Mechanism**: Successfully processed chunks are tracked in `processed_chunks` within `mapping.json`. Re-running the pipeline will automatically skip completed chunks unless the `--force` flag is used.
     *   **Prompt**: The core deobfuscation prompt is located in `src/deobfuscate_pipeline.js`. It injects metadata derived from `analyze.js` (Role, Label, State DNA) and existing mappings for consistency.
-    *   **Persistence**: Discovered mappings are saved to `cascade_graph_analysis/<version>/metadata/mapping.json`.
+    *   **Persistence**: Discovered mappings and processed chunk tracking are saved to `cascade_graph_analysis/<version>/metadata/mapping.json`.
 *   **Stage 2: Safe Renaming (`src/rename_chunks.js`)**
     *   **Logic**: Uses Babel to perform scope-aware renaming of all identifiers found in `mapping.json`.
     *   **Output**: Generates readable JavaScript files in the `deobfuscated_chunks/` directory.

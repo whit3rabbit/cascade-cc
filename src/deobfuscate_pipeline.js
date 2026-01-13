@@ -113,8 +113,12 @@ function sleep(ms) {
 
 // --- MAIN STAGES ---
 async function run() {
-    let version = process.argv.filter(arg => !arg.startsWith('-'))[2];
+    let version = process.argv.filter((arg, i, arr) => !arg.startsWith('-') && (i === 0 || arr[i - 1] !== '--limit'))[2];
     const isRenameOnly = process.argv.includes('--rename-only') || process.argv.includes('-r');
+    const isForce = process.argv.includes('--force') || process.argv.includes('-f');
+    const skipVendor = process.argv.includes('--skip-vendor');
+    const limitArgIdx = process.argv.indexOf('--limit');
+    const limit = limitArgIdx !== -1 ? parseInt(process.argv[limitArgIdx + 1]) : Infinity;
 
     if (!version) {
         version = getLatestVersion(OUTPUT_ROOT);
@@ -145,9 +149,10 @@ async function run() {
     }
 
     let globalMapping = {
-        version: "1.1",
+        version: "1.2",
         variables: {},
         properties: {},
+        processed_chunks: [],
         metadata: {
             total_renamed: 0,
             last_updated: new Date().toISOString()
@@ -159,7 +164,8 @@ async function run() {
             const raw = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
             if (raw.version && raw.variables) {
                 globalMapping = raw;
-                console.log(`[*] Loaded structured mapping v${globalMapping.version} with ${Object.keys(globalMapping.variables).length} variables and ${Object.keys(globalMapping.properties).length} properties.`);
+                if (!globalMapping.processed_chunks) globalMapping.processed_chunks = [];
+                console.log(`[*] Loaded structured mapping v${globalMapping.version} with ${Object.keys(globalMapping.variables).length} variables, ${Object.keys(globalMapping.properties).length} properties, and ${globalMapping.processed_chunks.length} processed chunks.`);
             } else {
                 // Migration from flat format
                 console.log(`[*] Migrating old flat mapping to structure format...`);
@@ -193,13 +199,25 @@ async function run() {
         process.exit(1);
     }
 
-    // Sort by Centrality (descending) - the "Brain" first
-    const sortedChunks = graphData.slice().sort((a, b) => {
-        return (b.centrality || 0) - (a.centrality || 0);
+    // Sort by Centrality (descending) AND Category priority
+    const categoryPriority = { 'founder': 3, 'family': 2, 'vendor': 1, 'unknown': 0 };
+    let sortedChunks = graphData.slice().sort((a, b) => {
+        const primary = (b.centrality || 0) - (a.centrality || 0);
+        if (Math.abs(primary) > 0.0001) return primary;
+
+        // Tie-breaker: Category
+        const catA = categoryPriority[a.category] || 0;
+        const catB = categoryPriority[b.category] || 0;
+        return catB - catA;
     });
 
+    if (limit < sortedChunks.length) {
+        console.log(`[*] Limit applied: Only processing top ${limit} chunks.`);
+        sortedChunks = sortedChunks.slice(0, limit);
+    }
+
     console.log(`[*] Starting Deobfuscation Pipeline [Provider: ${PROVIDER}, Model: ${MODEL}]`);
-    console.log(`[*] Processing ${sortedChunks.length} chunks by Centrality order.`);
+    console.log(`[*] Processing ${sortedChunks.length} chunks.`);
 
     // --- KEY VALIDATION ---
     const isValid = await validateKey();
@@ -221,6 +239,22 @@ async function run() {
                 continue;
             }
 
+            // Skip vendor logic
+            if (skipVendor && chunkMeta.category === 'vendor') {
+                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
+                    globalMapping.processed_chunks.push(chunkMeta.name);
+                    fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
+                }
+                console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Skip ${file} (Vendor - skipped by flag).`);
+                continue;
+            }
+
+            // Resume check: Skip if already processed according to tracking list
+            if (globalMapping.processed_chunks.includes(chunkMeta.name) && !isForce) {
+                console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Skip ${file} (Already processed).`);
+                continue;
+            }
+
             const code = fs.readFileSync(chunkPath, 'utf8');
             const { variables, properties } = extractIdentifiers(code);
 
@@ -229,7 +263,11 @@ async function run() {
             const unknownProperties = properties.filter(p => !globalMapping.properties[p]);
 
             if (unknownVariables.length === 0 && unknownProperties.length === 0) {
-                console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Skip ${file} (All identifiers already mapped).`);
+                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
+                    globalMapping.processed_chunks.push(chunkMeta.name);
+                    fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
+                }
+                console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Skip ${file} (All identifiers mapped).`);
                 continue;
             }
 
@@ -356,8 +394,14 @@ RESPONSE FORMAT (JSON ONLY):
                         if (added > 0) {
                             globalMapping.metadata.total_renamed = Object.keys(globalMapping.variables).length + Object.keys(globalMapping.properties).length;
                             globalMapping.metadata.last_updated = new Date().toISOString();
-                            fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
                         }
+
+                        // Always mark as processed if we got a valid JSON response
+                        if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
+                            globalMapping.processed_chunks.push(chunkMeta.name);
+                        }
+
+                        fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
 
                         if (responseData.suggestedFilename) {
                             chunkMeta.suggestedFilename = responseData.suggestedFilename;
