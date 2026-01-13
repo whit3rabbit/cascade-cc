@@ -4,10 +4,12 @@
   "description": "Pre-processor for CASCADE-style analysis of Claude Code",
   "main": "src/analyze.js",
   "scripts": {
+    "analyze": "node run analyze",
     "start": "node run analyze",
     "clean": "node run clean",
     "lint": "prettier --write .",
-    "visualize": "node run visualize"
+    "visualize": "node run visualize",
+    "deobfuscate": "node run deobfuscate"
   },
   "dependencies": {
     "@babel/generator": "^7.28.5",

@@ -481,7 +481,9 @@ class CascadeGraph {
             const isUtility = node.type === 'VariableDeclaration' &&
                 node.declarations.some(d => d.id.name && (NATIVE_PROPS.includes(d.id.name) || d.id.name.startsWith('_')));
 
-            const shouldSplit = currentChunkNodes.length > 0 && (
+            const isInsideLargeDeclaration = node.type === 'VariableDeclaration' && nodeTokens > 1000;
+
+            const shouldSplit = currentChunkNodes.length > 0 && !isInsideLargeDeclaration && (
                 (isImport && currentChunkHasContent) ||
                 (isModuleWrapperCall && currentTokens > 3000) ||
                 (nodeCategory === 'priority' && currentCategory === 'vendor' && currentTokens > 1500) ||
@@ -535,25 +537,30 @@ class CascadeGraph {
         const size = names.length;
         if (size === 0) return;
 
+        const dampingFactor = 0.85; // Standard PageRank damping
+        const teleportProbability = (1 - dampingFactor) / size;
         let scores = new Array(size).fill(1 / size);
 
         for (let iter = 0; iter < 10; iter++) {
-            let nextScores = new Array(size).fill(0);
+            let nextScores = new Array(size).fill(teleportProbability);
             for (let i = 0; i < size; i++) {
                 const node = this.nodes.get(names[i]);
                 const outDegree = node.neighbors.size;
 
                 if (outDegree > 0) {
-                    const contribution = scores[i] / outDegree;
+                    const contribution = (scores[i] * dampingFactor) / outDegree;
                     node.neighbors.forEach(neighborName => {
                         const neighborIdx = names.indexOf(neighborName);
                         if (neighborIdx !== -1) nextScores[neighborIdx] += contribution;
                     });
                 } else {
-                    for (let j = 0; j < size; j++) nextScores[j] += scores[i] / size;
+                    // Sink node: redistribute its score equally
+                    for (let j = 0; j < size; j++) nextScores[j] += (scores[i] * dampingFactor) / size;
                 }
             }
-            scores = nextScores;
+            // Normalize scores to ensure they sum to 1
+            const sum = nextScores.reduce((a, b) => a + b, 0);
+            scores = nextScores.map(s => s / sum);
         }
 
         names.forEach((name, i) => {
@@ -745,9 +752,12 @@ async function run() {
     // Phase 0: Preprocessing with Webcrack
     console.log(`[*] Phase 0: Preprocessing with Webcrack...`);
     try {
-        const result = await webcrack(code);
+        const result = await webcrack(code, {
+            unminify: true,
+            mangle: false
+        });
         code = result.code;
-        console.log(`[*] Preprocessing complete. Code cleaned and unminified.`);
+        console.log(`[*] Preprocessing complete. Code cleaned, unminified, and proxy functions resolved.`);
     } catch (err) {
         console.error(`[!] Webcrack failed: ${err.message}. Proceeding with raw code.`);
     }

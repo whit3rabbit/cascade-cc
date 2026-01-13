@@ -51,9 +51,11 @@ function extractIdentifiers(code) {
     while ((match = idRegex.exec(code)) !== null) {
         const id = match[0];
         if (!keywords.has(id) && !globals.has(id)) {
-            // Usually obfuscated names are short or have specific patterns,
-            // but we want to catch all that are in our mapping.
-            variables.add(id);
+            // IGNORE human-readable names: length > 4 or containing underscores or camelCase
+            const isHumanReadable = id.length > 4 || id.includes('_') || (/[a-z]/.test(id) && /[A-Z]/.test(id));
+            if (!isHumanReadable) {
+                variables.add(id);
+            }
         }
     }
 
@@ -191,15 +193,13 @@ async function run() {
         process.exit(1);
     }
 
-    // Sort by name (sequential order)
+    // Sort by Centrality (descending) - the "Brain" first
     const sortedChunks = graphData.slice().sort((a, b) => {
-        const fileA = path.basename(a.file);
-        const fileB = path.basename(b.file);
-        return fileA.localeCompare(fileB, undefined, { numeric: true, sensitivity: 'base' });
+        return (b.centrality || 0) - (a.centrality || 0);
     });
 
     console.log(`[*] Starting Deobfuscation Pipeline [Provider: ${PROVIDER}, Model: ${MODEL}]`);
-    console.log(`[*] Processing ${sortedChunks.length} chunks by Sequential order.`);
+    console.log(`[*] Processing ${sortedChunks.length} chunks by Centrality order.`);
 
     // --- KEY VALIDATION ---
     const isValid = await validateKey();
@@ -224,6 +224,15 @@ async function run() {
             const code = fs.readFileSync(chunkPath, 'utf8');
             const { variables, properties } = extractIdentifiers(code);
 
+            // Candidate Pool: Determine which identifiers REALLY need naming
+            const unknownVariables = variables.filter(v => !globalMapping.variables[v]);
+            const unknownProperties = properties.filter(p => !globalMapping.properties[p]);
+
+            if (unknownVariables.length === 0 && unknownProperties.length === 0) {
+                console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Skip ${file} (All identifiers already mapped).`);
+                continue;
+            }
+
             const filteredMapping = { variables: {}, properties: {} };
             let varMatches = 0;
             let propMatches = 0;
@@ -241,8 +250,19 @@ async function run() {
                 }
             }
 
-            console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Naming Pass for ${file}...`);
+            // Prepare neighbor information with display names or roles
+            const neighborInfo = chunkMeta.outbound.map(targetId => {
+                const target = graphData.find(c => c.name === targetId || path.basename(c.file, '.js') === targetId);
+                if (target) {
+                    const name = target.displayName || target.suggestedFilename || target.role || targetId;
+                    return `${targetId} (${name})`;
+                }
+                return targetId;
+            }).join(', ');
+
+            console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Naming Pass for ${file} (${chunkMeta.centrality.toFixed(4)} centrality)...`);
             console.log(`    - Context: ${varMatches} variables, ${propMatches} properties injected from mapping.`);
+            console.log(`    - Discovery: ${unknownVariables.length} variables and ${unknownProperties.length} properties need naming.`);
 
             const prompt = `
 Role: Senior Reverse Engineer
@@ -257,7 +277,11 @@ CHUNK METADATA:
 - Logical Source: ${chunkMeta.kb_info?.suggested_path || 'unknown'}
 - Bundle Line Range: ${chunkMeta.startLine} - ${chunkMeta.endLine}
 - State DNA: This code interacts with global state properties: ${chunkMeta.state_touchpoints.join(', ')}
-- Neighbors: Interacts with ${chunkMeta.outbound.join(', ')}
+- Neighbors: Interacts with ${neighborInfo}
+
+UNKNOWN IDENTIFIERS TO MAP:
+- Variables: ${unknownVariables.join(', ')}
+- Properties: ${unknownProperties.join(', ')}
 
 EXISTING MAPPINGS (Use these for consistency):
 ${JSON.stringify(filteredMapping, null, 2)}
@@ -277,6 +301,11 @@ INSTRUCTIONS:
 4. For "properties", ensure names reflect the data being stored or the action being performed.
 5. If the logic matches a REFERENCE HINT, you MUST use that suggested name.
 6. Suggest a concise, descriptive FILENAME for this chunk (e.g., 'anthropicApiClient').
+
+CRITICAL:
+- I have provided a list of UNKNOWN IDENTIFIERS. Focus your response primarily on mapping these.
+- DO NOT propose new names for identifiers already present in the EXISTING MAPPINGS list; use them for consistency.
+- Your response must be valid JSON and ONLY JSON.
 
 RESPONSE FORMAT (JSON ONLY):
 {

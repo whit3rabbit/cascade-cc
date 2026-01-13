@@ -66,9 +66,9 @@ async function callLLM(prompt, retryCount = 0) {
                     const isQuota = detailedMessage.toLowerCase().includes('quota') || detailedMessage.toLowerCase().includes('credit');
                     if (isQuota) throw new Error(`[!] Quota/Credit Exceeded (429): ${detailedMessage}`);
 
-                    if (retryCount < 7) {
-                        const delay = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
-                        console.warn(`[!] Rate limited (429): ${detailedMessage}. Retrying in ${Math.round(delay / 1000)}s...`);
+                    if (retryCount < 10) { // Increased retries for free tier
+                        const delay = Math.pow(2, retryCount) * 3000 + Math.random() * 2000;
+                        console.warn(`[!] Rate limited (429): ${detailedMessage}. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
                         await sleep(delay);
                         return callLLM(prompt, retryCount + 1);
                     }

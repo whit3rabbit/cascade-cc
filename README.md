@@ -9,8 +9,8 @@ cp .env.example .env
 # Update .env with LLM api keys/model names
 npm install
 npm start
-node run deobfuscate
-node run deobfuscate <version> --rename-only
+npm run deobfuscate
+npm run deobfuscate -- <version> --rename-only
 # Output will be in cascade_graph_analysis/<version>/deobfuscated_chunks/
 ```
 
@@ -35,7 +35,7 @@ npm start
 To specify a path:
 
 ```bash
-node run analyze path/to/bundle.js
+npm run analyze -- path/to/bundle.js
 ```
 
 ### Visualize
@@ -57,13 +57,13 @@ Start the context-aware deobfuscation pipeline. This requires an LLM API key.
 
 ```bash
 # Deobfuscate latest analysis
-node run deobfuscate
+npm run deobfuscate
 
-# Specify a target version
-node run deobfuscate 2.1.5
+# Specify a target version (use -- to pass args to the script)
+npm run deobfuscate -- 2.1.5
 
 # Final Run: Rename Only (Skip LLM if mapping.json is already built)
-node run deobfuscate 2.1.5 --rename-only
+npm run deobfuscate -- 2.1.5 --rename-only
 ```
 
 The deobfuscated chunks will be saved to `cascade_graph_analysis/<version>/deobfuscated_chunks/`.

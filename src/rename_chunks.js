@@ -22,11 +22,19 @@ function renameIdentifiers(code, mapping) {
 
                 // 1. Variable Renaming (Scope-aware)
                 if (mapping.variables && mapping.variables[oldName] && !renamedBindings.has(oldName)) {
-                    if (path.scope.hasBinding(oldName)) {
-                        const entry = mapping.variables[oldName];
-                        const newName = typeof entry === 'string' ? entry : entry.name;
-                        path.scope.rename(oldName, newName);
-                        renamedBindings.add(oldName);
+                    const binding = path.scope.getBinding(oldName);
+                    if (binding) {
+                        // Refined scope check: Renaming if Program level OR in a shallow wrapper (common in esbuild)
+                        // This allows renaming module-level globals that are wrapped in __commonJS routines.
+                        const isTopLevel = binding.scope.block.type === 'Program';
+                        const isShallow = binding.scope.depth <= 2;
+
+                        if (isTopLevel || isShallow) {
+                            const entry = mapping.variables[oldName];
+                            const newName = typeof entry === 'string' ? entry : entry.name;
+                            path.scope.rename(oldName, newName);
+                            renamedBindings.add(oldName);
+                        }
                     }
                 }
             },

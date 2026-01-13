@@ -1,3 +1,5 @@
+const t = require('@babel/types');
+
 /**
  * Basic AAdecode implementation adapted from JSimplifier
  */
@@ -54,7 +56,6 @@ function jjdecode(text) {
  * Now accepts a dynamic map discovered during analysis
  */
 function applyDynamicRenaming(path, dynamicMap) {
-    const t = require('@babel/types');
     if (t.isIdentifier(path.node) && dynamicMap[path.node.name]) {
         // Only rename if it's a top-level binding or a reference to one
         const binding = path.scope.getBinding(path.node.name);

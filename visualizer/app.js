@@ -116,8 +116,13 @@ async function init() {
             window.location.href = url.href;
         });
 
-        // Default layout
-        graphologyLibrary.layoutForceAtlas2.assign(graph, { iterations: 100, settings: { gravity: 1 } });
+        // Default layout: Circular for very large graphs, ForceAtlas2 otherwise
+        if (graph.order > 500) {
+            console.log(`[*] Large graph detected (${graph.order} nodes), using Circular layout.`);
+            graphologyLibrary.layout.circular.assign(graph);
+        } else {
+            graphologyLibrary.layoutForceAtlas2.assign(graph, { iterations: 100, settings: { gravity: 1 } });
+        }
 
     } catch (err) {
         console.error('Initialization error:', err);
