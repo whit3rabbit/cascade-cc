@@ -9,7 +9,8 @@
     "clean": "node run clean",
     "lint": "prettier --write .",
     "visualize": "node run visualize",
-    "deobfuscate": "node run deobfuscate"
+    "deobfuscate": "node run deobfuscate",
+    "assemble": "node run assemble"
   },
   "dependencies": {
     "@babel/generator": "^7.28.5",

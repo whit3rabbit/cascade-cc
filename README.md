@@ -11,7 +11,8 @@ npm install
 npm start
 npm run deobfuscate
 npm run deobfuscate -- <version> --rename-only
-# Output will be in cascade_graph_analysis/<version>/deobfuscated_chunks/
+npm run assemble -- <version>
+# Output will be in cascade_graph_analysis/<version>/final_codebase/
 ```
 
 ## Setup
@@ -68,6 +69,23 @@ npm run deobfuscate -- 2.1.5 --rename-only
 
 The deobfuscated chunks will be saved to `cascade_graph_analysis/<version>/deobfuscated_chunks/`.
 
+### Assemble Final Codebase
+
+Organize the deobfuscated chunks into a coherent final codebase structure using **Path-First Aggregation**.
+
+```bash
+# Assemble the latest version
+npm run assemble -- <version>
+```
+
+This script performs:
+1.  **Trust the Knowledge Base (KB):** Uses `suggested_path` if available.
+2.  **Trust the LLM:** Uses `suggestedFilename` placed in a subdirectory based on its `role`.
+3.  **Filter by "Family":** Automatically skips vendor chunks.
+4.  **Order by Source:** Merges multiple chunks into logical files, sorted by original `startLine`.
+
+The final structured codebase will be located in `cascade_graph_analysis/<version>/final_codebase/`.
+
 #### LLM Pipeline Details
 
 The pipeline consists of two primary stages, orchestrated by `src/deobfuscate_pipeline.js`:
@@ -97,7 +115,8 @@ graph TD
     H --> I[Stage 1: Context-Aware Mapping]
     I -- LLM Analysis --> J[Translation Map]
     J --> K[Stage 2: Final Rewrite]
-    K --> L[Deobfuscated Code]
+    K --> L[Phase 5: Path-First Aggregation]
+    L --> M[Final Codebase]
 ```
 
 ### Phase 0: Preprocessing & AST Renaming

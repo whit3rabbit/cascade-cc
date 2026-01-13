@@ -25,6 +25,11 @@ const scripts = {
         cmd: 'node',
         args: ['src/deobfuscate_pipeline.js', ...args],
         desc: 'Run LLM-based deobfuscation (Stage 1 & 2)'
+    },
+    'assemble': {
+        cmd: 'node',
+        args: ['src/assemble_final.js', ...args],
+        desc: 'Assemble deobfuscated chunks into a final file structure'
     }
 };
 
