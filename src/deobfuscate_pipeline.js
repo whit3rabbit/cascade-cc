@@ -288,6 +288,21 @@ async function run() {
                 }
             }
 
+            // --- CONTEXT THINNING ---
+            // If we have too many existing mappings, the prompt becomes massive.
+            // We prioritize mappings that are actually present in this chunk (done above),
+            // but we might still want to limit the total number if common properties/variables explode.
+            const MAX_INJECTED_VARS = 100;
+            const MAX_INJECTED_PROPS = 100;
+
+            const finalFilteredMapping = {
+                variables: Object.fromEntries(Object.entries(filteredMapping.variables).slice(0, MAX_INJECTED_VARS)),
+                properties: Object.fromEntries(Object.entries(filteredMapping.properties).slice(0, MAX_INJECTED_PROPS))
+            };
+
+            const varCount = Object.keys(finalFilteredMapping.variables).length;
+            const propCount = Object.keys(finalFilteredMapping.properties).length;
+
             // Prepare neighbor information with display names or roles
             const neighborInfo = chunkMeta.outbound.map(targetId => {
                 const target = graphData.find(c => c.name === targetId || path.basename(c.file, '.js') === targetId);
@@ -321,8 +336,9 @@ UNKNOWN IDENTIFIERS TO MAP:
 - Variables: ${unknownVariables.join(', ')}
 - Properties: ${unknownProperties.join(', ')}
 
-EXISTING MAPPINGS (Use these for consistency):
-${JSON.stringify(filteredMapping, null, 2)}
+EXISTING MAPPINGS (Subset for context):
+${JSON.stringify(finalFilteredMapping, null, 2)}
+${(varMatches > MAX_INJECTED_VARS || propMatches > MAX_INJECTED_PROPS) ? `\n(Note: ${varMatches} variables and ${propMatches} properties matched, showing only top ${MAX_INJECTED_VARS}/${MAX_INJECTED_PROPS})` : ''}
 
 REFERENCE HINTS FROM KNOWLEDGE BASE:
 ${filterKBHints(code, KB)}
