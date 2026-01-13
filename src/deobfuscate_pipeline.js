@@ -39,12 +39,44 @@ function getLatestVersion(baseDir) {
 }
 
 function extractIdentifiers(code) {
-    // Simple regex-based identifier extraction
-    // Matches common JS variable names, avoids some keywords
-    const matches = code.match(/[a-zA-Z_$][a-zA-Z0-9_$]*/g) || [];
-    const unique = new Set(matches);
+    // Enhanced extraction for variables and properties
+    const variables = new Set();
+    const properties = new Set();
     const keywords = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'async', 'null', 'true', 'false', 'undefined']);
-    return Array.from(unique).filter(id => !keywords.has(id));
+    const globals = new Set(['console', 'Object', 'Array', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'JSON', 'Math', 'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'globalThis', 'window', 'global', 'process', 'require', 'module', 'exports', 'URL', 'Buffer']);
+
+    // Match variables (stand-alone identifiers)
+    const idRegex = /\b[a-zA-Z_$][a-zA-Z0-9_$]*\b/g;
+    let match;
+    while ((match = idRegex.exec(code)) !== null) {
+        const id = match[0];
+        if (!keywords.has(id) && !globals.has(id)) {
+            // Usually obfuscated names are short or have specific patterns,
+            // but we want to catch all that are in our mapping.
+            variables.add(id);
+        }
+    }
+
+    // Match potential property lookups: .prop or prop:
+    const propRegex = /\.([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g;
+    while ((match = propRegex.exec(code)) !== null) {
+        const prop = match[1];
+        if (!keywords.has(prop) && !globals.has(prop) && prop.length > 1) {
+            properties.add(prop);
+        }
+    }
+    const propLitRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g;
+    while ((match = propLitRegex.exec(code)) !== null) {
+        const prop = match[1];
+        if (!keywords.has(prop) && !globals.has(prop) && prop.length > 1) {
+            properties.add(prop);
+        }
+    }
+
+    return {
+        variables: Array.from(variables),
+        properties: Array.from(properties)
+    };
 }
 
 function filterKBHints(code, kb, maxHints = 100) {
@@ -110,11 +142,35 @@ async function run() {
         process.exit(1);
     }
 
-    let globalMapping = {};
+    let globalMapping = {
+        version: "1.1",
+        variables: {},
+        properties: {},
+        metadata: {
+            total_renamed: 0,
+            last_updated: new Date().toISOString()
+        }
+    };
+
     if (fs.existsSync(mappingPath)) {
         try {
-            globalMapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
-            console.log(`[*] Loaded global mapping with ${Object.keys(globalMapping).length} entries.`);
+            const raw = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
+            if (raw.version && raw.variables) {
+                globalMapping = raw;
+                console.log(`[*] Loaded structured mapping v${globalMapping.version} with ${Object.keys(globalMapping.variables).length} variables and ${Object.keys(globalMapping.properties).length} properties.`);
+            } else {
+                // Migration from flat format
+                console.log(`[*] Migrating old flat mapping to structure format...`);
+                for (const [key, val] of Object.entries(raw)) {
+                    globalMapping.variables[key] = {
+                        name: val,
+                        confidence: 0.8,
+                        source: "migration"
+                    };
+                }
+                console.log(`[*] Migration complete: ${Object.keys(globalMapping.variables).length} entries.`);
+                fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
+            }
         } catch (err) {
             console.warn(`[!] Error reading mapping.json, starting fresh: ${err.message}`);
         }
@@ -124,7 +180,8 @@ async function run() {
     let graphData = [];
     if (fs.existsSync(graphMapPath)) {
         try {
-            graphData = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
+            const rawData = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
+            graphData = rawData.chunks || rawData; // Handle both old and new formats
         } catch (err) {
             console.error(`[!] Error parsing graph_map.json: ${err.message}`);
             process.exit(1);
@@ -165,28 +222,44 @@ async function run() {
             }
 
             const code = fs.readFileSync(chunkPath, 'utf8');
-            const identifiers = extractIdentifiers(code);
-            const filteredMapping = {};
-            for (const key of identifiers) {
-                if (Object.prototype.hasOwnProperty.call(globalMapping, key)) {
-                    filteredMapping[key] = globalMapping[key];
+            const { variables, properties } = extractIdentifiers(code);
+
+            const filteredMapping = { variables: {}, properties: {} };
+            let varMatches = 0;
+            let propMatches = 0;
+
+            for (const key of variables) {
+                if (globalMapping.variables[key]) {
+                    filteredMapping.variables[key] = globalMapping.variables[key].name;
+                    varMatches++;
+                }
+            }
+            for (const key of properties) {
+                if (globalMapping.properties[key]) {
+                    filteredMapping.properties[key] = globalMapping.properties[key].name;
+                    propMatches++;
                 }
             }
 
             console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Naming Pass for ${file}...`);
+            console.log(`    - Context: ${varMatches} variables, ${propMatches} properties injected from mapping.`);
 
             const prompt = `
 Role: Senior Reverse Engineer
-Task: Semantic Variable Mapping
+Task: Semantic Identity Mapping (Unobfuscation)
 
 Analyze the provided JavaScript code chunk from an AI Agent CLI tool.
+Goal: Map obfuscated variables and object properties to human-readable names.
+
 CHUNK METADATA:
 - Role: ${chunkMeta.role}
 - Label: ${chunkMeta.label}
+- Logical Source: ${chunkMeta.kb_info?.suggested_path || 'unknown'}
+- Bundle Line Range: ${chunkMeta.startLine} - ${chunkMeta.endLine}
 - State DNA: This code interacts with global state properties: ${chunkMeta.state_touchpoints.join(', ')}
 - Neighbors: Interacts with ${chunkMeta.outbound.join(', ')}
 
-EXISTING MAPPINGS (Use these names for consistency):
+EXISTING MAPPINGS (Use these for consistency):
 ${JSON.stringify(filteredMapping, null, 2)}
 
 REFERENCE HINTS FROM KNOWLEDGE BASE:
@@ -198,20 +271,25 @@ ${code}
 \`\`\`
 
 INSTRUCTIONS:
-1. Identify the purpose of obfuscated variables based on their usage, logic, and metadata.
-2. If a variable stores a value related to a State DNA property, Name it descriptively (e.g., 'sessionId' -> 'activeSessionId').
-3. If the role is '${chunkMeta.role}', prioritize domain-specific names.
-4. Suggest a concise, descriptive FILENAME for this chunk (e.g., 'anthropicApiClient', 'flowController').
-5. Return ONLY a JSON object of NEW or IMPROVED mappings and the suggested filename. If you are updating an existing mapping, explain why in the rationale.
-6. If the logic matches a REFERENCE HINT, you MUST use that suggested name for both mapping and filename (if applicable).
+1. Identify the purpose of obfuscated variables AND object properties based on their usage.
+2. CATEGORIZE your suggestions into "variables" (let, const, var, function names) and "properties" (this.prop, obj.prop, {prop: ...}).
+3. For "variables", prioritize names that reflect the variable's role in the ${chunkMeta.role} logic.
+4. For "properties", ensure names reflect the data being stored or the action being performed.
+5. If the logic matches a REFERENCE HINT, you MUST use that suggested name.
+6. Suggest a concise, descriptive FILENAME for this chunk (e.g., 'anthropicApiClient').
 
 RESPONSE FORMAT (JSON ONLY):
 {
   "mappings": {
-     "obfuscatedName": "descriptiveName"
+    "variables": {
+       "obfuscatedVar": { "name": "descriptiveVar", "rationale": "...", "confidence": 0.9 }
+    },
+    "properties": {
+       "obfuscatedProp": { "name": "descriptiveProp", "rationale": "...", "confidence": 0.9 }
+    }
   },
   "suggestedFilename": "descriptive_name",
-  "rationale": "Brief explanation of why these names were chosen."
+  "overallRationale": "Summary of choosing these names."
 }
 `;
 
@@ -223,15 +301,32 @@ RESPONSE FORMAT (JSON ONLY):
                     const newMappings = responseData.mappings || {};
 
                     let added = 0;
-                    for (const [key, val] of Object.entries(newMappings)) {
-                        if (globalMapping[key] !== val) {
-                            globalMapping[key] = val;
-                            added++;
+                    // Update variables
+                    if (newMappings.variables) {
+                        for (const [key, mapping] of Object.entries(newMappings.variables)) {
+                            const newName = typeof mapping === 'string' ? mapping : mapping.name;
+                            if (!globalMapping.variables[key] || globalMapping.variables[key].name !== newName) {
+                                globalMapping.variables[key] = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: file } : { ...mapping, source: file };
+                                added++;
+                            }
+                        }
+                    }
+
+                    // Update properties
+                    if (newMappings.properties) {
+                        for (const [key, mapping] of Object.entries(newMappings.properties)) {
+                            const newName = typeof mapping === 'string' ? mapping : mapping.name;
+                            if (!globalMapping.properties[key] || globalMapping.properties[key].name !== newName) {
+                                globalMapping.properties[key] = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: file } : { ...mapping, source: file };
+                                added++;
+                            }
                         }
                     }
 
                     if (added > 0 || responseData.suggestedFilename) {
                         if (added > 0) {
+                            globalMapping.metadata.total_renamed = Object.keys(globalMapping.variables).length + Object.keys(globalMapping.properties).length;
+                            globalMapping.metadata.last_updated = new Date().toISOString();
                             fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
                         }
 
@@ -240,7 +335,7 @@ RESPONSE FORMAT (JSON ONLY):
                             fs.writeFileSync(graphMapPath, JSON.stringify(graphData, null, 2));
                         }
 
-                        console.log(`    - Added/Updated ${added} mappings. [File Suggestion: ${responseData.suggestedFilename || 'None'}] Rationale: ${responseData.rationale}`);
+                        console.log(`    - Added/Updated ${added} mappings. [File Suggestion: ${responseData.suggestedFilename || 'None'}] Rationale: ${responseData.overallRationale || responseData.rationale || 'None'}`);
                     }
 
                     // Throttle to strictly abide by 10 RPM free tier limits (6s baseline + 1s jitter)

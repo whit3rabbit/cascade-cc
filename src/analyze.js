@@ -331,6 +331,9 @@ class CascadeGraph {
             const chunkName = `chunk${chunkIndex.toString().padStart(3, '0')}`;
             const code = currentChunkNodes.map(n => generate(n, { minified: false }).code).join('\n\n');
 
+            const startLine = currentChunkNodes[0].loc?.start.line || 0;
+            const endLine = currentChunkNodes[currentChunkNodes.length - 1].loc?.end.line || 0;
+
             let suggestedName = null;
             let category = currentCategory;
             let kbInfo = null;
@@ -415,6 +418,8 @@ class CascadeGraph {
                 name: chunkName,
                 code,
                 tokens,
+                startLine,
+                endLine,
                 neighbors: new Set(),
                 score: 0,
                 category: currentCategory,
@@ -664,15 +669,19 @@ class CascadeGraph {
         });
 
         const metadata = [];
+        const fileRanges = [];
 
         for (const [name, node] of this.nodes) {
             const fileName = node.displayName ? `${name}_${node.displayName}.js` : `${name}.js`;
             fs.writeFileSync(path.join(chunksDir, fileName), node.code);
 
-            metadata.push({
+            const display = node.displayName || node.name;
+            const metaEntry = {
                 name: node.displayName ? `${name} (${node.displayName})` : node.name,
                 file: `chunks/${fileName}`,
                 tokens: node.tokens,
+                startLine: node.startLine,
+                endLine: node.endLine,
                 category: node.category,
                 label: node.label || 'UNKNOWN',
                 role: node.role || 'MODULE',
@@ -682,17 +691,39 @@ class CascadeGraph {
                 outbound: Array.from(node.neighbors),
                 kb_info: node.kb_info,
                 hints: node.hints
-            });
+            };
+            metadata.push(metaEntry);
+
+            // Group by suggested path or display name for the summary
+            const suggestedPath = node.kb_info?.suggested_path || node.displayName || 'unknown';
+            let rangeEntry = fileRanges.find(r => r.path === suggestedPath);
+            if (!rangeEntry) {
+                rangeEntry = { path: suggestedPath, ranges: [] };
+                fileRanges.push(rangeEntry);
+            }
+
+            // Try to merge adjacent ranges
+            const lastRange = rangeEntry.ranges[rangeEntry.ranges.length - 1];
+            if (lastRange && node.startLine <= lastRange.end + 5) { // 5 line buffer for whitespace/comments
+                lastRange.end = Math.max(lastRange.end, node.endLine);
+            } else {
+                rangeEntry.ranges.push({ start: node.startLine, end: node.endLine });
+            }
         }
+
+        const finalOutput = {
+            chunks: metadata,
+            file_ranges: fileRanges.sort((a, b) => a.ranges[0].start - b.ranges[0].start)
+        };
 
         fs.writeFileSync(
             path.join(metadataDir, 'graph_map.json'),
-            JSON.stringify(metadata, null, 2)
+            JSON.stringify(finalOutput, null, 2)
         );
 
         fs.writeFileSync(
             path.join(metadataDir, 'graph_map.js'),
-            `window.GRAPH_DATA = ${JSON.stringify(metadata, null, 2)};`
+            `window.GRAPH_DATA = ${JSON.stringify(finalOutput, null, 2)};`
         );
     }
 }

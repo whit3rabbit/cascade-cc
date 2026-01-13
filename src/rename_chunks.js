@@ -11,19 +11,45 @@ function renameIdentifiers(code, mapping) {
     try {
         const ast = parser.parse(code, {
             sourceType: 'module',
-            plugins: ['jsx'] // Add plugins if needed for other syntaxes
+            plugins: ['jsx']
         });
+
+        const renamedBindings = new Set();
 
         traverse(ast, {
             Identifier(path) {
                 const oldName = path.node.name;
-                // Use Object.prototype.hasOwnProperty.call to safely check if oldName is a key in mapping
-                // This prevents picking up inherited properties like 'toString' or 'hasOwnProperty'
-                if (Object.prototype.hasOwnProperty.call(mapping, oldName)) {
-                    const newName = mapping[oldName];
-                    if (typeof newName === 'string') {
+
+                // 1. Variable Renaming (Scope-aware)
+                if (mapping.variables && mapping.variables[oldName] && !renamedBindings.has(oldName)) {
+                    if (path.scope.hasBinding(oldName)) {
+                        const entry = mapping.variables[oldName];
+                        const newName = typeof entry === 'string' ? entry : entry.name;
                         path.scope.rename(oldName, newName);
+                        renamedBindings.add(oldName);
                     }
+                }
+            },
+            MemberExpression(path) {
+                // 2. Property Renaming (Direct Member Access: obj.prop)
+                if (path.node.computed) return;
+
+                const propName = path.node.property.name;
+                if (mapping.properties && mapping.properties[propName]) {
+                    const entry = mapping.properties[propName];
+                    const newName = typeof entry === 'string' ? entry : entry.name;
+                    path.node.property.name = newName;
+                }
+            },
+            ObjectProperty(path) {
+                // 3. Object Property Renaming ({ prop: value })
+                if (path.node.computed) return;
+
+                const propName = path.node.key.name;
+                if (mapping.properties && mapping.properties[propName]) {
+                    const entry = mapping.properties[propName];
+                    const newName = typeof entry === 'string' ? entry : entry.name;
+                    path.node.key.name = newName;
                 }
             }
         });
@@ -89,7 +115,6 @@ async function main() {
             const chunkBase = path.basename(file, '.js');
             const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
             const outputPath = path.join(deobfuscatedDir, finalName);
-
             const renamedCode = renameIdentifiers(code, mapping);
 
             if (renamedCode) {
