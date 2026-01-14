@@ -21,7 +21,7 @@ function renameIdentifiers(code, mapping) {
                 const oldName = path.node.name;
 
                 // 1. Variable Renaming (Scope-aware)
-                if (mapping.variables && mapping.variables[oldName] && !renamedBindings.has(oldName)) {
+                if (mapping.variables && Object.prototype.hasOwnProperty.call(mapping.variables, oldName) && !renamedBindings.has(oldName)) {
                     const binding = path.scope.getBinding(oldName);
                     if (binding) {
                         // Refined scope check: Renaming if Program level OR in a shallow wrapper (common in esbuild)
@@ -31,9 +31,11 @@ function renameIdentifiers(code, mapping) {
 
                         if (isTopLevel || isShallow) {
                             const entry = mapping.variables[oldName];
-                            const newName = typeof entry === 'string' ? entry : entry.name;
-                            path.scope.rename(oldName, newName);
-                            renamedBindings.add(oldName);
+                            const newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                            if (newName) {
+                                path.scope.rename(oldName, newName);
+                                renamedBindings.add(oldName);
+                            }
                         }
                     }
                 }
@@ -43,10 +45,12 @@ function renameIdentifiers(code, mapping) {
                 if (path.node.computed) return;
 
                 const propName = path.node.property.name;
-                if (mapping.properties && mapping.properties[propName]) {
+                if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
-                    const newName = typeof entry === 'string' ? entry : entry.name;
-                    path.node.property.name = newName;
+                    const newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                    if (newName) {
+                        path.node.property.name = newName;
+                    }
                 }
             },
             ObjectProperty(path) {
@@ -54,10 +58,12 @@ function renameIdentifiers(code, mapping) {
                 if (path.node.computed) return;
 
                 const propName = path.node.key.name;
-                if (mapping.properties && mapping.properties[propName]) {
+                if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
-                    const newName = typeof entry === 'string' ? entry : entry.name;
-                    path.node.key.name = newName;
+                    const newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                    if (newName) {
+                        path.node.key.name = newName;
+                    }
                 }
             }
         });
