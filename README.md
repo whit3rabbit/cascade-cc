@@ -72,8 +72,8 @@ npm run deobfuscate -- --skip-vendor
 # Force re-scan (Ignore resume tracking)
 npm run deobfuscate -- --force
 
-# Final Run: Rename Only (Skip LLM if mapping.json is already built)
-npm run deobfuscate -- 2.1.6 --rename-only
+# Final Run: Apply Mappings (Renames variables, files, and beautifies code)
+npm run deobfuscate -- <version> --rename-only
 ```
 
 The deobfuscated chunks will be saved to `cascade_graph_analysis/<version>/deobfuscated_chunks/`.
@@ -103,9 +103,10 @@ The pipeline consists of two primary stages, orchestrated by `src/deobfuscate_pi
     *   **Resume Mechanism**: Successfully processed chunks are tracked in `processed_chunks` within `mapping.json`. Re-running the pipeline will automatically skip completed chunks unless the `--force` flag is used.
     *   **Prompt**: The core deobfuscation prompt is located in `src/deobfuscate_pipeline.js`. It injects metadata derived from `analyze.js` (Role, Label, State DNA) and existing mappings for consistency.
     *   **Persistence**: Discovered mappings and processed chunk tracking are saved to `cascade_graph_analysis/<version>/metadata/mapping.json`.
-*   **Stage 2: Safe Renaming (`src/rename_chunks.js`)**
-    *   **Logic**: Uses Babel to perform scope-aware renaming of all identifiers found in `mapping.json`.
-    *   **Output**: Generates readable JavaScript files in the `deobfuscated_chunks/` directory.
+*   **Stage 2: Mapping Application & Renaming (`src/rename_chunks.js`)**
+    *   **Logic**: Uses Babel to perform scope-aware renaming of all variables and object properties found in `mapping.json`. It also renames chunk files to their suggested names (e.g., `chunk001_module_loader.js`).
+    *   **Formatting**: Automatically **beautifies (unminifies)** the code during the renaming process for maximum readability.
+    *   **Output**: Generates readable, formatted JavaScript files in the `deobfuscated_chunks/` directory.
 
 ## Workflow
 

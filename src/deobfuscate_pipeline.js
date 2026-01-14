@@ -111,6 +111,35 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function cleanLLMResponse(text) {
+    if (!text) return null;
+
+    // 1. Remove markdown code blocks if present
+    let cleaned = text.trim();
+    const jsonBlockRegex = /```(?:json)?\s*([\s\S]*?)```/i;
+    const match = cleaned.match(jsonBlockRegex);
+    if (match) {
+        cleaned = match[1].trim();
+    }
+
+    // 2. Sometimes the LLM adds text before or after the JSON.
+    // We try to find the start and end of the JSON object.
+    const startIdx = cleaned.indexOf('{');
+    const endIdx = cleaned.lastIndexOf('}');
+
+    if (startIdx === -1) return null;
+
+    if (endIdx !== -1 && endIdx > startIdx) {
+        cleaned = cleaned.substring(startIdx, endIdx + 1);
+    } else {
+        // Potentially truncated JSON (missing closing braces)
+        // We could try to append } but it's risky. Let's return the fragment starting with {
+        cleaned = cleaned.substring(startIdx);
+    }
+
+    return cleaned;
+}
+
 // --- MAIN STAGES ---
 async function run() {
     let version = process.argv.filter((arg, i, arr) => !arg.startsWith('-') && (i === 0 || arr[i - 1] !== '--limit'))[2];
@@ -225,9 +254,9 @@ async function run() {
         process.exit(1);
     }
 
-    // Stage 1: Incremental Mapping
+    // Stage 1: Mapping Generation (LLM Pass)
     if (isRenameOnly) {
-        console.log(`[*] Skipping Stage 1 (LLM Pass) as --rename-only is set.`);
+        console.log(`[*] Skipping Stage 1 (Mapping Generation) as --rename-only is set.`);
     } else {
         for (let i = 0; i < sortedChunks.length; i++) {
             const chunkMeta = sortedChunks[i];
@@ -360,37 +389,83 @@ CRITICAL:
 - I have provided a list of UNKNOWN IDENTIFIERS. Focus your response primarily on mapping these.
 - DO NOT propose new names for identifiers already present in the EXISTING MAPPINGS list; use them for consistency.
 - Your response must be valid JSON and ONLY JSON.
+- KEEP rationale and overallRationale extremely concise (one sentence each) to avoid hitting token limits for large chunks.
 
 RESPONSE FORMAT (JSON ONLY):
 {
   "mappings": {
     "variables": {
-       "obfuscatedVar": { "name": "descriptiveVar", "rationale": "...", "confidence": 0.9 }
+       "obfuscatedVar": { "name": "descriptiveVar", "rationale": "Shorter is better.", "confidence": 0.9 }
     },
     "properties": {
-       "obfuscatedProp": { "name": "descriptiveProp", "rationale": "...", "confidence": 0.9 }
+       "obfuscatedProp": { "name": "descriptiveProp", "rationale": "Shorter is better.", "confidence": 0.9 }
     }
   },
   "suggestedFilename": "descriptive_name",
-  "overallRationale": "Summary of choosing these names."
+  "overallRationale": "Concise summary."
 }
 `;
 
-            try {
-                const llmResponse = await callLLM(prompt);
-                const jsonMatch = llmResponse.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                    const responseData = JSON.parse(jsonMatch[0]);
-                    const newMappings = responseData.mappings || {};
+            const MAX_RETRIES = 2;
+            let llmProcessed = false;
 
+            for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                    const llmResponse = await callLLM(prompt);
+                    const cleanedJson = cleanLLMResponse(llmResponse);
+
+                    if (!cleanedJson) {
+                        throw new Error("No JSON found in LLM response");
+                    }
+
+                    let responseData;
+                    try {
+                        responseData = JSON.parse(cleanedJson);
+                    } catch (parseErr) {
+                        // Try a basic truncation fix: count open vs closed braces
+                        const openBraces = (cleanedJson.match(/\{/g) || []).length;
+                        const closeBraces = (cleanedJson.match(/\}/g) || []).length;
+                        if (openBraces > closeBraces) {
+                            const fixedJson = cleanedJson + '}'.repeat(openBraces - closeBraces);
+                            try {
+                                responseData = JSON.parse(fixedJson);
+                                console.log(`    [*] Attempted truncation fix was successful.`);
+                            } catch (e) {
+                                throw new Error(`JSON parse error: ${parseErr.message} at position ${parseErr.at || 'unknown'}`);
+                            }
+                        } else {
+                            throw new Error(`JSON parse error: ${parseErr.message}`);
+                        }
+                    }
+
+                    const newMappings = responseData.mappings || {};
                     let added = 0;
+
                     // Update variables
                     if (newMappings.variables) {
                         for (const [key, mapping] of Object.entries(newMappings.variables)) {
-                            const newName = typeof mapping === 'string' ? mapping : mapping.name;
-                            if (!globalMapping.variables[key] || globalMapping.variables[key].name !== newName) {
-                                globalMapping.variables[key] = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: file } : { ...mapping, source: file };
+                            const newMapping = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: file } : { ...mapping, source: file };
+                            const existing = globalMapping.variables[key];
+
+                            if (!existing) {
+                                globalMapping.variables[key] = newMapping;
                                 added++;
+                            } else if (Array.isArray(existing)) {
+                                const sameSourceIdx = existing.findIndex(e => e.source === file);
+                                if (sameSourceIdx !== -1) {
+                                    existing[sameSourceIdx] = newMapping;
+                                } else {
+                                    existing.push(newMapping);
+                                }
+                                added++;
+                            } else if (existing.source !== file) {
+                                globalMapping.variables[key] = [existing, newMapping];
+                                added++;
+                            } else {
+                                if (existing.name !== newMapping.name || newMapping.confidence > existing.confidence) {
+                                    globalMapping.variables[key] = newMapping;
+                                    added++;
+                                }
                             }
                         }
                     }
@@ -398,10 +473,28 @@ RESPONSE FORMAT (JSON ONLY):
                     // Update properties
                     if (newMappings.properties) {
                         for (const [key, mapping] of Object.entries(newMappings.properties)) {
-                            const newName = typeof mapping === 'string' ? mapping : mapping.name;
-                            if (!globalMapping.properties[key] || globalMapping.properties[key].name !== newName) {
-                                globalMapping.properties[key] = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: file } : { ...mapping, source: file };
+                            const newMapping = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: file } : { ...mapping, source: file };
+                            const existing = globalMapping.properties[key];
+
+                            if (!existing) {
+                                globalMapping.properties[key] = newMapping;
                                 added++;
+                            } else if (Array.isArray(existing)) {
+                                const sameSourceIdx = existing.findIndex(e => e.source === file);
+                                if (sameSourceIdx !== -1) {
+                                    existing[sameSourceIdx] = newMapping;
+                                } else {
+                                    existing.push(newMapping);
+                                }
+                                added++;
+                            } else if (existing.source !== file) {
+                                globalMapping.properties[key] = [existing, newMapping];
+                                added++;
+                            } else {
+                                if (existing.name !== newMapping.name || newMapping.confidence > existing.confidence) {
+                                    globalMapping.properties[key] = newMapping;
+                                    added++;
+                                }
                             }
                         }
                     }
@@ -412,7 +505,6 @@ RESPONSE FORMAT (JSON ONLY):
                             globalMapping.metadata.last_updated = new Date().toISOString();
                         }
 
-                        // Always mark as processed if we got a valid JSON response
                         if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
                             globalMapping.processed_chunks.push(chunkMeta.name);
                         }
@@ -427,23 +519,30 @@ RESPONSE FORMAT (JSON ONLY):
                         console.log(`    - Added/Updated ${added} mappings. [File Suggestion: ${responseData.suggestedFilename || 'None'}] Rationale: ${responseData.overallRationale || responseData.rationale || 'None'}`);
                     }
 
-                    // Throttle to strictly abide by 10 RPM free tier limits (6s baseline + 1s jitter)
+                    llmProcessed = true;
+                    // Throttle to strictly abide by 10 RPM free tier limits
                     const throttleDelay = 6000 + Math.random() * 1000;
                     await sleep(throttleDelay);
-                } else {
-                    console.warn(`    [!] Could not parse JSON from LLM response for ${file}`);
+                    break; // Success! Exit retry loop.
+
+                } catch (err) {
+                    console.warn(`    [!] Error processing ${file} (Attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${err.message}`);
+                    if (attempt < MAX_RETRIES) {
+                        const waitTime = 5000 * (attempt + 1);
+                        console.log(`    [*] Retrying in ${waitTime / 1000}s...`);
+                        await sleep(waitTime);
+                    } else {
+                        console.error(`    [!] Failed to process ${file} after ${MAX_RETRIES + 1} attempts. Skipping.`);
+                    }
                 }
-            } catch (err) {
-                console.error(`    [!] Critical error processing ${file}: ${err.message}`);
-                // We continue to the next chunk instead of crashing the whole process
             }
         }
 
         console.log(`[*] Stage 1 Complete. Final mapping preserved at ${mappingPath}`);
     }
 
-    // Stage 2: Safe Babel Renaming
-    console.log(`[*] Starting Stage 2: Safe Renaming with Babel...`);
+    // Stage 2: Mapping Application & Renaming (Babel)
+    console.log(`[*] Starting Stage 2: Applying Mapping & Renaming with Babel...`);
     try {
         const cmd = `node src/rename_chunks.js "${versionPath}"`;
         console.log(`[*] Executing: ${cmd}`);

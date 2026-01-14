@@ -7,7 +7,7 @@ const generate = require('@babel/generator').default;
 /**
  * Safely renames identifiers in a piece of code using Babel's scope-aware renaming.
  */
-function renameIdentifiers(code, mapping) {
+function renameIdentifiers(code, mapping, sourceFile = null) {
     try {
         const ast = parser.parse(code, {
             sourceType: 'module',
@@ -31,7 +31,12 @@ function renameIdentifiers(code, mapping) {
 
                         if (isTopLevel || isShallow) {
                             const entry = mapping.variables[oldName];
-                            const newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+
+                            // If multiple sources exist, prioritize the one matching current file
+                            const newName = Array.isArray(entry)
+                                ? (entry.find(e => e.source === sourceFile)?.name || entry[0].name)
+                                : (typeof entry === 'string' ? entry : (entry ? entry.name : null));
+
                             if (newName) {
                                 path.scope.rename(oldName, newName);
                                 renamedBindings.add(oldName);
@@ -47,7 +52,9 @@ function renameIdentifiers(code, mapping) {
                 const propName = path.node.property.name;
                 if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
-                    const newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                    const newName = Array.isArray(entry)
+                        ? (entry.find(e => e.source === sourceFile)?.name || entry[0].name)
+                        : (typeof entry === 'string' ? entry : (entry ? entry.name : null));
                     if (newName) {
                         path.node.property.name = newName;
                     }
@@ -60,7 +67,9 @@ function renameIdentifiers(code, mapping) {
                 const propName = path.node.key.name;
                 if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
-                    const newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                    const newName = Array.isArray(entry)
+                        ? (entry.find(e => e.source === sourceFile)?.name || entry[0].name)
+                        : (typeof entry === 'string' ? entry : (entry ? entry.name : null));
                     if (newName) {
                         path.node.key.name = newName;
                     }
@@ -69,7 +78,7 @@ function renameIdentifiers(code, mapping) {
         });
 
         return generate(ast, {
-            retainLines: true,
+            retainLines: false,
             compact: false
         }).code;
     } catch (err) {
@@ -129,7 +138,7 @@ async function main() {
             const chunkBase = path.basename(file, '.js');
             const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
             const outputPath = path.join(deobfuscatedDir, finalName);
-            const renamedCode = renameIdentifiers(code, mapping);
+            const renamedCode = renameIdentifiers(code, mapping, file);
 
             if (renamedCode) {
                 fs.writeFileSync(outputPath, renamedCode);

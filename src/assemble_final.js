@@ -15,6 +15,34 @@ function getLatestVersion(outputRoot) {
     return versions.sort(semver.rcompare)[0];
 }
 
+function getDeobfuscatedChunkPath(chunksDir, chunkMeta) {
+    if (!chunkMeta) return null;
+
+    const originalFile = path.basename(chunkMeta.file);
+    const chunkBase = path.basename(originalFile, '.js');
+
+    let logicalName = "";
+    if (chunkMeta.suggestedFilename) {
+        logicalName = chunkMeta.suggestedFilename;
+    } else if (chunkMeta.kb_info && chunkMeta.kb_info.suggested_path) {
+        logicalName = path.basename(chunkMeta.kb_info.suggested_path.replace(/`/g, ''), '.ts').replace('.js', '');
+    }
+
+    // Sanitize logicalName to match rename_chunks.js
+    logicalName = logicalName.replace(/[\/\\?%*:|"<>]/g, '_');
+
+    const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : originalFile;
+    const fullPath = path.join(chunksDir, finalName);
+
+    if (fs.existsSync(fullPath)) return fullPath;
+
+    // Fallback: Check if the original chunk name exists
+    const fallbackPath = path.join(chunksDir, originalFile);
+    if (fs.existsSync(fallbackPath)) return fallbackPath;
+
+    return null;
+}
+
 async function assemble(version) {
     const outputRoot = './cascade_graph_analysis';
 
@@ -82,25 +110,31 @@ async function assemble(version) {
 
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-        // Sort chunks by original startLine to preserve logic sequence
-        chunkList.sort((a, b) => a.startLine - b.startLine);
+        // Sort chunks by startsWithImport first, then by original startLine
+        chunkList.sort((a, b) => {
+            if (a.startsWithImport && !b.startsWithImport) return -1;
+            if (!a.startsWithImport && b.startsWithImport) return 1;
+            return a.startLine - b.startLine;
+        });
 
         let mergedCode = `/**\n * File: ${filePath}\n * Role: ${chunkList[0].role}\n * Aggregated from ${chunkList.length} chunks\n */\n\n`;
 
         for (const chunkMeta of chunkList) {
-            const chunkFileName = path.basename(chunkMeta.file);
-            const chunkFilePath = path.join(chunksDir, chunkFileName);
+            const chunkFilePath = getDeobfuscatedChunkPath(chunksDir, chunkMeta);
 
-            if (fs.existsSync(chunkFilePath)) {
+            if (chunkFilePath) {
                 const code = fs.readFileSync(chunkFilePath, 'utf8');
                 mergedCode += `// --- Chunk: ${chunkMeta.name} (Original lines: ${chunkMeta.startLine}-${chunkMeta.endLine}) ---\n`;
                 mergedCode += code + "\n\n";
+            } else {
+                console.warn(`    [!] Missing deobfuscated chunk: ${chunkMeta.name} (Expected at ${chunksDir})`);
             }
         }
 
         fs.writeFileSync(fullOutputPath, mergedCode);
         console.log(`    [+] Generated: ${filePath}`);
     }
+
 
     console.log(`\n[OK] Assembly complete. Codebase located in: ${finalDir}`);
 }

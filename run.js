@@ -24,7 +24,7 @@ const scripts = {
     'deobfuscate': {
         cmd: 'node',
         args: ['src/deobfuscate_pipeline.js', ...args],
-        desc: 'Run LLM-based deobfuscation (Stage 1 & 2)'
+        desc: 'Run LLM-based deobfuscation (Stage 1 & 2). Use --rename-only or -r to just re-run renaming phase.'
     },
     'assemble': {
         cmd: 'node',

@@ -427,7 +427,13 @@ class CascadeGraph {
                 hints: hints,
                 hasGenerator,
                 hasStateMutator,
-                error_signature: errorSignature
+                error_signature: errorSignature,
+                startsWithImport: currentChunkNodes.some(node => {
+                    const nodeCode = generate(node, { minified: true }).code;
+                    return node.type === 'ImportDeclaration' ||
+                        (node.type === 'VariableDeclaration' && (nodeCode.includes('require(') || nodeCode.includes('_toESM'))) ||
+                        (node.type === 'ExpressionStatement' && nodeCode.includes('require('));
+                })
             });
 
             if (suggestedName) {
@@ -697,7 +703,8 @@ class CascadeGraph {
                 neighborCount: node.neighbors.size,
                 outbound: Array.from(node.neighbors),
                 kb_info: node.kb_info,
-                hints: node.hints
+                hints: node.hints,
+                startsWithImport: node.startsWithImport
             };
             metadata.push(metaEntry);
 
