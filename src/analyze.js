@@ -144,12 +144,6 @@ const removeDeadCodeVisitor = {
         } catch (e) {
             // Evaluation failed, skip
         }
-    },
-    SequenceExpression(path) {
-        const { expressions } = path.node;
-        if (expressions.slice(0, -1).every(e => t.isLiteral(e))) {
-            path.replaceWith(expressions[expressions.length - 1]);
-        }
     }
 };
 
@@ -215,82 +209,45 @@ class CascadeGraph {
     // Phase 0.6: Detect the internal state object
     detectInternalState(ast) {
         let stateVarName = null;
-        let creatorFunctionName = null;
         const statements = ast.program.body;
 
-        console.log(`[*] Phase 0.6: Detecting internal state object...`);
+        console.log(`[*] Phase 0.6: Detecting internal state object via mutation patterns...`);
 
-        // 1. Find the function that returns an object with "sessionId"
-        for (let i = 0; i < Math.min(statements.length, 2000); i++) {
-            const node = statements[i];
+        // Heuristic: Count mutations and cross-chunk usage for objects
+        const mutationCounts = new Map(); // name -> count
 
-            if (node.type === 'FunctionDeclaration') {
-                const code = generate(node, { minified: true }).code;
-                if (code.includes('sessionId') && code.includes('totalCostUSD')) {
-                    creatorFunctionName = node.id.name;
-                    console.log(`[*] Found state creator function: ${creatorFunctionName}`);
-                    break;
+        traverse(ast, {
+            AssignmentExpression(path) {
+                if (path.node.left.type === 'MemberExpression' && path.node.left.object.type === 'Identifier') {
+                    const objName = path.node.left.object.name;
+                    mutationCounts.set(objName, (mutationCounts.get(objName) || 0) + 1);
                 }
-            }
-
-            if (node.type === 'VariableDeclaration') {
-                for (const decl of node.declarations) {
-                    if (decl.init && (decl.init.type === 'FunctionExpression' || decl.init.type === 'ArrowFunctionExpression')) {
-                        const code = generate(decl.init, { minified: true }).code;
-                        if (code.includes('sessionId') && code.includes('totalCostUSD')) {
-                            creatorFunctionName = decl.id.name;
-                            console.log(`[*] Found state creator function: ${creatorFunctionName}`);
-                            break;
-                        }
+            },
+            CallExpression(path) {
+                // Heuristic: Objects passed into many functions are likely state/context
+                path.node.arguments.forEach(arg => {
+                    if (arg.type === 'Identifier') {
+                        mutationCounts.set(arg.name, (mutationCounts.get(arg.name) || 0) + 0.5);
                     }
-                }
-                if (creatorFunctionName) break;
+                });
+            }
+        });
+
+        // Filter for variables that look like state (many mutations/accesses)
+        // We also check if it contains "sessionId" or "totalCostUSD" as a strong signal, but not a requirement
+        let bestCandidate = null;
+        let maxScore = 0;
+
+        for (const [name, score] of mutationCounts.entries()) {
+            if (score > maxScore && name.length <= 4) { // typical obfuscated state var
+                maxScore = score;
+                bestCandidate = name;
             }
         }
 
-        if (!creatorFunctionName) {
-            // Fallback: look for direct assignment of the object literal
-            for (let i = 0; i < Math.min(statements.length, 2000); i++) {
-                const node = statements[i];
-                if (node.type === 'VariableDeclaration') {
-                    for (const decl of node.declarations) {
-                        if (decl.init && decl.init.type === 'ObjectExpression') {
-                            const code = generate(decl.init, { minified: true }).code;
-                            if (code.includes('sessionId') && code.includes('totalCostUSD')) {
-                                stateVarName = decl.id.name;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (stateVarName) break;
-            }
-        } else {
-            // 2. Find where this function is called and assigned
-            // The assignment might be inside a lazy init wrapper, so we use traverse
-            console.log(`[*] Searching for call to ${creatorFunctionName} and assignment...`);
-            traverse(ast, {
-                AssignmentExpression(path) {
-                    if (path.node.right.type === 'CallExpression' &&
-                        path.node.right.callee.name === creatorFunctionName &&
-                        path.node.left.type === 'Identifier') {
-                        stateVarName = path.node.left.name;
-                        path.stop();
-                    }
-                },
-                VariableDeclarator(path) {
-                    if (path.node.init && path.node.init.type === 'CallExpression' &&
-                        path.node.init.callee.name === creatorFunctionName &&
-                        path.node.id.type === 'Identifier') {
-                        stateVarName = path.node.id.name;
-                        path.stop();
-                    }
-                }
-            });
-        }
-
-        if (stateVarName) {
-            console.log(`[*] Detected internal state variable: ${stateVarName} -> INTERNAL_STATE`);
+        if (bestCandidate && maxScore > 10) {
+            stateVarName = bestCandidate;
+            console.log(`[*] Detected potential internal state variable: ${stateVarName} (Score: ${maxScore})`);
             this.runtimeMap[stateVarName] = 'INTERNAL_STATE';
         }
 
@@ -345,18 +302,29 @@ class CascadeGraph {
                 // 1. Check File Anchors
                 if (KB.file_anchors) {
                     for (const anchor of KB.file_anchors) {
-                        const matchCount = anchor.trigger_keywords.filter(kw => code.includes(kw)).length;
-                        const threshold = Math.max(2, Math.floor(anchor.trigger_keywords.length * 0.6));
+                        // Weighted keywords logic
+                        let weightedSum = 0;
+                        const triggerKeywords = Array.isArray(anchor.trigger_keywords) ? anchor.trigger_keywords : [];
 
-                        if (matchCount >= threshold) {
+                        triggerKeywords.forEach(kwEntry => {
+                            const kw = typeof kwEntry === 'string' ? kwEntry : kwEntry.word;
+                            const weight = typeof kwEntry === 'string' ? 1 : (kwEntry.weight || 1);
+                            if (code.includes(kw)) {
+                                weightedSum += weight;
+                            }
+                        });
+
+                        const threshold = anchor.threshold || Math.max(2, Math.floor(triggerKeywords.length * 0.6));
+
+                        if (weightedSum >= threshold) {
                             suggestedName = anchor.suggested_name.replace(/`/g, '');
                             category = 'priority';
                             kbInfo = {
                                 suggested_path: anchor.suggested_path,
                                 description: anchor.description,
-                                match_count: matchCount
+                                weighted_sum: weightedSum
                             };
-                            console.log(`    [+] KB Match: Found ${suggestedName} (${matchCount} keywords)`);
+                            console.log(`    [+] KB Match: Found ${suggestedName} (Score: ${weightedSum})`);
                             break;
                         }
                     }
@@ -429,10 +397,16 @@ class CascadeGraph {
                 hasStateMutator,
                 error_signature: errorSignature,
                 startsWithImport: currentChunkNodes.some(node => {
-                    const nodeCode = generate(node, { minified: true }).code;
-                    return node.type === 'ImportDeclaration' ||
-                        (node.type === 'VariableDeclaration' && (nodeCode.includes('require(') || nodeCode.includes('_toESM'))) ||
-                        (node.type === 'ExpressionStatement' && nodeCode.includes('require('));
+                    if (node.type === 'ImportDeclaration') return true;
+                    if (node.type === 'VariableDeclaration') {
+                        const subCode = code.slice(node.start, node.end);
+                        return subCode.includes('require(') || subCode.includes('_toESM');
+                    }
+                    if (node.type === 'ExpressionStatement') {
+                        const subCode = code.slice(node.start, node.end);
+                        return subCode.includes('require(');
+                    }
+                    return false;
                 })
             });
 
@@ -466,13 +440,14 @@ class CascadeGraph {
         if (wrapperNames.size > 0) console.log(`[*] Using detected module wrappers for splitting: ${Array.from(wrapperNames).join(', ')}`);
 
         statements.forEach((node) => {
-            const nodeCode = generate(node, { minified: true }).code;
-            const nodeTokens = encode(nodeCode).length;
-            const hasSignal = SIGNAL_KEYWORDS.some(kw => nodeCode.toLowerCase().includes(kw));
+            const nodeCodeApprox = code.slice(node.start, node.end).toLowerCase();
+            // Performance Optimization: Rough token estimate (length / 4)
+            const nodeTokensApprox = nodeCodeApprox.length / 4;
+            const hasSignal = SIGNAL_KEYWORDS.some(kw => nodeCodeApprox.includes(kw));
             const nodeCategory = hasSignal ? 'priority' : 'vendor';
 
             const isImport = node.type === 'ImportDeclaration' ||
-                (node.type === 'VariableDeclaration' && nodeCode.includes('require('));
+                (node.type === 'VariableDeclaration' && nodeCodeApprox.includes('require('));
 
             const isModuleWrapperCall = node.type === 'VariableDeclaration' &&
                 node.declarations.length === 1 &&
@@ -487,13 +462,16 @@ class CascadeGraph {
             const isUtility = node.type === 'VariableDeclaration' &&
                 node.declarations.some(d => d.id.name && (NATIVE_PROPS.includes(d.id.name) || d.id.name.startsWith('_')));
 
-            const isInsideLargeDeclaration = node.type === 'VariableDeclaration' && nodeTokens > 1000;
+            const isInsideLargeDeclaration = node.type === 'VariableDeclaration' && nodeTokensApprox > 250;
 
-            const shouldSplit = currentChunkNodes.length > 0 && !isInsideLargeDeclaration && (
+            // Only allow splitting at the Top Level of the program
+            const isTopLevel = statements.includes(node);
+
+            const shouldSplit = currentChunkNodes.length > 0 && isTopLevel && !isInsideLargeDeclaration && (
                 (isImport && currentChunkHasContent) ||
                 (isModuleWrapperCall && currentTokens > 3000) ||
                 (nodeCategory === 'priority' && currentCategory === 'vendor' && currentTokens > 1500) ||
-                (currentTokens + nodeTokens > 8000) ||
+                (currentTokens + nodeTokensApprox > 2000) || // 2000*4 = approx 8k tokens
                 (isUtility && currentTokens > 2000)
             );
 
@@ -503,7 +481,7 @@ class CascadeGraph {
             }
 
             currentChunkNodes.push(node);
-            currentTokens += nodeTokens;
+            currentTokens += nodeTokensApprox;
 
             if (!isImport && !isBanal) {
                 currentChunkHasContent = true;
@@ -547,8 +525,10 @@ class CascadeGraph {
         const teleportProbability = (1 - dampingFactor) / size;
         let scores = new Array(size).fill(1 / size);
 
-        for (let iter = 0; iter < 10; iter++) {
+        for (let iter = 0; iter < 100; iter++) {
             let nextScores = new Array(size).fill(teleportProbability);
+            let maxDiff = 0;
+
             for (let i = 0; i < size; i++) {
                 const node = this.nodes.get(names[i]);
                 const outDegree = node.neighbors.size;
@@ -564,9 +544,17 @@ class CascadeGraph {
                     for (let j = 0; j < size; j++) nextScores[j] += (scores[i] * dampingFactor) / size;
                 }
             }
-            // Normalize scores to ensure they sum to 1
-            const sum = nextScores.reduce((a, b) => a + b, 0);
-            scores = nextScores.map(s => s / sum);
+
+            // Convergence Check
+            for (let i = 0; i < size; i++) {
+                maxDiff = Math.max(maxDiff, Math.abs(nextScores[i] - scores[i]));
+            }
+
+            scores = nextScores;
+            if (maxDiff < 0.00001) {
+                console.log(`    [*] Markov Centrality converged after ${iter + 1} iterations (diff: ${maxDiff.toFixed(8)})`);
+                break;
+            }
         }
 
         names.forEach((name, i) => {
@@ -757,14 +745,14 @@ async function run() {
     let code = fs.readFileSync(targetFile, 'utf8');
 
     // Phase 0: Preprocessing with Webcrack
-    console.log(`[*] Phase 0: Preprocessing with Webcrack...`);
+    console.log(`[*] Phase 0: Preprocessing with Webcrack (De-proxifying)...`);
     try {
         const result = await webcrack(code, {
-            unminify: true,
+            unminify: false, // Let Babel handle unminification for consistency
             mangle: false
         });
         code = result.code;
-        console.log(`[*] Preprocessing complete. Code cleaned, unminified, and proxy functions resolved.`);
+        console.log(`[*] Preprocessing complete. Proxy functions resolved.`);
     } catch (err) {
         console.error(`[!] Webcrack failed: ${err.message}. Proceeding with raw code.`);
     }
@@ -811,10 +799,15 @@ async function run() {
                 const body = path.node.body.body;
                 if (body.length === 1 && t.isReturnStatement(body[0])) {
                     const arg = body[0].argument;
-                    if (t.isMemberExpression(arg) && t.isIdentifier(arg.object) && arg.object.name === 'INTERNAL_STATE' && t.isIdentifier(arg.property)) {
-                        const propName = arg.property.name;
-                        if (stateKeys.includes(propName)) {
-                            stateAccessors[path.node.id.name] = `get_${propName}`;
+                    if (t.isMemberExpression(arg) && t.isIdentifier(arg.object)) {
+                        // Safe check: ensure the object is indeed what we detected as INTERNAL_STATE
+                        const isStateObj = arg.object.name === 'INTERNAL_STATE';
+
+                        if (isStateObj && !arg.computed && t.isIdentifier(arg.property)) {
+                            const propName = arg.property.name;
+                            if (stateKeys.includes(propName)) {
+                                stateAccessors[path.node.id.name] = `get_${propName}`;
+                            }
                         }
                     }
                 }

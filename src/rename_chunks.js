@@ -52,9 +52,23 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                 const propName = path.node.property.name;
                 if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
-                    const newName = Array.isArray(entry)
-                        ? (entry.find(e => e.source === sourceFile)?.name || entry[0].name)
-                        : (typeof entry === 'string' ? entry : (entry ? entry.name : null));
+                    let newName = null;
+
+                    if (Array.isArray(entry)) {
+                        // Priority 1: Current chunk's suggestion
+                        const chunkMatch = entry.find(e => e.source === path.basename(sourceFile));
+                        if (chunkMatch) {
+                            newName = chunkMatch.name;
+                        } else {
+                            // Priority 2: High confidence common name (if any)
+                            // For properties, we are MORE CAUTIOUS. Only rename if it's high confidence.
+                            const highConf = entry.find(e => e.confidence >= 0.9);
+                            if (highConf) newName = highConf.name;
+                        }
+                    } else {
+                        newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                    }
+
                     if (newName) {
                         path.node.property.name = newName;
                     }
@@ -67,9 +81,20 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                 const propName = path.node.key.name;
                 if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
-                    const newName = Array.isArray(entry)
-                        ? (entry.find(e => e.source === sourceFile)?.name || entry[0].name)
-                        : (typeof entry === 'string' ? entry : (entry ? entry.name : null));
+                    let newName = null;
+
+                    if (Array.isArray(entry)) {
+                        const chunkMatch = entry.find(e => e.source === path.basename(sourceFile));
+                        if (chunkMatch) {
+                            newName = chunkMatch.name;
+                        } else {
+                            const highConf = entry.find(e => e.confidence >= 0.9);
+                            if (highConf) newName = highConf.name;
+                        }
+                    } else {
+                        newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                    }
+
                     if (newName) {
                         path.node.key.name = newName;
                     }
@@ -137,8 +162,7 @@ async function main() {
 
             const chunkBase = path.basename(file, '.js');
             const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
-            const outputPath = path.join(deobfuscatedDir, finalName);
-            const renamedCode = renameIdentifiers(code, mapping, file);
+            const renamedCode = renameIdentifiers(code, mapping, chunkBase);
 
             if (renamedCode) {
                 fs.writeFileSync(outputPath, renamedCode);

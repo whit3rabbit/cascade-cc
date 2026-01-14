@@ -102,7 +102,8 @@ async function assemble(version) {
     }
 
     // 3. Write Files
-    if (fs.existsSync(finalDir)) fs.rmSync(finalDir, { recursive: true });
+    // NOTE: Avoid deleting the entire finalDir to preserve manual changes if any
+    if (!fs.existsSync(finalDir)) fs.mkdirSync(finalDir, { recursive: true });
 
     for (const [filePath, chunkList] of fileMap) {
         const fullOutputPath = path.join(finalDir, filePath);
@@ -110,10 +111,17 @@ async function assemble(version) {
 
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-        // Sort chunks by startsWithImport first, then by original startLine
+        // Sort chunks by dependency first, then by startsWithImport, then by original startLine
         chunkList.sort((a, b) => {
+            // 1. Dependency check: If 'a' is a neighbor of 'b', 'a' should come first
+            if (b.outbound && b.outbound.includes(a.name)) return -1;
+            if (a.outbound && a.outbound.includes(b.name)) return 1;
+
+            // 2. Import check
             if (a.startsWithImport && !b.startsWithImport) return -1;
             if (!a.startsWithImport && b.startsWithImport) return 1;
+
+            // 3. Line number fallback
             return a.startLine - b.startLine;
         });
 

@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { callLLM, validateKey, PROVIDER, MODEL } = require('./llm_client');
+const parser = require('@babel/parser');
+const traverse = require('@babel/traverse').default;
 
 const OUTPUT_ROOT = './cascade_graph_analysis';
 
@@ -39,46 +41,61 @@ function getLatestVersion(baseDir) {
 }
 
 function extractIdentifiers(code) {
-    // Enhanced extraction for variables and properties
-    const variables = new Set();
-    const properties = new Set();
-    const keywords = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'async', 'null', 'true', 'false', 'undefined']);
-    const globals = new Set(['console', 'Object', 'Array', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'JSON', 'Math', 'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'globalThis', 'window', 'global', 'process', 'require', 'module', 'exports', 'URL', 'Buffer']);
+    try {
+        const ast = parser.parse(code, {
+            sourceType: 'module',
+            plugins: ['jsx', 'typescript']
+        });
 
-    // Match variables (stand-alone identifiers)
-    const idRegex = /\b[a-zA-Z_$][a-zA-Z0-9_$]*\b/g;
-    let match;
-    while ((match = idRegex.exec(code)) !== null) {
-        const id = match[0];
-        if (!keywords.has(id) && !globals.has(id)) {
-            // IGNORE human-readable names: length > 4 or containing underscores or camelCase
-            const isHumanReadable = id.length > 4 || id.includes('_') || (/[a-z]/.test(id) && /[A-Z]/.test(id));
-            if (!isHumanReadable) {
-                variables.add(id);
+        const variables = new Set();
+        const properties = new Set();
+        const keywords = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'async', 'null', 'true', 'false', 'undefined']);
+        const globals = new Set(['console', 'Object', 'Array', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'JSON', 'Math', 'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'globalThis', 'window', 'global', 'process', 'require', 'module', 'exports', 'URL', 'Buffer']);
+
+        traverse(ast, {
+            Identifier(path) {
+                const id = path.node.name;
+                if (keywords.has(id) || globals.has(id)) return;
+
+                // Check if it's a property of a member expression (not computed)
+                if (path.parentPath.isMemberExpression({ property: path.node, computed: false })) {
+                    if (id.length > 1) properties.add(id);
+                    return;
+                }
+
+                // Check if it's a key in an object property (not computed)
+                if (path.parentPath.isObjectProperty({ key: path.node, computed: false })) {
+                    if (id.length > 1) properties.add(id);
+                    return;
+                }
+
+                // Otherwise, it's a variable/binding
+                // IGNORE human-readable names: length > 4 or containing underscores or camelCase
+                const isHumanReadable = id.length > 4 || id.includes('_') || (/[a-z]/.test(id) && /[A-Z]/.test(id));
+                if (!isHumanReadable) {
+                    variables.add(id);
+                }
             }
-        }
-    }
+        });
 
-    // Match potential property lookups: .prop or prop:
-    const propRegex = /\.([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g;
-    while ((match = propRegex.exec(code)) !== null) {
-        const prop = match[1];
-        if (!keywords.has(prop) && !globals.has(prop) && prop.length > 1) {
-            properties.add(prop);
+        return {
+            variables: Array.from(variables),
+            properties: Array.from(properties)
+        };
+    } catch (err) {
+        console.warn(`[!] Babel extraction failed, falling back to regex: ${err.message}`);
+        // Fallback to regex if parsing fails (e.g. invalid snippet)
+        const variables = new Set();
+        const properties = new Set();
+        const idRegex = /\b[a-zA-Z_$][a-zA-Z0-9_$]*\b/g;
+        let match;
+        while ((match = idRegex.exec(code)) !== null) {
+            const id = match[0];
+            const isHumanReadable = id.length > 4 || id.includes('_') || (/[a-z]/.test(id) && /[A-Z]/.test(id));
+            if (!isHumanReadable) variables.add(id);
         }
+        return { variables: Array.from(variables), properties: [] };
     }
-    const propLitRegex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g;
-    while ((match = propLitRegex.exec(code)) !== null) {
-        const prop = match[1];
-        if (!keywords.has(prop) && !globals.has(prop) && prop.length > 1) {
-            properties.add(prop);
-        }
-    }
-
-    return {
-        variables: Array.from(variables),
-        properties: Array.from(properties)
-    };
 }
 
 function filterKBHints(code, kb, maxHints = 100) {
@@ -132,8 +149,7 @@ function cleanLLMResponse(text) {
     if (endIdx !== -1 && endIdx > startIdx) {
         cleaned = cleaned.substring(startIdx, endIdx + 1);
     } else {
-        // Potentially truncated JSON (missing closing braces)
-        // We could try to append } but it's risky. Let's return the fragment starting with {
+        // Potentially truncated JSON
         cleaned = cleaned.substring(startIdx);
     }
 
@@ -300,29 +316,46 @@ async function run() {
                 continue;
             }
 
-            const filteredMapping = { variables: {}, properties: {} };
-            let varMatches = 0;
-            let propMatches = 0;
+            // --- CONTEXT INJECTION (GRAPH-INFORMED) ---
+            const neighborChunks = [...new Set([...chunkMeta.outbound, ...graphData.filter(c => c.outbound.includes(chunkMeta.name)).map(c => c.name)])];
 
+            const neighborMapping = { variables: {}, properties: {} };
+            for (const neighborId of neighborChunks) {
+                const neighborFileName = graphData.find(c => c.name === neighborId)?.file;
+                if (!neighborFileName) continue;
+
+                // Collect variables from globalMapping that originated from this neighbor
+                for (const [id, entry] of Object.entries(globalMapping.variables)) {
+                    const match = Array.isArray(entry) ? entry.find(e => e.source === path.basename(neighborFileName)) : (entry.source === path.basename(neighborFileName) ? entry : null);
+                    if (match) neighborMapping.variables[id] = match.name;
+                }
+                for (const [id, entry] of Object.entries(globalMapping.properties)) {
+                    const match = Array.isArray(entry) ? entry.find(e => e.source === path.basename(neighborFileName)) : (entry.source === path.basename(neighborFileName) ? entry : null);
+                    if (match) neighborMapping.properties[id] = match.name;
+                }
+            }
+
+            const filteredMapping = {
+                variables: { ...neighborMapping.variables },
+                properties: { ...neighborMapping.properties }
+            };
+
+            // Prioritize current chunk's IDs that are already mapped
             for (const key of variables) {
                 if (globalMapping.variables[key]) {
-                    filteredMapping.variables[key] = globalMapping.variables[key].name;
-                    varMatches++;
+                    const entry = globalMapping.variables[key];
+                    filteredMapping.variables[key] = Array.isArray(entry) ? entry[0].name : entry.name;
                 }
             }
             for (const key of properties) {
                 if (globalMapping.properties[key]) {
-                    filteredMapping.properties[key] = globalMapping.properties[key].name;
-                    propMatches++;
+                    const entry = globalMapping.properties[key];
+                    filteredMapping.properties[key] = Array.isArray(entry) ? entry[0].name : entry.name;
                 }
             }
 
-            // --- CONTEXT THINNING ---
-            // If we have too many existing mappings, the prompt becomes massive.
-            // We prioritize mappings that are actually present in this chunk (done above),
-            // but we might still want to limit the total number if common properties/variables explode.
-            const MAX_INJECTED_VARS = 100;
-            const MAX_INJECTED_PROPS = 100;
+            const MAX_INJECTED_VARS = 150;
+            const MAX_INJECTED_PROPS = 150;
 
             const finalFilteredMapping = {
                 variables: Object.fromEntries(Object.entries(filteredMapping.variables).slice(0, MAX_INJECTED_VARS)),
@@ -343,7 +376,7 @@ async function run() {
             }).join(', ');
 
             console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Naming Pass for ${file} (${chunkMeta.centrality.toFixed(4)} centrality)...`);
-            console.log(`    - Context: ${varMatches} variables, ${propMatches} properties injected from mapping.`);
+            console.log(`    - Context: ${varCount} variables, ${propCount} properties injected from mapping (including neighbors).`);
             console.log(`    - Discovery: ${unknownVariables.length} variables and ${unknownProperties.length} properties need naming.`);
 
             const prompt = `
@@ -367,7 +400,7 @@ UNKNOWN IDENTIFIERS TO MAP:
 
 EXISTING MAPPINGS (Subset for context):
 ${JSON.stringify(finalFilteredMapping, null, 2)}
-${(varMatches > MAX_INJECTED_VARS || propMatches > MAX_INJECTED_PROPS) ? `\n(Note: ${varMatches} variables and ${propMatches} properties matched, showing only top ${MAX_INJECTED_VARS}/${MAX_INJECTED_PROPS})` : ''}
+${(varCount > MAX_INJECTED_VARS || propCount > MAX_INJECTED_PROPS) ? `\n(Note: ${varCount} variables and ${propCount} properties matched, showing only top ${MAX_INJECTED_VARS}/${MAX_INJECTED_PROPS})` : ''}
 
 REFERENCE HINTS FROM KNOWLEDGE BASE:
 ${filterKBHints(code, KB)}
@@ -422,19 +455,25 @@ RESPONSE FORMAT (JSON ONLY):
                     try {
                         responseData = JSON.parse(cleanedJson);
                     } catch (parseErr) {
-                        // Try a basic truncation fix: count open vs closed braces
-                        const openBraces = (cleanedJson.match(/\{/g) || []).length;
-                        const closeBraces = (cleanedJson.match(/\}/g) || []).length;
-                        if (openBraces > closeBraces) {
-                            const fixedJson = cleanedJson + '}'.repeat(openBraces - closeBraces);
-                            try {
-                                responseData = JSON.parse(fixedJson);
-                                console.log(`    [*] Attempted truncation fix was successful.`);
-                            } catch (e) {
-                                throw new Error(`JSON parse error: ${parseErr.message} at position ${parseErr.at || 'unknown'}`);
+                        try {
+                            const { jsonrepair } = require('jsonrepair');
+                            responseData = JSON.parse(jsonrepair(cleanedJson));
+                            console.log(`    [*] JSON repaired successfully.`);
+                        } catch (e) {
+                            // Fallback to manual fix if json-repair isn't available or fails
+                            const openBraces = (cleanedJson.match(/\{/g) || []).length;
+                            const closeBraces = (cleanedJson.match(/\}/g) || []).length;
+                            if (openBraces > closeBraces) {
+                                const fixedJson = cleanedJson + '}'.repeat(openBraces - closeBraces);
+                                try {
+                                    responseData = JSON.parse(fixedJson);
+                                    console.log(`    [*] Attempted manual truncation fix was successful.`);
+                                } catch (e2) {
+                                    throw new Error(`JSON parse error: ${parseErr.message}`);
+                                }
+                            } else {
+                                throw new Error(`JSON parse error: ${parseErr.message}`);
                             }
-                        } else {
-                            throw new Error(`JSON parse error: ${parseErr.message}`);
                         }
                     }
 
@@ -444,7 +483,7 @@ RESPONSE FORMAT (JSON ONLY):
                     // Update variables
                     if (newMappings.variables) {
                         for (const [key, mapping] of Object.entries(newMappings.variables)) {
-                            const newMapping = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: file } : { ...mapping, source: file };
+                            const newMapping = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: chunkMeta.name } : { ...mapping, source: chunkMeta.name };
                             const existing = globalMapping.variables[key];
 
                             if (!existing) {
@@ -473,7 +512,7 @@ RESPONSE FORMAT (JSON ONLY):
                     // Update properties
                     if (newMappings.properties) {
                         for (const [key, mapping] of Object.entries(newMappings.properties)) {
-                            const newMapping = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: file } : { ...mapping, source: file };
+                            const newMapping = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: chunkMeta.name } : { ...mapping, source: chunkMeta.name };
                             const existing = globalMapping.properties[key];
 
                             if (!existing) {

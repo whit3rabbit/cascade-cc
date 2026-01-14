@@ -2,6 +2,8 @@
 
 Pre-processor for CASCADE-style analysis of Claude Code bundles.
 
+"Relational Identity" system that uses graph theory (Markov centrality) to prioritize LLM tokens
+
 ## Quickstart
 
 ```bash

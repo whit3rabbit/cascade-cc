@@ -36,19 +36,21 @@ async function callLLM(prompt, retryCount = 0) {
     try {
         if (PROVIDER === 'gemini') {
             const model = geminiClient.getGenerativeModel({ model: MODEL });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
 
-            // Timeout wrapper for Gemini
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error(`[!] Gemini request timed out after ${LLM_TIMEOUT_MS / 1000}s`)), LLM_TIMEOUT_MS);
-            });
-
-            const result = await Promise.race([
-                model.generateContent(prompt),
-                timeoutPromise
-            ]);
-
-            const response = await result.response;
-            return response.text();
+            try {
+                const result = await model.generateContent({
+                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                const response = await result.response;
+                return response.text();
+            } catch (err) {
+                clearTimeout(timeoutId);
+                throw err;
+            }
         } else {
             console.log(`[*] ${PROVIDER} Request: Sending prompt to ${MODEL}...`);
             const controller = new AbortController();
