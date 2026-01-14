@@ -1,12 +1,36 @@
 const fs = require('fs');
 const path = require('path');
+const semver = require('semver');
+
+function getLatestVersion(outputRoot) {
+    if (!fs.existsSync(outputRoot)) return null;
+    const versions = fs.readdirSync(outputRoot).filter(f => {
+        const fullPath = path.join(outputRoot, f);
+        return fs.statSync(fullPath).isDirectory() && semver.valid(f);
+    });
+
+    if (versions.length === 0) return null;
+
+    // Sort versions using semver to get the actual latest
+    return versions.sort(semver.rcompare)[0];
+}
 
 async function assemble(version) {
     const outputRoot = './cascade_graph_analysis';
+
+    if (!version) {
+        version = getLatestVersion(outputRoot);
+        if (!version) {
+            console.error(`[!] No versions found in ${outputRoot}`);
+            return;
+        }
+        console.log(`[*] No version specified. Defaulting to latest: ${version}`);
+    }
+
     const versionPath = path.join(outputRoot, version);
     const metadataPath = path.join(versionPath, 'metadata', 'graph_map.json');
     const chunksDir = path.join(versionPath, 'deobfuscated_chunks');
-    const finalDir = path.join(versionPath, 'final_codebase');
+    const finalDir = path.join(versionPath, 'assemble');
 
     if (!fs.existsSync(metadataPath)) {
         console.error(`[!] Metadata not found: ${metadataPath}`);
@@ -14,10 +38,15 @@ async function assemble(version) {
     }
 
     const graphData = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
-    const chunks = graphData.chunks;
+    const chunks = Array.isArray(graphData) ? graphData : graphData.chunks;
+
+    if (!chunks) {
+        console.error(`[!] No chunks found in metadata: ${metadataPath}`);
+        return;
+    }
 
     // 1. Filter for "Core" chunks (Skip vendor)
-    const coreChunks = chunks.filter(c => c.category === 'family' || c.category === 'priority');
+    const coreChunks = chunks.filter(c => c.category === 'family' || c.category === 'priority' || c.category === 'founder');
 
     console.log(`[*] Assembling ${coreChunks.length} core chunks into a structured codebase...`);
 
@@ -77,8 +106,5 @@ async function assemble(version) {
 }
 
 const version = process.argv[2];
-if (!version) {
-    console.log("Usage: node src/assemble_final.js <version>");
-} else {
-    assemble(version);
-}
+assemble(version);
+
