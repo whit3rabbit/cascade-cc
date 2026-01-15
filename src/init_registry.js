@@ -17,7 +17,10 @@ function initRegistry(version) {
 
     // We want to create a registry that maps logic vectors (from logicDb)
     // to resolved names (from mapping).
-    const registry = {};
+    const registryPath = path.join(baseDir, 'logic_registry.json');
+    const registry = fs.existsSync(registryPath)
+        ? JSON.parse(fs.readFileSync(registryPath, 'utf8'))
+        : {};
 
     for (const chunk of logicDb) {
         // Find deobfuscated names associated with this chunk
@@ -50,7 +53,6 @@ function initRegistry(version) {
         }
     }
 
-    const registryPath = path.join(baseDir, 'logic_registry.json');
     fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
     console.log(`[+] Initialized Logic Registry at ${registryPath} with ${Object.keys(registry).length} entries.`);
 }

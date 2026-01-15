@@ -72,7 +72,8 @@ switch (command) {
     case 'visualize':
     case 'clean':
     case 'deobfuscate':
-    case 'assemble': {
+    case 'assemble':
+    case 'anchor': {
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',
             shell: true
@@ -83,11 +84,28 @@ switch (command) {
         break;
     }
 
-    case 'anchor': {
-        console.log(`[*] Initiating Anchoring...`);
-        const anchorArgs = process.argv.slice(3).join(' ');
-        execSync(`node src/anchor_logic.js ${anchorArgs}`, { stdio: 'inherit' });
-        process.exit(0); // Exit after execSync
+    case 'bootstrap': {
+        console.log(`[*] Initiating Library Bootstrapping...`);
+        const { spawnSync } = require('child_process');
+
+        spawnSync('node', ['src/bootstrap_libs.js', ...args], { stdio: 'inherit' });
+
+        console.log(`[*] Vectorizing Bootstrap Data...`);
+        const pythonEnv = fs.existsSync('./ml/venv/bin/python3') ? './ml/venv/bin/python3' : 'python3';
+        const bootstrapDir = './cascade_graph_analysis/bootstrap';
+
+        if (fs.existsSync(bootstrapDir)) {
+            const libs = fs.readdirSync(bootstrapDir).filter(f => fs.statSync(path.join(bootstrapDir, f)).isDirectory());
+            for (const lib of libs) {
+                console.log(`    [+] Vectorizing ${lib}...`);
+                spawnSync(pythonEnv, ['ml/vectorize.py', path.join(bootstrapDir, lib)], { stdio: 'inherit' });
+            }
+        }
+
+        console.log(`[*] Updating Logic Registry...`);
+        spawnSync('node', ['src/update_registry_from_bootstrap.js'], { stdio: 'inherit' });
+
+        process.exit(0);
         break;
     }
 
@@ -96,26 +114,17 @@ switch (command) {
         const pythonEnv = fs.existsSync('./ml/venv/bin/python3') ? './ml/venv/bin/python3' : 'python3';
 
         console.log(`[*] Initiating Model Training on Gold Standards...`);
-        try {
-            // Pass the bootstrap directory to the python script
-            execSync(`${pythonEnv} ml/train.py ${bootstrapDir}`, { stdio: 'inherit' });
-            process.exit(0);
-        } catch (e) {
-            console.error(`[!] Training failed: ${e.message}`);
-            process.exit(1);
-        }
-        break;
-    }
-
-    case 'bootstrap': {
-        console.log(`[*] Initiating Library Bootstrapping...`);
-        execSync(`node src/bootstrap_libs.js`, { stdio: 'inherit' });
-        process.exit(0);
+        const child = spawn(pythonEnv, ['ml/train.py', bootstrapDir], {
+            stdio: 'inherit',
+            shell: true
+        });
+        child.on('exit', (code) => {
+            process.exit(code);
+        });
         break;
     }
 
     default: {
-        // Fallback for any commands not explicitly handled in the switch
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',
             shell: true
@@ -142,6 +151,3 @@ if (command === 'visualize') {
     }, 2000);
 }
 
-child.on('exit', (code) => {
-    process.exit(code);
-});

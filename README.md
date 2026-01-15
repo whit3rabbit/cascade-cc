@@ -30,7 +30,9 @@ pip install -r requirements.txt
 
 ## 2. Getting Started (Cold Start Workflow)
 
-If you have just cloned this repo, you need to build the "Brain" first.
+If you have just cloned this repo, you can skip and use the pre-trained model in `ml/model.pth`. 
+
+Here are instructions for building your own model if you don't want to use the pre-trained model.
 
 ### Step 1: Bootstrap Library DNA
 
@@ -52,17 +54,21 @@ npm run train
 
 ### Step 3: Analyze & Anchor Claude
 
-Now, analyze a real Claude bundle. The `anchor` step will automatically identify all library code using structural similarity, saving you thousands of LLM tokens.
+Now, analyze a real Claude bundle. This is a two-part process: **Structural Analysis** (JavaScript) followed by **Neural Anchoring** (Python).
 
 ```bash
-# 1. Analyze
-npm run analyze -- claude-analysis/2.1.6/cli.js --version 2.1.6
+# 1. Analyze (JavaScript Phase)
+# Fetches, de-proxies, and chunks the latest Claude version.
+npm run analyze
 
-# 2. Anchor (NN identifies libraries automatically)
-npm run anchor -- 2.1.6
+# 2. Anchor (Python/NN Phase)
+# Runs the Neural Network (ml/vectorize.py) to identify libraries using the "Brain".
+# (Replace '2.1.7' with the version reported by the analyze step)
+npm run anchor -- 2.1.7
 
-# 3. Deobfuscate (LLM only processes the "new" Claude logic)
-npm run deobfuscate -- 2.1.6
+# 3. Deobfuscate (LLM Phase)
+# Processes the proprietary "Founder" logic using the LLM.
+npm run deobfuscate -- 2.1.7 --skip-vendor
 ```
 
 ---
@@ -135,9 +141,9 @@ In `src/anchor_logic.js`, we use similarity thresholds and symbol alignment to e
 
 | Similarity | Result | Action |
 | :--- | :--- | :--- |
-| **> 0.98** | High Confidence | Auto-rename everything |
-| **0.90 - 0.97** | Version Drift | Flag for LLM/Partial anchor |
-| **< 0.80** | New Logic | Send to LLM |
+| **> 0.95** | High Confidence | Auto-rename everything (Relaxed from 0.98 for Cold Start) |
+| **0.90 - 0.94** | Version Drift | Flag for LLM/Partial anchor |
+| **< 0.85** | New Logic | Send to LLM |
 
 ### The "Cold Start" Advantage
 

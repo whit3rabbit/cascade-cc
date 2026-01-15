@@ -38,10 +38,17 @@ function ensureTargetExists() {
         if (versionIdx !== -1 && process.argv[versionIdx + 1]) {
             version = process.argv[versionIdx + 1];
         } else {
-            // Try to infer version from path
-            const match = targetFile.match(/claude-analysis\/([^/]+)\/cli\.js/);
+            // Try to infer version from path: claude-analysis/<version>/cli.js or similar
+            const match = targetFile.match(/claude-analysis\/([^/]+)\/cli\.js/) || targetFile.match(/([0-9]+\.[0-9]+\.[0-9]+)/);
             if (match) version = match[1];
         }
+
+        // If still unknown, use a hash of the file path to avoid collisions
+        if (version === 'unknown') {
+            const crypto = require('crypto');
+            version = 'custom-' + crypto.createHash('md5').update(targetFile).digest('hex').slice(0, 8);
+        }
+
         return { targetFile, version };
     }
 
@@ -489,8 +496,9 @@ class CascadeGraph {
 
         statements.forEach((node) => {
             const nodeCodeApprox = code.slice(node.start, node.end).toLowerCase();
-            // Performance Optimization: Rough token estimate (length / 4)
-            const nodeTokensApprox = nodeCodeApprox.length / 4;
+            // Performance Optimization: Rough token estimate (length / 2.5)
+            // Obfuscated code has many short identifiers, making length/4 too optimistic.
+            const nodeTokensApprox = nodeCodeApprox.length / 2.5;
             const hasSignal = SIGNAL_KEYWORDS.some(kw => nodeCodeApprox.includes(kw));
             const nodeCategory = hasSignal ? 'priority' : 'vendor';
 
@@ -573,6 +581,8 @@ class CascadeGraph {
         const teleportProbability = (1 - dampingFactor) / size;
         let scores = new Array(size).fill(1 / size);
 
+        const nameToIndex = new Map(names.map((name, idx) => [name, idx]));
+
         for (let iter = 0; iter < 100; iter++) {
             let nextScores = new Array(size).fill(teleportProbability);
             let maxDiff = 0;
@@ -584,8 +594,8 @@ class CascadeGraph {
                 if (outDegree > 0) {
                     const contribution = (scores[i] * dampingFactor) / outDegree;
                     node.neighbors.forEach(neighborName => {
-                        const neighborIdx = names.indexOf(neighborName);
-                        if (neighborIdx !== -1) nextScores[neighborIdx] += contribution;
+                        const neighborIdx = nameToIndex.get(neighborName);
+                        if (neighborIdx !== undefined && neighborIdx !== -1) nextScores[neighborIdx] += contribution;
                     });
                 } else {
                     // Sink node: redistribute its score equally
@@ -724,9 +734,9 @@ class CascadeGraph {
             const fileName = node.displayName ? `${name}_${node.displayName}.js` : `${name}.js`;
             fs.writeFileSync(path.join(chunksDir, fileName), node.code);
 
-            const display = node.displayName || node.name;
             const metaEntry = {
-                name: node.displayName ? `${name} (${node.displayName})` : node.name,
+                name: name, // Keep raw ID (chunk001) as the primary key
+                displayName: node.displayName || null, // Store the pretty name separately
                 file: `chunks/${fileName}`,
                 tokens: node.tokens,
                 startLine: node.startLine,

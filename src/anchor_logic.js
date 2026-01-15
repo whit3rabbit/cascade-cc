@@ -9,6 +9,8 @@ function calculateSimilarity(vecA, vecB) {
 
 /**
  * Aligns symbols between two matched entities and updates the target mapping.
+ * NOTE: This currently uses index-based alignment (positional), which is 
+ * EXPERIMENTAL and can be UNRELIABLE if minifiers reorder code.
  */
 function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targetSymbols, refSymbols, sourceLabel) {
     let alignedCount = 0;
@@ -17,17 +19,23 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
         const targetMangled = targetSymbols[i];
         const refMangled = refSymbols[i];
 
-        // Check registry or reference mapping for resolved name
-        let resolved = resolvedVariables[refMangled] || resolvedProperties[refMangled];
+        const resolvedVar = resolvedVariables[refMangled];
+        const resolvedProp = resolvedProperties[refMangled];
 
-        if (resolved) {
-            // Handle array of possibilities if applicable (though usually it's one)
-            const isProperty = !!resolvedProperties[refMangled];
-            const targetMap = isProperty ? targetMapping.properties : targetMapping.variables;
-
-            if (!targetMap[targetMangled]) {
-                targetMap[targetMangled] = {
-                    name: typeof resolved === 'string' ? resolved : resolved.name,
+        if (resolvedVar) {
+            if (!targetMapping.variables[targetMangled]) {
+                targetMapping.variables[targetMangled] = {
+                    name: typeof resolvedVar === 'string' ? resolvedVar : resolvedVar.name,
+                    confidence: 0.95,
+                    source: `anchored_from_${sourceLabel}`
+                };
+                alignedCount++;
+            }
+        }
+        if (resolvedProp) {
+            if (!targetMapping.properties[targetMangled]) {
+                targetMapping.properties[targetMangled] = {
+                    name: typeof resolvedProp === 'string' ? resolvedProp : resolvedProp.name,
                     confidence: 0.95,
                     source: `anchored_from_${sourceLabel}`
                 };
@@ -67,7 +75,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         const targetLogicDb = JSON.parse(fs.readFileSync(path.join(targetPath, 'metadata', 'logic_db.json'), 'utf8'));
 
         const targetMappingPath = path.join(targetPath, 'metadata', 'mapping.json');
-        let targetMapping = { version: "1.2", variables: {}, properties: {}, processed_chunks: [] };
+        let targetMapping = { version: "1.2", variables: {}, properties: {}, processed_chunks: [], metadata: { total_renamed: 0, last_updated: new Date().toISOString() } };
         if (fs.existsSync(targetMappingPath)) {
             targetMapping = JSON.parse(fs.readFileSync(targetMappingPath, 'utf8'));
         }
@@ -84,8 +92,12 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 }
             }
 
-            if (bestMatch.similarity > 0.98) {
-                console.log(`    [ANCHOR/REGISTRY] Match: ${targetChunk.name} -> ${bestMatch.label} (${(bestMatch.similarity * 100).toFixed(2)}%)`);
+            if (bestMatch.similarity > 0.95) { // Lowered from 0.98 for cold start reliability
+                const isNewChunk = !targetMapping.processed_chunks.includes(targetChunk.name);
+                const logPrefix = isNewChunk ? '[ANCHOR/REGISTRY] NEW MATCH' : '[ANCHOR/REGISTRY] EXISTING';
+
+                console.log(`    ${logPrefix}: ${targetChunk.name} -> ${bestMatch.label} (${(bestMatch.similarity * 100).toFixed(2)}%)`);
+
                 const namesAdded = alignSymbols(
                     targetMapping,
                     bestMatch.ref.resolved_variables,
@@ -94,7 +106,8 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     bestMatch.ref.symbols,
                     bestMatch.label
                 );
-                if (!targetMapping.processed_chunks.includes(targetChunk.name)) {
+
+                if (isNewChunk) {
                     targetMapping.processed_chunks.push(targetChunk.name);
                     matchedCount++;
                     totalNamesAnchored += namesAdded;
@@ -102,7 +115,10 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
             }
         }
         fs.writeFileSync(targetMappingPath, JSON.stringify(targetMapping, null, 2));
-        console.log(`[+] Registry Anchoring complete. Matched ${matchedCount} chunks, aligned ${totalNamesAnchored} symbols.`);
+        console.log(`[+] Registry Anchoring complete.`);
+        console.log(`    - Total chunks in mapping: ${targetMapping.processed_chunks.length}`);
+        console.log(`    - New chunks matched this run: ${matchedCount}`);
+        console.log(`    - New symbols aligned this run: ${totalNamesAnchored}`);
 
     } else {
         // Mode: Version-to-version anchoring (Legacy/Direct)
@@ -127,7 +143,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         const referenceMapping = JSON.parse(fs.readFileSync(referenceMappingPath, 'utf8'));
 
         const targetMappingPath = path.join(targetPath, 'metadata', 'mapping.json');
-        let targetMapping = { version: "1.2", variables: {}, properties: {}, processed_chunks: [] };
+        let targetMapping = { version: "1.2", variables: {}, properties: {}, processed_chunks: [], metadata: { total_renamed: 0, last_updated: new Date().toISOString() } };
         if (fs.existsSync(targetMappingPath)) {
             targetMapping = JSON.parse(fs.readFileSync(targetMappingPath, 'utf8'));
         }
@@ -144,7 +160,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 }
             }
 
-            if (bestMatch.similarity > 0.98) {
+            if (bestMatch.similarity > 0.95) { // Lowered from 0.98 for cold start reliability
                 console.log(`    [ANCHOR/DIRECT] Match: ${targetChunk.name} -> ${bestMatch.ref.name} (${(bestMatch.similarity * 100).toFixed(2)}%)`);
 
                 // For direct anchoring, we need to extract the relevant mappings from refMapping for THAT chunk

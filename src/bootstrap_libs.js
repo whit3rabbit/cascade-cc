@@ -82,9 +82,10 @@ async function bootstrap() {
 
             // 3. Bundle with ESBUILD
             const bundlePath = path.join(libWorkDir, 'bundled.js');
-            console.log(`  [+] Bundling with esbuild (minify: true, format: esm)...`);
+            console.log(`  [+] Bundling with esbuild (minify-whitespace, minify-syntax)...`);
             // Note: We include --external for binary/heavy modules that shouldn't be flattened
-            execSync(`npx esbuild "${entryFile}" --bundle --minify --platform=node --format=esm --target=node18 --outfile="${bundlePath}" --external:sharp --external:tree-sitter --external:tree-sitter-typescript --external:react-devtools-core --external:fsevents`, { stdio: 'inherit' });
+            // We use --minify-whitespace --minify-syntax to KEEP original identifier names for anchoring
+            execSync(`npx esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" --external:sharp --external:tree-sitter --external:tree-sitter-typescript --external:react-devtools-core --external:fsevents`, { stdio: 'inherit' });
 
             // 4. Run Analysis
             console.log(`  [+] Fingerprinting structural ASTs...`);

@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .constants import NODE_TYPES, TYPE_TO_ID, VOCAB_SIZE
+
 class CodeStructureEncoder(nn.Module):
-    def __init__(self, vocab_size, embedding_dim=64, hidden_dim=128):
+    def __init__(self, vocab_size=VOCAB_SIZE, embedding_dim=64, hidden_dim=128):
         super(CodeStructureEncoder, self).__init__()
         # vocab_size is the number of unique AST Node types
         self.nodes_embedding = nn.Embedding(vocab_size, embedding_dim)
@@ -30,29 +32,9 @@ class CodeStructureEncoder(nn.Module):
 class ASTPreprocessor:
     def __init__(self):
         # Common Babel node types. This list can be expanded.
-        self.node_types = [
-            "UNKNOWN", "File", "Program", "FunctionDeclaration", "FunctionExpression", 
-            "ArrowFunctionExpression", "VariableDeclaration", "VariableDeclarator",
-            "Identifier", "StringLiteral", "NumericLiteral", "BooleanLiteral",
-            "NullLiteral", "RegExpLiteral", "BinaryExpression", "UnaryExpression",
-            "UpdateExpression", "LogicalExpression", "AssignmentExpression",
-            "MemberExpression", "OptionalMemberExpression", "CallExpression",
-            "OptionalCallExpression", "NewExpression", "ArrayExpression",
-            "ObjectExpression", "ObjectProperty", "ObjectMethod", "BlockStatement",
-            "ExpressionStatement", "IfStatement", "ForStatement", "WhileStatement",
-            "DoWhileStatement", "ForInStatement", "ForOfStatement", "ReturnStatement",
-            "ThrowStatement", "TryStatement", "CatchClause", "SwitchStatement",
-            "SwitchCase", "BreakStatement", "ContinueStatement", "EmptyStatement",
-            "DebuggerStatement", "WithStatement", "LabeledStatement", "ClassDeclaration",
-            "ClassBody", "ClassMethod", "ClassProperty", "ImportDeclaration",
-            "ImportSpecifier", "ImportDefaultSpecifier", "ImportNamespaceSpecifier",
-            "ExportNamedDeclaration", "ExportDefaultDeclaration", "ExportAllDeclaration",
-            "YieldExpression", "AwaitExpression", "TemplateLiteral", "TemplateElement",
-            "SpreadElement", "RestElement", "SequenceExpression", "AssignmentPattern",
-            "ArrayPattern", "ObjectPattern", "V8IntrinsicIdentifier"
-        ]
-        self.type_to_id = {t: i for i, t in enumerate(self.node_types)}
-        self.vocab_size = len(self.node_types)
+        self.node_types = NODE_TYPES
+        self.type_to_id = TYPE_TO_ID
+        self.vocab_size = VOCAB_SIZE
 
     def get_type_id(self, type_name):
         return self.type_to_id.get(type_name, self.type_to_id["UNKNOWN"])

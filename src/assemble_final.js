@@ -111,23 +111,65 @@ async function assemble(version) {
 
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-        // Sort chunks by dependency first, then by startsWithImport, then by original startLine
-        chunkList.sort((a, b) => {
-            // 1. Dependency check: If 'a' is a neighbor of 'b', 'a' should come first
-            if (b.outbound && b.outbound.includes(a.name)) return -1;
-            if (a.outbound && a.outbound.includes(b.name)) return 1;
+        // Sort chunks using a Directed Acyclic Graph (DAG) topological sort
+        const { Graph } = require('graphology');
+        const { topologicalSort } = require('graphology-dag');
 
-            // 2. Import check
-            if (a.startsWithImport && !b.startsWithImport) return -1;
-            if (!a.startsWithImport && b.startsWithImport) return 1;
+        const graph = new Graph({ directed: true });
+        chunkList.forEach(c => graph.addNode(c.name));
 
-            // 3. Line number fallback
-            return a.startLine - b.startLine;
+        chunkList.forEach(chunk => {
+            if (chunk.outbound) {
+                chunk.outbound.forEach(targetId => {
+                    if (graph.hasNode(targetId)) {
+                        try {
+                            graph.addDirectedEdge(chunk.name, targetId);
+                        } catch (e) {
+                            // Circular dependency or existing edge, skip
+                        }
+                    }
+                });
+            }
         });
+
+        let sortedNames;
+        try {
+            // graphology's topologicalSort returns nodes in order such that for every edge u -> v, u comes before v.
+            // In our case, if 'a' depends on 'b' (a -> b), we might want 'b' first for imports,
+            // but for logical flow, we usually want 'a' before 'b' if 'a' is the caller.
+            // The original logic was: `if (b.outbound && b.outbound.includes(a.name)) return -1;`
+            // This means if 'b' points to 'a', 'a' comes first.
+            // So we want the REVERSE of a standard topological sort if we consider outbound as "calls".
+            // Actually, for imports/dependencies, if B is a neighbor of A (A -> B), B should likely come after A OR before A depending on context.
+            // Standard topological sort: for edge u -> v, u comes before v.
+            // If A -> B (A depends on B), then A comes before B.
+            // This is usually what we want for logical flow (High level -> Low level).
+            // Reverse standard topological sort: for edge u -> v (u depends on v), v should come before u.
+            // Actually, in our graph, edges are Chunk -> Target (Dependent -> Dependency).
+            // topologicalSort(graph) returns [Dependent, Dependency].
+            // We want [Dependency, Dependent].
+            sortedNames = topologicalSort(graph).reverse();
+        } catch (e) {
+            // If there's a cycle, fall back to the original heuristic
+            console.warn(`    [!] Cycle detected in ${filePath}, falling back to heuristic sort.`);
+            sortedNames = chunkList.sort((a, b) => {
+                if (b.outbound && b.outbound.includes(a.name)) return -1;
+                if (a.outbound && a.outbound.includes(b.name)) return 1;
+                if (a.startsWithImport && !b.startsWithImport) return -1;
+                if (!a.startsWithImport && b.startsWithImport) return 1;
+                return a.startLine - b.startLine;
+            }).map(c => c.name);
+        }
+
+        const sortedChunks = sortedNames.map(name => chunkList.find(c => c.name === name)).filter(Boolean);
+
+        // Secondary stable sort for non-dependent chunks (e.g. imports first)
+        // Note: sortedChunks already respects DAG order. We only want to bubble up imports if it doesn't break DAG.
+        // For simplicity, we'll stick to the DAG sort primarily.
 
         let mergedCode = `/**\n * File: ${filePath}\n * Role: ${chunkList[0].role}\n * Aggregated from ${chunkList.length} chunks\n */\n\n`;
 
-        for (const chunkMeta of chunkList) {
+        for (const chunkMeta of sortedChunks) {
             const chunkFilePath = getDeobfuscatedChunkPath(chunksDir, chunkMeta);
 
             if (chunkFilePath) {

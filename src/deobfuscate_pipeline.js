@@ -52,10 +52,12 @@ function extractIdentifiers(code) {
         const keywords = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'async', 'null', 'true', 'false', 'undefined']);
         const globals = new Set(['console', 'Object', 'Array', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'JSON', 'Math', 'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'globalThis', 'window', 'global', 'process', 'require', 'module', 'exports', 'URL', 'Buffer']);
 
+        const builtInProps = new Set(['toString', 'constructor', 'hasOwnProperty', 'valueOf', 'propertyIsEnumerable', 'toLocaleString', 'isPrototypeOf', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__', '__proto__']);
+
         traverse(ast, {
             Identifier(path) {
                 const id = path.node.name;
-                if (keywords.has(id) || globals.has(id)) return;
+                if (keywords.has(id) || globals.has(id) || builtInProps.has(id)) return;
 
                 // Check if it's a property of a member expression (not computed)
                 if (path.parentPath.isMemberExpression({ property: path.node, computed: false })) {
@@ -210,7 +212,34 @@ async function run() {
             if (raw.version && raw.variables) {
                 globalMapping = raw;
                 if (!globalMapping.processed_chunks) globalMapping.processed_chunks = [];
+                if (!globalMapping.metadata) {
+                    globalMapping.metadata = {
+                        total_renamed: 0,
+                        last_updated: new Date().toISOString()
+                    };
+                }
                 console.log(`[*] Loaded structured mapping v${globalMapping.version} with ${Object.keys(globalMapping.variables).length} variables, ${Object.keys(globalMapping.properties).length} properties, and ${globalMapping.processed_chunks.length} processed chunks.`);
+
+                // Cleanup nulls from botched previous runs
+                let cleanedCount = 0;
+                const cleanupNulls = (obj) => {
+                    for (const key in obj) {
+                        if (obj[key] === null) {
+                            delete obj[key];
+                            cleanedCount++;
+                        } else if (Array.isArray(obj[key])) {
+                            const originalLen = obj[key].length;
+                            obj[key] = obj[key].filter(e => e !== null);
+                            cleanedCount += (originalLen - obj[key].length);
+                            if (obj[key].length === 0) delete obj[key];
+                        }
+                    }
+                };
+                cleanupNulls(globalMapping.variables);
+                cleanupNulls(globalMapping.properties);
+                if (cleanedCount > 0) {
+                    console.log(`[*] Cleaned up ${cleanedCount} null entries from mapping.`);
+                }
             } else {
                 // Migration from flat format
                 console.log(`[*] Migrating old flat mapping to structure format...`);
@@ -303,6 +332,19 @@ async function run() {
             const code = fs.readFileSync(chunkPath, 'utf8');
             const { variables, properties } = extractIdentifiers(code);
 
+            // NEW: Check if the NN already provided high-confidence names for most things
+            const anchoredCount = variables.filter(v => globalMapping.variables[v]?.source?.startsWith('anchored')).length;
+            const anchorCoverage = variables.length > 0 ? anchoredCount / variables.length : 0;
+
+            if (anchorCoverage > 0.8) {
+                console.log(`[*] Stage 1 [${i + 1}/${sortedChunks.length}]: Skip ${file} (${(anchorCoverage * 100).toFixed(0)}% Anchored by NN).`);
+                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
+                    globalMapping.processed_chunks.push(chunkMeta.name);
+                    fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
+                }
+                continue;
+            }
+
             // Candidate Pool: Determine which identifiers REALLY need naming
             const unknownVariables = variables.filter(v => !globalMapping.variables[v]);
             const unknownProperties = properties.filter(p => !globalMapping.properties[p]);
@@ -326,11 +368,13 @@ async function run() {
 
                 // Collect variables from globalMapping that originated from this neighbor
                 for (const [id, entry] of Object.entries(globalMapping.variables)) {
-                    const match = Array.isArray(entry) ? entry.find(e => e.source === path.basename(neighborFileName)) : (entry.source === path.basename(neighborFileName) ? entry : null);
+                    if (!entry) continue;
+                    const match = Array.isArray(entry) ? entry.find(e => e && e.source === path.basename(neighborFileName)) : (entry.source === path.basename(neighborFileName) ? entry : null);
                     if (match) neighborMapping.variables[id] = match.name;
                 }
                 for (const [id, entry] of Object.entries(globalMapping.properties)) {
-                    const match = Array.isArray(entry) ? entry.find(e => e.source === path.basename(neighborFileName)) : (entry.source === path.basename(neighborFileName) ? entry : null);
+                    if (!entry) continue;
+                    const match = Array.isArray(entry) ? entry.find(e => e && e.source === path.basename(neighborFileName)) : (entry.source === path.basename(neighborFileName) ? entry : null);
                     if (match) neighborMapping.properties[id] = match.name;
                 }
             }
@@ -453,27 +497,39 @@ RESPONSE FORMAT (JSON ONLY):
 
                     let responseData;
                     try {
-                        responseData = JSON.parse(cleanedJson);
+                        const { jsonrepair } = require('jsonrepair');
+                        responseData = JSON.parse(jsonrepair(cleanedJson));
                     } catch (parseErr) {
-                        try {
-                            const { jsonrepair } = require('jsonrepair');
-                            responseData = JSON.parse(jsonrepair(cleanedJson));
-                            console.log(`    [*] JSON repaired successfully.`);
-                        } catch (e) {
-                            // Fallback to manual fix if json-repair isn't available or fails
-                            const openBraces = (cleanedJson.match(/\{/g) || []).length;
-                            const closeBraces = (cleanedJson.match(/\}/g) || []).length;
-                            if (openBraces > closeBraces) {
-                                const fixedJson = cleanedJson + '}'.repeat(openBraces - closeBraces);
-                                try {
-                                    responseData = JSON.parse(fixedJson);
-                                    console.log(`    [*] Attempted manual truncation fix was successful.`);
-                                } catch (e2) {
-                                    throw new Error(`JSON parse error: ${parseErr.message}`);
-                                }
-                            } else {
-                                throw new Error(`JSON parse error: ${parseErr.message}`);
+                        // Fallback to manual fix if jsonrepair fails or isn't perfect for this truncation
+                        const openBraces = (cleanedJson.match(/\{/g) || []).length;
+                        const closeBraces = (cleanedJson.match(/\}/g) || []).length;
+                        if (openBraces > closeBraces) {
+                            let fixedJson = cleanedJson.trim();
+                            // If it ends with something that looks like it's inside a string (no quote)
+                            if (fixedJson.match(/[a-zA-Z0-9_\-]$/)) {
+                                fixedJson += '"'; // Close the string
                             }
+                            // If it ends with a quote but no comma/brace, it might be a property value
+                            if (fixedJson.endsWith('"')) {
+                                fixedJson += ''; // No-op, just a marker
+                            }
+
+                            fixedJson += '}'.repeat(openBraces - closeBraces);
+                            try {
+                                responseData = JSON.parse(fixedJson);
+                                console.log(`    [*] Attempted manual truncation fix was successful.`);
+                            } catch (e2) {
+                                // One more try: maybe it needs a comma before the closing brace if it's a field
+                                try {
+                                    const altFix = cleanedJson.trim() + '"}'.repeat(openBraces - closeBraces);
+                                    responseData = JSON.parse(altFix);
+                                    console.log(`    [*] Attempted manual truncation fix (alt) was successful.`);
+                                } catch (e3) {
+                                    throw new Error(`JSON parse error even after repair attempts: ${parseErr.message}`);
+                                }
+                            }
+                        } else {
+                            throw new Error(`JSON parse error: ${parseErr.message}`);
                         }
                     }
 
@@ -490,21 +546,25 @@ RESPONSE FORMAT (JSON ONLY):
                                 globalMapping.variables[key] = newMapping;
                                 added++;
                             } else if (Array.isArray(existing)) {
-                                const sameSourceIdx = existing.findIndex(e => e.source === file);
+                                const sameSourceIdx = existing.findIndex(e => e && e.source === file);
                                 if (sameSourceIdx !== -1) {
                                     existing[sameSourceIdx] = newMapping;
                                 } else {
                                     existing.push(newMapping);
                                 }
                                 added++;
-                            } else if (existing.source !== file) {
+                            } else if (existing && existing.source !== file) {
                                 globalMapping.variables[key] = [existing, newMapping];
                                 added++;
-                            } else {
+                            } else if (existing) {
                                 if (existing.name !== newMapping.name || newMapping.confidence > existing.confidence) {
                                     globalMapping.variables[key] = newMapping;
                                     added++;
                                 }
+                            } else {
+                                // Fallback just in case existing was null
+                                globalMapping.variables[key] = newMapping;
+                                added++;
                             }
                         }
                     }
@@ -519,21 +579,25 @@ RESPONSE FORMAT (JSON ONLY):
                                 globalMapping.properties[key] = newMapping;
                                 added++;
                             } else if (Array.isArray(existing)) {
-                                const sameSourceIdx = existing.findIndex(e => e.source === file);
+                                const sameSourceIdx = existing.findIndex(e => e && e.source === file);
                                 if (sameSourceIdx !== -1) {
                                     existing[sameSourceIdx] = newMapping;
                                 } else {
                                     existing.push(newMapping);
                                 }
                                 added++;
-                            } else if (existing.source !== file) {
+                            } else if (existing && existing.source !== file) {
                                 globalMapping.properties[key] = [existing, newMapping];
                                 added++;
-                            } else {
+                            } else if (existing) {
                                 if (existing.name !== newMapping.name || newMapping.confidence > existing.confidence) {
                                     globalMapping.properties[key] = newMapping;
                                     added++;
                                 }
+                            } else {
+                                // Fallback just in case existing was null
+                                globalMapping.properties[key] = newMapping;
+                                added++;
                             }
                         }
                     }

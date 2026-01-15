@@ -17,12 +17,12 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
         const renamedBindings = new Set();
 
         traverse(ast, {
-            Identifier(path) {
-                const oldName = path.node.name;
+            Identifier(p) {
+                const oldName = p.node.name;
 
                 // 1. Variable Renaming (Scope-aware)
                 if (mapping.variables && Object.prototype.hasOwnProperty.call(mapping.variables, oldName) && !renamedBindings.has(oldName)) {
-                    const binding = path.scope.getBinding(oldName);
+                    const binding = p.scope.getBinding(oldName);
                     if (binding) {
                         // Refined scope check: Renaming if Program level OR in a shallow wrapper (common in esbuild)
                         // This allows renaming module-level globals that are wrapped in __commonJS routines.
@@ -31,38 +31,40 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
 
                         if (isTopLevel || isShallow) {
                             const entry = mapping.variables[oldName];
+                            if (!entry) return;
 
                             // If multiple sources exist, prioritize the one matching current file
                             const newName = Array.isArray(entry)
-                                ? (entry.find(e => e.source === sourceFile)?.name || entry[0].name)
+                                ? (entry.find(e => e && e.source === sourceFile)?.name || (entry[0] ? entry[0].name : null))
                                 : (typeof entry === 'string' ? entry : (entry ? entry.name : null));
 
                             if (newName) {
-                                path.scope.rename(oldName, newName);
+                                p.scope.rename(oldName, newName);
                                 renamedBindings.add(oldName);
                             }
                         }
                     }
                 }
             },
-            MemberExpression(path) {
+            MemberExpression(p) {
                 // 2. Property Renaming (Direct Member Access: obj.prop)
-                if (path.node.computed) return;
+                if (p.node.computed) return;
 
-                const propName = path.node.property.name;
+                const propName = p.node.property.name;
                 if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
+                    if (!entry) return;
                     let newName = null;
 
                     if (Array.isArray(entry)) {
                         // Priority 1: Current chunk's suggestion
-                        const chunkMatch = entry.find(e => e.source === path.basename(sourceFile));
+                        const chunkMatch = entry.find(e => e && e.source === path.basename(String(sourceFile)));
                         if (chunkMatch) {
                             newName = chunkMatch.name;
                         } else {
                             // Priority 2: High confidence common name (if any)
                             // For properties, we are MORE CAUTIOUS. Only rename if it's high confidence.
-                            const highConf = entry.find(e => e.confidence >= 0.9);
+                            const highConf = entry.find(e => e && e.confidence >= 0.9);
                             if (highConf) newName = highConf.name;
                         }
                     } else {
@@ -70,25 +72,26 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                     }
 
                     if (newName) {
-                        path.node.property.name = newName;
+                        p.node.property.name = newName;
                     }
                 }
             },
-            ObjectProperty(path) {
+            ObjectProperty(p) {
                 // 3. Object Property Renaming ({ prop: value })
-                if (path.node.computed) return;
+                if (p.node.computed) return;
 
-                const propName = path.node.key.name;
+                const propName = p.node.key.name;
                 if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
+                    if (!entry) return;
                     let newName = null;
 
                     if (Array.isArray(entry)) {
-                        const chunkMatch = entry.find(e => e.source === path.basename(sourceFile));
+                        const chunkMatch = entry.find(e => e && e.source === path.basename(String(sourceFile)));
                         if (chunkMatch) {
                             newName = chunkMatch.name;
                         } else {
-                            const highConf = entry.find(e => e.confidence >= 0.9);
+                            const highConf = entry.find(e => e && e.confidence >= 0.9);
                             if (highConf) newName = highConf.name;
                         }
                     } else {
@@ -96,7 +99,7 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                     }
 
                     if (newName) {
-                        path.node.key.name = newName;
+                        p.node.key.name = newName;
                     }
                 }
             }
@@ -162,6 +165,7 @@ async function main() {
 
             const chunkBase = path.basename(file, '.js');
             const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
+            const outputPath = path.join(deobfuscatedDir, finalName);
             const renamedCode = renameIdentifiers(code, mapping, chunkBase);
 
             if (renamedCode) {
@@ -177,7 +181,8 @@ async function main() {
             // Attempt to write original as fallback
             try {
                 const chunkBase = path.basename(file, '.js');
-                fs.writeFileSync(path.join(deobfuscatedDir, file), fs.readFileSync(path.join(chunksDir, file), 'utf8'));
+                const fallbackPath = path.join(deobfuscatedDir, file);
+                fs.writeFileSync(fallbackPath, fs.readFileSync(path.join(chunksDir, file), 'utf8'));
             } catch (e) { }
             failCount++;
         }

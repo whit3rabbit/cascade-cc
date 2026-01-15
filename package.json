@@ -26,6 +26,7 @@
     "dotenv": "^16.6.1",
     "gpt-tokenizer": "^3.4.0",
     "graphology": "^0.26.0",
+    "graphology-dag": "^0.4.1",
     "graphology-library": "^0.8.0",
     "jsonrepair": "^3.13.1",
     "serve": "^14.2.5",

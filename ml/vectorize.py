@@ -4,29 +4,7 @@ import json
 import sys
 import os
 
-# Consolidated Node Types from encoder.py
-NODE_TYPES = [
-    "UNKNOWN", "File", "Program", "FunctionDeclaration", "FunctionExpression", 
-    "ArrowFunctionExpression", "VariableDeclaration", "VariableDeclarator",
-    "Identifier", "StringLiteral", "NumericLiteral", "BooleanLiteral",
-    "NullLiteral", "RegExpLiteral", "BinaryExpression", "UnaryExpression",
-    "UpdateExpression", "LogicalExpression", "AssignmentExpression",
-    "MemberExpression", "OptionalMemberExpression", "CallExpression",
-    "OptionalCallExpression", "NewExpression", "ArrayExpression",
-    "ObjectExpression", "ObjectProperty", "ObjectMethod", "BlockStatement",
-    "ExpressionStatement", "IfStatement", "ForStatement", "WhileStatement",
-    "DoWhileStatement", "ForInStatement", "ForOfStatement", "ReturnStatement",
-    "ThrowStatement", "TryStatement", "CatchClause", "SwitchStatement",
-    "SwitchCase", "BreakStatement", "ContinueStatement", "EmptyStatement",
-    "DebuggerStatement", "WithStatement", "LabeledStatement", "ClassDeclaration",
-    "ClassBody", "ClassMethod", "ClassProperty", "ImportDeclaration",
-    "ImportSpecifier", "ImportDefaultSpecifier", "ImportNamespaceSpecifier",
-    "ExportNamedDeclaration", "ExportDefaultDeclaration", "ExportAllDeclaration",
-    "YieldExpression", "AwaitExpression", "TemplateLiteral", "TemplateElement",
-    "SpreadElement", "RestElement", "SequenceExpression", "AssignmentPattern",
-    "ArrayPattern", "ObjectPattern", "V8IntrinsicIdentifier"
-]
-TYPE_TO_ID = {t: i for i, t in enumerate(NODE_TYPES)}
+from .constants import NODE_TYPES, TYPE_TO_ID
 
 class CodeFingerprinter(nn.Module):
     def __init__(self, vocab_size=100, embed_dim=32, hidden_dim=64):
