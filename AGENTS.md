@@ -1,7 +1,8 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/`: Core analysis, LLM pipeline, and renaming logic.
+- `src/`: Core analysis, LLM pipeline, and anchoring/renaming logic.
+- `ml/`: Machine Learning components (PyTorch) for structural fingerprinting.
 - `visualizer/`: WebGL graph viewer (served by `npm run visualize`).
 - `run.js`: Command dispatcher used by `node run <task>`.
 - `knowledge_base.json`: Seed terms for chunk identification.
@@ -11,7 +12,8 @@
 ## Build, Test, and Development Commands
 - `npm install`: Install dependencies.
 - `npm start`: Run the analyzer (defaults to `./cli.js` or fetches latest bundle).
-- `npm run analyze -- path/to/bundle.js`: Analyze a specific bundle.
+- `npm run analyze -- path/to/bundle.js`: Analyze a specific bundle (generates `simplified_asts.json`).
+- `npm run anchor -- <target> <reference>`: Structural similarity matching via Python NN.
 - `npm run deobfuscate -- [version] [--limit N] [--skip-vendor] [--force] [--rename-only]`: Run the LLM pipeline and/or rename pass.
 - `npm run assemble -- <version>`: Assemble deobfuscated chunks into a final file structure.
 - `npm run visualize`: Start the local visualizer.
@@ -25,7 +27,8 @@
 - No automated test suite is currently present; validate with `npm start` and check `cascade_graph_analysis/`.
 
 ## Architecture Overview
-- Claude Code bundles are esbuild-style single files (`cli.js`); `src/analyze.js` uses `webcrack` (with `unminify: true`), detects runtime helpers/`INTERNAL_STATE`, and uses `knowledge_base.json` anchors to tag chunks.
+- Claude Code bundles are esbuild-style single files (`cli.js`); `src/analyze.js` uses `webcrack` (with `unminify: true`), detects runtime helpers/`INTERNAL_STATE`, and exports **name-agnostic simplified ASTs** for ML.
+- **Structural Fingerprinting**: `src/anchor_logic.js` bridges to PyTorch models in `ml/` to generate logic embeddings for code chunks.
 - `src/analyze.js` calculates **centrality scores** using a Markov Chain (with `0.85` damping factor) to identify the "brain" of the application.
 - The deobfuscation pipeline in `src/deobfuscate_pipeline.js` processes chunks by **Centrality order** and **Category priority** (Founder > Family > Vendor).
 - Implements a **Resume Mechanism** via `processed_chunks` in `mapping.json` to avoid re-processing chunks. Use `--force` to override.
@@ -37,18 +40,20 @@
 - `visualizer/` reads `metadata/` plus chunks.
 
 ```mermaid
-flowchart LR
-  A[claude-analysis/<version>/cli.js] --> B[src/analyze.js]
-  B --> C[cascade_graph_analysis/<version>/chunks]
-  B --> D[cascade_graph_analysis/<version>/metadata/graph_map.json]
-  D --> E[src/deobfuscate_pipeline.js]
-  E --> F[metadata/mapping.json]
-  F --> G[src/rename_chunks.js]
-  G --> H[deobfuscated_chunks/]
-  H --> J[src/assemble_final.js]
-  J --> K[final_codebase/]
-  C --> I[visualizer/]
-  D --> I
+flowchart TD
+  A[claude-analysis/bundle.js] --> B[src/analyze.js]
+  B --> C[metadata/simplified_asts.json]
+  C --> D[src/anchor_logic.js]
+  D --> E[ml/vectorize.py]
+  E --> F[metadata/logic_db.json]
+  F --> G[src/anchor_logic.js]
+  G --> H[metadata/mapping.json]
+  H --> I[src/deobfuscate_pipeline.js]
+  I --> J[metadata/mapping.json]
+  J --> K[src/rename_chunks.js]
+  K --> L[deobfuscated_chunks/]
+  L --> M[src/assemble_final.js]
+  M --> N[final_codebase/]
 ```
 
 ## Commit & Pull Request Guidelines

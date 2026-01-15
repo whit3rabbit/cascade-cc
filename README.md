@@ -1,186 +1,144 @@
 # Claude Code Cascade Analyzer
 
-Pre-processor for CASCADE-style analysis of Claude Code bundles.
+Pre-processor for CASCADE-style analysis of Claude Code bundles. 
 
-"Relational Identity" system that uses graph theory (Markov centrality) to prioritize LLM tokens
+Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Fingerprinting + LLM Deobfuscation).
 
-## Quickstart
+---
+
+## 1. Installation & Setup
+
+### Requirements
+- **Node.js** (v18+)
+- **Python** (v3.10+)
+- **OpenRouter/Gemini API Key** (for LLM deobfuscation)
 
 ```bash
-cp .env.example .env
-# Update .env with LLM api keys/model names
+# 1. Install Node dependencies
 npm install
-npm start
-npm run deobfuscate
-npm run deobfuscate -- <version> --rename-only
-npm run assemble -- <version>
-# Output will be in cascade_graph_analysis/<version>/final_codebase/
+
+# 2. Configure Environment
+cp .env.example .env # Add your API keys
+
+# 3. Setup ML Environment
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## Setup
+---
 
-Install dependencies:
+## 2. Getting Started (Cold Start Workflow)
+
+If you have just cloned this repo, you need to build the "Brain" first.
+
+### Step 1: Bootstrap Library DNA
+
+This downloads the libraries Claude depends on (Zod, React, etc.) and extracts their structural fingerprints.
 
 ```bash
-npm install
+npm run bootstrap
 ```
 
-## Usage
+### Step 2: Train the Neural Network
 
-### Analyze
-
-Run the analysis on a bundle. It defaults to searching for `./cli.js` or downloading the latest version from npm if not found.
+This teaches the model to recognize the DNA of those libraries even when they are mangled/minified.
 
 ```bash
-npm start
+npm run train
 ```
+*Output: `ml/model.pth`. Your analyzer is now "primed" to recognize standard code.*
 
-To specify a path:
 
-```bash
-npm run analyze -- path/to/bundle.js
-```
+### Step 3: Analyze & Anchor Claude
 
-### Visualize
-
-Start the interactive graph visualizer (WebGL powered by Sigma.js):
+Now, analyze a real Claude bundle. The `anchor` step will automatically identify all library code using structural similarity, saving you thousands of LLM tokens.
 
 ```bash
-npm run visualize
-```
+# 1. Analyze
+npm run analyze -- claude-analysis/2.1.6/cli.js --version 2.1.6
 
-Then open: [http://localhost:3000/visualizer/](http://localhost:3000/visualizer/)
+# 2. Anchor (NN identifies libraries automatically)
+npm run anchor -- 2.1.6
 
-### Deobfuscate (LLM Pipeline)
-
-Start the context-aware deobfuscation pipeline. This requires an LLM API key.
-
-1. **Setup `.env`**: Create a `.env` file in the root based on `.env.example`.
-2. **Run Pipeline**: This process builds a global `mapping.json` using LLM analysis and then physically renames variables using Babel.
-
-```bash
-# Deobfuscate latest analysis
-npm run deobfuscate
-
-# Specify a target version (use -- to pass args to the script)
+# 3. Deobfuscate (LLM only processes the "new" Claude logic)
 npm run deobfuscate -- 2.1.6
-
-# Resume with limit (only process top 50 chunks)
-npm run deobfuscate -- --limit 50
-
-# Skip vendor libraries
-npm run deobfuscate -- --skip-vendor
-
-# Force re-scan (Ignore resume tracking)
-npm run deobfuscate -- --force
-
-# Final Run: Apply Mappings (Renames variables, files, and beautifies code)
-npm run deobfuscate -- <version> --rename-only
 ```
 
-The deobfuscated chunks will be saved to `cascade_graph_analysis/<version>/deobfuscated_chunks/`.
+---
+
+## 5. Post-Processing & Reference
 
 ### Assemble Final Codebase
 
-Organize the deobfuscated chunks into a coherent final codebase structure using **Path-First Aggregation**.
+Organize deobfuscated chunks into a coherent file structure based on inferred roles.
 
 ```bash
-# Assemble the latest version
-npm run assemble -- <version>
+npm run assemble -- 2.1.7
 ```
 
-This script performs:
-1.  **Trust the Knowledge Base (KB):** Uses `suggested_path` if available.
-2.  **Trust the LLM:** Uses `suggestedFilename` placed in a subdirectory based on its `role`.
-3.  **Filter by "Family":** Automatically skips vendor chunks.
-4.  **Order by Source:** Merges multiple chunks into logical files, sorted by original `startLine`.
+### Interactive Visualization
 
-The final structured codebase will be located in `cascade_graph_analysis/<version>/final_codebase/`.
+View the dependency graph and Markov centrality scores.
 
-#### LLM Pipeline Details
-
-The pipeline consists of two primary stages, orchestrated by `src/deobfuscate_pipeline.js`:
-*   **Stage 1: Semantic Mapping (`src/deobfuscate_pipeline.js`)**
-    *   **Logic**: Iterates through code chunks in order of **Centrality** (importance) and **Category** (Founder > Family > Vendor).
-    *   **Resume Mechanism**: Successfully processed chunks are tracked in `processed_chunks` within `mapping.json`. Re-running the pipeline will automatically skip completed chunks unless the `--force` flag is used.
-    *   **Prompt**: The core deobfuscation prompt is located in `src/deobfuscate_pipeline.js`. It injects metadata derived from `analyze.js` (Role, Label, State DNA) and existing mappings for consistency.
-    *   **Persistence**: Discovered mappings and processed chunk tracking are saved to `cascade_graph_analysis/<version>/metadata/mapping.json`.
-*   **Stage 2: Mapping Application & Renaming (`src/rename_chunks.js`)**
-    *   **Logic**: Uses Babel to perform scope-aware renaming of all variables and object properties found in `mapping.json`. It also renames chunk files to their suggested names (e.g., `chunk001_module_loader.js`).
-    *   **Formatting**: Automatically **beautifies (unminifies)** the code during the renaming process for maximum readability.
-    *   **Output**: Generates readable, formatted JavaScript files in the `deobfuscated_chunks/` directory.
-
-## Workflow
-
-The analysis and deobfuscation process follows a multi-signal **Relational Identity System**:
-
-```mermaid
-graph TD
-    A[Bundle: cli.js] --> B[Phase 0: Preprocessing]
-    B --> C{Phase 1: Identification}
-    C -- KB Anchors --> D[Priority Chunks]
-    C -- Error Anchors --> D
-    C -- Structural DNA --> D
-    D --> E[Phase 2: Neighbor Detection]
-    E --> F[Phase 3: Centrality Analysis]
-    F --> G[Phase 4: Relational Classification]
-    G -- Tengu Spreading --> H[Family Set]
-    H --> I[Stage 1: Context-Aware Mapping]
-    I -- LLM Analysis --> J[Translation Map]
-    J --> K[Stage 2: Final Rewrite]
-    K --> L[Phase 5: Path-First Aggregation]
-    L --> M[Final Codebase]
+```bash
+npm run visualize
+# Open http://localhost:3000/visualizer/
 ```
 
-### Phase 0: Preprocessing & AST Renaming
-The target bundle is processed via `webcrack` to unminify code. The analyzer then dynamically detects runtime helpers (lazy loaders, CommonJS wrappers) and the `INTERNAL_STATE` object, applying global renaming to the AST before chunking.
+### Project Architecture
 
-### Phase 1: AST Identification (The DNA Scan)
-The tree is split into logical functional chunks. Each chunk is scanned for:
-- **Knowledge Base Anchors**: Trigger keywords from `knowledge_base.json`.
-- **Error Fingerprinting**: Plain-text error strings (e.g., "Sandbox violation") that survive minification.
-- **Structural DNA**: Chunks are tagged if they contain `async function*` (generators) or mutate `INTERNAL_STATE`.
+- `src/`: JavaScript core (Babel renaming, Chunking, Orchestration).
+- `ml/`: Python ML core (Triplet Loss training, Vectorization).
+- `cascade_graph_analysis/`: Project metadata, Logic DB, and mappings.
+- `claude-analysis/`: Source bundles.
 
-### Phase 2 & 3: Neighbor Detection & Centrality
-The analyzer builds a dependency graph of cross-references. A Markov Chain analysis calculates the centrality of each chunk, identifying the "Brain" of the application.
+---
 
-### Phase 4: Final Classification (Relational Identity)
-- **Tengu Spreading**: Starting from "Founder" chunks (containing Tengu keywords or generators), the system iteratively infects neighbors. If 30% of a chunk's neighbors are "Family," it is categorized as Family.
-- **Capability Analysis**: Roles (e.g., `SHELL_EXECUTOR`, `API_CLIENT`) are assigned based on Node.js module imports and structural signatures.
-- **State DNA Mapping**: Accessors to `INTERNAL_STATE` (like `sessionId` or `totalCostUSD`) provide functional touchpoints.
+## Architecture: Training vs. Reference
 
-### Stage 1 & 2: LLM Deobfuscation
-The identified roles and State DNA are injected into LLM prompts. This leads to high-accuracy variable naming because the LLM knows, for example, that a `STREAM_ORCHESTRATOR` chunk is likely handling a `MessageStream`.
+The `npm run bootstrap` command populates two different directories. They represent two different sides of the same coin: **Training** vs. **Reference**.
 
-## Output
+### 1. `ml/bootstrap_data` (The Training Lab)
 
-Results are saved to `cascade_graph_analysis/`:
-- `chunks/`: Extracted functional chunks.
-- `metadata/graph_map.json`: Graph structure and Markov centrality scores.
+**Purpose:** Input for the Neural Network's **Training Phase**. Holds `*_gold_asts.json` clean library patterns.
 
-## Claude Code Obfuscation Analysis
+### 2. `cascade_graph_analysis/bootstrap` (The Logic Registry)
 
-An analysis of `claude-analysis/2.1.3/cli.js` (11MB bundle) reveals the following technical characteristics:
+**Purpose:** Output of the analysis tool, used for the **Anchoring Phase**. Acts as a lookup table of known structural vectors.
 
-### Obfuscation Level
-The code is **minified but not aggressively obfuscated**. It does not use advanced techniques like encrypted string tables, control flow flattening, or self-defending code. 
+| Feature | `ml/bootstrap_data` | `cascade_graph_analysis/bootstrap` |
+| :--- | :--- | :--- |
+| **Role** | **Input** for Training | **Output** of Analysis |
+| **User** | Python NN (`train.py`) | JS Anchoring (`anchor_logic.js`) |
+| **Key File** | `zod_gold_asts.json` | `logic_db.json` |
 
-### Key Characteristics
-- **Bundler**: Built using `esbuild`, identified by standard helper functions (`w`, `U`, `U5`) and lazy-load module initialization patterns.
-- **Minification**: Local variable and function names are mangled (e.g., `hN9`, `_CA`), but high-level logic structures—such as classes and core control flows—remain discernable.
-- **Dependency Aggregation**: The 11MB file is a standalone bundle containing numerous integrated dependencies, including `lodash`, `rxjs`, and various Node.js polyfills.
-- **Internal Logic**: Logic for components like the native host (Chrome integration) and MCP (Model Context Protocol) clients is clearly visible as distinct classes (e.g., `Mz9`, `Rz9`).
-- **Transparency**: Includes clear metadata such as build timestamps, versioning info, and even a recruitment message in the comments, suggesting the minification is for efficiency rather than secrecy.
+### Why do we need both?
 
-## Project Structure
+The **NN** identifies that two pieces of code are structurally similar. The **Registry** provides the human-readable names assigned to those structures in the clean, non-obfuscated version.
 
-- `src/`: Core logic and helper scripts.
-  - `analyze.js`: Entry point for codebase analysis and chunking.
-  - `deobfuscate_pipeline.js`: Orchestrates the LLM deobfuscation stages.
-  - `deobfuscation_helpers.js`: Specialized decoders and AST transformation utilities.
-  - `llm_client.js`: Generic interface for LLM providers.
-  - `rename_chunks.js`: Babel-powered variable renaming script.
-- `visualizer/`: WebGL-based graph visualization tool.
-- `run.js`: Central command runner and script orchestrator.
-- `knowledge_base.json`: Seed data for functional identification.
-- `cascade_graph_analysis/`: Output directory for analysis results and deobfuscated code.
+---
+
+## Structural DNA & Version Drift
+
+The Neural Network produce **Vector Embeddings** (comparable patterns) rather than simple hashes. This allows it to handle version drift and minification through **Structural DNA**.
+
+### 1. Vectors vs. Hashes
+
+If one character changes, a **Hash** breaks. If logic changes slightly, a **Vector** simply moves a fraction in vector space.
+*   **Minor Updates (e.g., Zod 4.3.4 -> 4.3.5):** The "backbone" remains the same. The resulting vector maintains **~98-99% similarity**.
+*   **Synthetic Mangling:** In `ml/train.py`, we intentionally rename variables to nonsense during training. The NN learns to ignore **"Surface Noise"** and focus on **"Logic Topology"**.
+
+### 2. Guardrails & Safety
+
+In `src/anchor_logic.js`, we use similarity thresholds and symbol alignment to ensure accuracy:
+
+| Similarity | Result | Action |
+| :--- | :--- | :--- |
+| **> 0.98** | High Confidence | Auto-rename everything |
+| **0.90 - 0.97** | Version Drift | Flag for LLM/Partial anchor |
+| **< 0.80** | New Logic | Send to LLM |
+
+### The "Cold Start" Advantage
+
+By training on many libraries, the NN learns what **"Library-ness"** looks like. It can categorize vendor code even if it has never seen that specific version before, allowing the LLM to focus purely on the proprietary "Founder" logic.

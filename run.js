@@ -5,6 +5,8 @@ const path = require('path');
 const command = process.argv[2];
 const args = process.argv.slice(3);
 
+const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'train', 'bootstrap', 'clean'];
+
 const scripts = {
     'analyze': {
         cmd: 'node',
@@ -30,6 +32,21 @@ const scripts = {
         cmd: 'node',
         args: ['src/assemble_final.js', ...args],
         desc: 'Assemble deobfuscated chunks into a final file structure'
+    },
+    'anchor': {
+        cmd: 'node',
+        args: ['src/anchor_logic.js', ...args],
+        desc: 'Run anchoring logic to compare two versions'
+    },
+    'train': {
+        cmd: 'node',
+        args: [],
+        desc: 'Initiate Model Training'
+    },
+    'bootstrap': {
+        cmd: 'node',
+        args: ['src/bootstrap_libs.js', ...args],
+        desc: 'Bootstrap library DNA (Gold Standards)'
     }
 };
 
@@ -45,10 +62,71 @@ if (!command || !scripts[command]) {
 const config = scripts[command];
 console.log(`[*] Running: ${config.cmd} ${config.args.join(' ')}`);
 
-const child = spawn(config.cmd, config.args, {
-    stdio: 'inherit',
-    shell: true
-});
+// The original code used a generic spawn for all commands.
+// The instruction implies a switch statement for specific commands like 'train'.
+// We will adapt the execution flow to use a switch for commands that require specific handling
+// and fall back to the generic spawn for others.
+
+switch (command) {
+    case 'analyze':
+    case 'visualize':
+    case 'clean':
+    case 'deobfuscate':
+    case 'assemble': {
+        const child = spawn(config.cmd, config.args, {
+            stdio: 'inherit',
+            shell: true
+        });
+        child.on('exit', (code) => {
+            process.exit(code);
+        });
+        break;
+    }
+
+    case 'anchor': {
+        console.log(`[*] Initiating Anchoring...`);
+        const anchorArgs = process.argv.slice(3).join(' ');
+        execSync(`node src/anchor_logic.js ${anchorArgs}`, { stdio: 'inherit' });
+        process.exit(0); // Exit after execSync
+        break;
+    }
+
+    case 'train': {
+        const bootstrapDir = './ml/bootstrap_data';
+        const pythonEnv = fs.existsSync('./ml/venv/bin/python3') ? './ml/venv/bin/python3' : 'python3';
+
+        console.log(`[*] Initiating Model Training on Gold Standards...`);
+        try {
+            // Pass the bootstrap directory to the python script
+            execSync(`${pythonEnv} ml/train.py ${bootstrapDir}`, { stdio: 'inherit' });
+            process.exit(0);
+        } catch (e) {
+            console.error(`[!] Training failed: ${e.message}`);
+            process.exit(1);
+        }
+        break;
+    }
+
+    case 'bootstrap': {
+        console.log(`[*] Initiating Library Bootstrapping...`);
+        execSync(`node src/bootstrap_libs.js`, { stdio: 'inherit' });
+        process.exit(0);
+        break;
+    }
+
+    default: {
+        // Fallback for any commands not explicitly handled in the switch
+        const child = spawn(config.cmd, config.args, {
+            stdio: 'inherit',
+            shell: true
+        });
+        child.on('exit', (code) => {
+            process.exit(code);
+        });
+        break;
+    }
+}
+
 
 if (command === 'visualize') {
     const url = 'http://localhost:3000/visualizer/';

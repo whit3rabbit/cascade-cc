@@ -1,0 +1,11 @@
+[project]
+name = "cascade-cc"
+version = "0.1.0"
+description = "Structural fingerprinting for Claude Code deobfuscation"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0.0",
+]
+
+[tool.setuptools]
+packages = ["ml"]

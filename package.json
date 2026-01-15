@@ -10,7 +10,11 @@
     "lint": "prettier --write .",
     "visualize": "node run visualize",
     "deobfuscate": "node run deobfuscate",
-    "assemble": "node run assemble"
+    "assemble": "node run assemble",
+    "anchor": "node run anchor",
+    "train": "node run train",
+    "bootstrap": "node run bootstrap",
+    "execute": "npm run analyze && npm run anchor && npm run deobfuscate"
   },
   "dependencies": {
     "@babel/generator": "^7.28.5",

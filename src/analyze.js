@@ -32,10 +32,16 @@ function ensureTargetExists() {
 
     // 1. Check command line argument
     if (process.argv[2]) {
-        targetFile = process.argv[2];
-        // Try to infer version from path
-        const match = targetFile.match(/claude-analysis\/([^/]+)\/cli\.js/);
-        if (match) version = match[1];
+        targetFile = path.resolve(process.argv[2]);
+        // Handle --version flag
+        const versionIdx = process.argv.indexOf('--version');
+        if (versionIdx !== -1 && process.argv[versionIdx + 1]) {
+            version = process.argv[versionIdx + 1];
+        } else {
+            // Try to infer version from path
+            const match = targetFile.match(/claude-analysis\/([^/]+)\/cli\.js/);
+            if (match) version = match[1];
+        }
         return { targetFile, version };
     }
 
@@ -112,6 +118,44 @@ function findStrings(node, strings = []) {
         }
     }
     return strings;
+}
+
+// --- NEW: STRUCTURAL AST EXPORT FOR ML ---
+/**
+ * Strips identifiers and values from a node to create a "shape-only" representation.
+ * This makes the representation name-agnostic for structural similarity matching.
+ */
+function simplifyAST(node) {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+        return node.map(simplifyAST).filter(Boolean);
+    }
+
+    const structure = { type: node.type };
+    if (node.callee && node.callee.name) structure.call = node.callee.name; // Keep builtin calls
+    if (node.type === 'Identifier') structure.name = node.name; // Preserve for symbol alignment
+
+    // We only care about the structural arrangement of nodes
+    const children = [];
+    for (const key in node) {
+        const val = node[key];
+        if (val && typeof val === 'object' && key !== 'loc' && key !== 'start' && key !== 'end' && key !== 'comments') {
+            const childResult = simplifyAST(val);
+            if (childResult) {
+                if (Array.isArray(childResult)) {
+                    children.push(...childResult);
+                } else {
+                    children.push(childResult);
+                }
+            }
+        }
+    }
+
+    if (children.length > 0) {
+        structure.children = children;
+    }
+
+    return structure;
 }
 
 // --- 2. DEOBFUSCATION HEURISTICS ---
@@ -275,7 +319,7 @@ class CascadeGraph {
     }
 
     // Step A: Initial Pass - Group logical chunks
-    identifyNodes(ast) {
+    identifyNodes(ast, code) {
         console.log(`[*] Phase 1: Identifying Chunks...`);
         const statements = ast.program.body;
         let currentChunkNodes = [];
@@ -381,6 +425,9 @@ class CascadeGraph {
 
             const tokens = encode(code).length;
 
+            // Generate structural AST for ML anchoring
+            const structuralAST = currentChunkNodes.map(simplifyAST);
+
             this.nodes.set(chunkName, {
                 id: chunkIndex,
                 name: chunkName,
@@ -388,6 +435,7 @@ class CascadeGraph {
                 tokens,
                 startLine,
                 endLine,
+                structuralAST, // Store for saveResults
                 neighbors: new Set(),
                 score: 0,
                 category: currentCategory,
@@ -727,6 +775,16 @@ class CascadeGraph {
             path.join(metadataDir, 'graph_map.js'),
             `window.GRAPH_DATA = ${JSON.stringify(finalOutput, null, 2)};`
         );
+
+        // Save Structural ASTs for ML anchoring
+        const structuralASTs = {};
+        for (const [name, node] of this.nodes) {
+            structuralASTs[name] = node.structuralAST;
+        }
+        fs.writeFileSync(
+            path.join(metadataDir, 'simplified_asts.json'),
+            JSON.stringify(structuralASTs)
+        );
     }
 }
 
@@ -830,7 +888,7 @@ async function run() {
         }
     }
 
-    graph.identifyNodes(ast);
+    graph.identifyNodes(ast, code);
     graph.detectNeighbors();
     graph.applyMarkovAnalysis();
     graph.classify();

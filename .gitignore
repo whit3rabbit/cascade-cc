@@ -38,3 +38,13 @@ cascade_graph_analysis
 claude_workspace
 .env
 repomix-output.xml
+
+# Machine Learning
+.venv
+ml/venv
+ml/__pycache__
+ml/model.pth
+ml/bootstrap_data
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
