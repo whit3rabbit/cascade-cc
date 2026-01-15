@@ -18,7 +18,8 @@ NODE_TYPES = [
     "ExportNamedDeclaration", "ExportDefaultDeclaration", "ExportAllDeclaration",
     "YieldExpression", "AwaitExpression", "TemplateLiteral", "TemplateElement",
     "SpreadElement", "RestElement", "SequenceExpression", "AssignmentPattern",
-    "ArrayPattern", "ObjectPattern", "V8IntrinsicIdentifier"
+    "ArrayPattern", "ObjectPattern", "V8IntrinsicIdentifier",
+    "Builtin_require", "Builtin_defineProperty", "Builtin_exports", "Builtin_module"
 ]
 
 TYPE_TO_ID = {t: i for i, t in enumerate(NODE_TYPES)}

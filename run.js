@@ -53,6 +53,22 @@ const scripts = {
 if (!command || !scripts[command]) {
     console.log('Usage: node run <command> [args]');
     console.log('\nAvailable commands:');
+    const findPython = () => {
+        const paths = [
+            path.join(__dirname, '.venv/bin/python3'),
+            path.join(__dirname, 'ml/.venv/bin/python3'),
+            'python3',
+            'python'
+        ];
+        for (const p of paths) {
+            try {
+                if (fs.existsSync(p)) return p;
+            } catch (e) { }
+        }
+        return 'python3';
+    };
+
+    const PYTHON_BIN = findPython();
     Object.entries(scripts).forEach(([name, cfg]) => {
         console.log(`  ${name.padEnd(12)} - ${cfg.desc}`);
     });
@@ -87,11 +103,13 @@ switch (command) {
     case 'bootstrap': {
         console.log(`[*] Initiating Library Bootstrapping...`);
         const { spawnSync } = require('child_process');
+        const runPython = (scriptPath, args = []) => {
+            return spawnSync(PYTHON_BIN, [scriptPath, ...args], { stdio: 'inherit', shell: true });
+        };
 
         spawnSync('node', ['src/bootstrap_libs.js', ...args], { stdio: 'inherit' });
 
         console.log(`[*] Vectorizing Bootstrap Data...`);
-        const pythonEnv = fs.existsSync('./ml/venv/bin/python3') ? './ml/venv/bin/python3' : 'python3';
         const bootstrapDir = './cascade_graph_analysis/bootstrap';
 
         if (fs.existsSync(bootstrapDir)) {

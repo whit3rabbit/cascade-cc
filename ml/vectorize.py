@@ -21,21 +21,40 @@ class CodeFingerprinter(nn.Module):
         hidden_cat = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim=1)
         return torch.nn.functional.normalize(self.fc(hidden_cat), p=2, dim=1)
 
-def flatten_ast(node, sequence, symbols):
-    """Convert AST tree into a linear sequence of type IDs (DFS) and extract symbols"""
+def flatten_ast(node, sequence, symbols, path="Program"):
+    """Convert AST tree into a linear sequence of type IDs (DFS) and extract symbols with structural keys"""
     if isinstance(node, list):
-        for item in node:
-            flatten_ast(item, sequence, symbols)
+        for i, item in enumerate(node):
+            flatten_ast(item, sequence, symbols, f"{path}[{i}]")
         return
 
     node_type = node.get("type", "UNKNOWN")
+    
+    # Built-in detection
+    if node_type == "CallExpression" and "call" in node:
+        call_name = node["call"]
+        if call_name == "require":
+            node_type = "Builtin_require"
+        elif call_name == "defineProperty":
+            node_type = "Builtin_defineProperty"
+    elif node_type == "Identifier" and "name" in node:
+        name = node["name"]
+        if name == "exports":
+            node_type = "Builtin_exports"
+        elif name == "module":
+            node_type = "Builtin_module"
+
     sequence.append(TYPE_TO_ID.get(node_type, 0)) # 0 for UNKNOWN
     
     if node_type == "Identifier" and "name" in node:
-        symbols.append(node["name"])
+        symbols.append({
+            "name": node["name"],
+            "key": path
+        })
         
-    for child in node.get("children", []):
-        flatten_ast(child, sequence, symbols)
+    for i, child in enumerate(node.get("children", [])):
+        child_type = child.get("type", "Node")
+        flatten_ast(child, sequence, symbols, f"{path}.{child_type}[{i}]")
 
 def run_vectorization(version_path):
     # Set seed for deterministic fingerprints across runs
@@ -64,6 +83,8 @@ def run_vectorization(version_path):
         chunks = json.load(f)
 
     results = []
+    total_nodes = 0
+    unknown_nodes = 0
     
     with torch.no_grad():
         for chunk_name, ast_root in chunks.items():
@@ -74,6 +95,9 @@ def run_vectorization(version_path):
             if not sequence:
                 continue
             
+            total_nodes += len(sequence)
+            unknown_nodes += sequence.count(0)
+
             # Truncate or pad to fixed length (e.g., 256 nodes)
             seq_tensor = torch.tensor(sequence[:256]).unsqueeze(0)
             if seq_tensor.size(1) < 256:
@@ -83,8 +107,15 @@ def run_vectorization(version_path):
             results.append({
                 "name": chunk_name,
                 "vector": fingerprint,
-                "symbols": symbols # Exported for alignment
+                "symbols": symbols # Exported for alignment: list of {name, key}
             })
+
+    # Vocabulary health check
+    if total_nodes > 0:
+        unknown_pct = (unknown_nodes / total_nodes) * 100
+        print(f"[*] Vocabulary Health Check: {unknown_pct:.2f}% UNKNOWN nodes")
+        if unknown_pct > 5.0:
+            print(f"[!] WARNING: High percentage of UNKNOWN nodes ({unknown_pct:.2f}%). ML performance may be degraded.")
 
     output_path = os.path.join(version_path, "metadata", "logic_db.json")
     with open(output_path, "w") as f:

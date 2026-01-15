@@ -55,24 +55,34 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                     const entry = mapping.properties[propName];
                     if (!entry) return;
                     let newName = null;
+                    let confidence = 0.8;
 
                     if (Array.isArray(entry)) {
-                        // Priority 1: Current chunk's suggestion
                         const chunkMatch = entry.find(e => e && e.source === path.basename(String(sourceFile)));
                         if (chunkMatch) {
                             newName = chunkMatch.name;
+                            confidence = chunkMatch.confidence || 0.8;
                         } else {
-                            // Priority 2: High confidence common name (if any)
-                            // For properties, we are MORE CAUTIOUS. Only rename if it's high confidence.
                             const highConf = entry.find(e => e && e.confidence >= 0.9);
-                            if (highConf) newName = highConf.name;
+                            if (highConf) {
+                                newName = highConf.name;
+                                confidence = highConf.confidence;
+                            }
                         }
                     } else {
                         newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                        confidence = (entry && typeof entry === 'object') ? (entry.confidence || 0.8) : 0.8;
                     }
 
                     if (newName) {
-                        p.node.property.name = newName;
+                        // SAFETY CHECKS
+                        const isObjectKnown = p.node.object.type === 'Identifier' && mapping.variables[p.node.object.name];
+                        const isHighConfidence = confidence >= 0.98;
+                        const isUnique = propName.length > 2;
+
+                        if (isObjectKnown || isHighConfidence || isUnique) {
+                            p.node.property.name = newName;
+                        }
                     }
                 }
             },
@@ -85,21 +95,33 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                     const entry = mapping.properties[propName];
                     if (!entry) return;
                     let newName = null;
+                    let confidence = 0.8;
 
                     if (Array.isArray(entry)) {
                         const chunkMatch = entry.find(e => e && e.source === path.basename(String(sourceFile)));
                         if (chunkMatch) {
                             newName = chunkMatch.name;
+                            confidence = chunkMatch.confidence || 0.8;
                         } else {
                             const highConf = entry.find(e => e && e.confidence >= 0.9);
-                            if (highConf) newName = highConf.name;
+                            if (highConf) {
+                                newName = highConf.name;
+                                confidence = highConf.confidence;
+                            }
                         }
                     } else {
                         newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                        confidence = (entry && typeof entry === 'object') ? (entry.confidence || 0.8) : 0.8;
                     }
 
                     if (newName) {
-                        p.node.key.name = newName;
+                        // SAFETY CHECKS: For object properties, we are slightly more lenient if it's high confidence or unique
+                        const isHighConfidence = confidence >= 0.98;
+                        const isUnique = propName.length > 2;
+
+                        if (isHighConfidence || isUnique) {
+                            p.node.key.name = newName;
+                        }
                     }
                 }
             }

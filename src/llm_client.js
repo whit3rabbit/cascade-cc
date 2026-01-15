@@ -79,6 +79,13 @@ async function callLLM(prompt, retryCount = 0) {
                 const status = response.status;
                 let detailedMessage = errorBody.error ? errorBody.error.message : JSON.stringify(errorBody);
 
+                // Check for insufficient credits
+                const isInsufficientCredits = detailedMessage.toLowerCase().includes('insufficient credits') || detailedMessage.toLowerCase().includes('credit balance');
+                if (isInsufficientCredits) {
+                    console.error(`[!] OpenRouter Error: Insufficient Credits. Please top up your account.`);
+                    throw new Error("OPENROUTER_INSUFFICIENT_CREDITS");
+                }
+
                 if (status === 401 || status === 403) {
                     throw new Error(`[!] API Key error (${status}): ${detailedMessage}. Please check your OPENROUTER_API_KEY in .env.`);
                 }

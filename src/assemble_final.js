@@ -167,18 +167,37 @@ async function assemble(version) {
         // Note: sortedChunks already respects DAG order. We only want to bubble up imports if it doesn't break DAG.
         // For simplicity, we'll stick to the DAG sort primarily.
 
-        let mergedCode = `/**\n * File: ${filePath}\n * Role: ${chunkList[0].role}\n * Aggregated from ${chunkList.length} chunks\n */\n\n`;
+        const headers = new Set();
+        const finalChunks = [];
 
         for (const chunkMeta of sortedChunks) {
             const chunkFilePath = getDeobfuscatedChunkPath(chunksDir, chunkMeta);
-
             if (chunkFilePath) {
-                const code = fs.readFileSync(chunkFilePath, 'utf8');
-                mergedCode += `// --- Chunk: ${chunkMeta.name} (Original lines: ${chunkMeta.startLine}-${chunkMeta.endLine}) ---\n`;
-                mergedCode += code + "\n\n";
+                let code = fs.readFileSync(chunkFilePath, 'utf8');
+
+                // Header Cleaning: Detect and extract common helpers
+                const helperRegex = /var (?:__defProp|__export|__toESM|__commonJS|__copyProps|__getProtoOf|__hasOwnProp|__markAsModule|__name|__require|__wrapCommonJS) = [\s\S]*?;(?=\n|$)/g;
+                const matches = code.match(helperRegex);
+                if (matches) {
+                    matches.forEach(m => headers.add(m));
+                    code = code.replace(helperRegex, '').trim();
+                }
+
+                finalChunks.push({
+                    meta: chunkMeta,
+                    code
+                });
             } else {
                 console.warn(`    [!] Missing deobfuscated chunk: ${chunkMeta.name} (Expected at ${chunksDir})`);
             }
+        }
+
+        let mergedCode = `/**\n * File: ${filePath}\n * Role: ${chunkList[0].role}\n * Aggregated from ${chunkList.length} chunks\n */\n\n`;
+        mergedCode += Array.from(headers).join('\n') + '\n\n';
+
+        for (const { meta, code } of finalChunks) {
+            mergedCode += `// --- Chunk: ${meta.name} (Original lines: ${meta.startLine}-${meta.endLine}) ---\n`;
+            mergedCode += (code || '// (Empty or missing code)') + "\n\n";
         }
 
         fs.writeFileSync(fullOutputPath, mergedCode);

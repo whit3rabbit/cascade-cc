@@ -9,15 +9,27 @@ function calculateSimilarity(vecA, vecB) {
 
 /**
  * Aligns symbols between two matched entities and updates the target mapping.
- * NOTE: This currently uses index-based alignment (positional), which is 
- * EXPERIMENTAL and can be UNRELIABLE if minifiers reorder code.
+ * Uses structural key-based alignment for robustness against code reordering.
  */
 function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targetSymbols, refSymbols, sourceLabel) {
     let alignedCount = 0;
-    const minLen = Math.min(targetSymbols.length, refSymbols.length);
-    for (let i = 0; i < minLen; i++) {
-        const targetMangled = targetSymbols[i];
-        const refMangled = refSymbols[i];
+
+    // Create a map of ref symbols by their structural key
+    const refSymbolMap = new Map();
+    refSymbols.forEach(ref => {
+        if (ref && typeof ref === 'object' && ref.key) {
+            refSymbolMap.set(ref.key, ref.name);
+        }
+    });
+
+    // Match target symbols to ref symbols using keys
+    for (const targetSymbol of targetSymbols) {
+        if (!targetSymbol || typeof targetSymbol !== 'object' || !targetSymbol.key) continue;
+
+        const targetMangled = targetSymbol.name;
+        const refMangled = refSymbolMap.get(targetSymbol.key);
+
+        if (!refMangled) continue;
 
         const resolvedVar = resolvedVariables[refMangled];
         const resolvedProp = resolvedProperties[refMangled];

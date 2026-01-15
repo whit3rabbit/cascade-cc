@@ -337,7 +337,11 @@ class CascadeGraph {
         const finalizeChunk = () => {
             if (currentChunkNodes.length === 0) return;
             const chunkName = `chunk${chunkIndex.toString().padStart(3, '0')}`;
-            const code = currentChunkNodes.map(n => generate(n, { minified: false }).code).join('\n\n');
+            // PERFORMANCE: Use code.slice instead of generate where possible
+            // We need the start/end of the first and last node to slice from the original code
+            const chunkStart = currentChunkNodes[0].start;
+            const chunkEnd = currentChunkNodes[currentChunkNodes.length - 1].end;
+            const chunkCode = code.slice(chunkStart, chunkEnd);
 
             const startLine = currentChunkNodes[0].loc?.start.line || 0;
             const endLine = currentChunkNodes[currentChunkNodes.length - 1].loc?.end.line || 0;
@@ -430,7 +434,7 @@ class CascadeGraph {
                 }
             }
 
-            const tokens = encode(code).length;
+            const tokens = encode(chunkCode).length;
 
             // Generate structural AST for ML anchoring
             const structuralAST = currentChunkNodes.map(simplifyAST);
@@ -438,7 +442,7 @@ class CascadeGraph {
             this.nodes.set(chunkName, {
                 id: chunkIndex,
                 name: chunkName,
-                code,
+                code: chunkCode,
                 tokens,
                 startLine,
                 endLine,
@@ -579,6 +583,11 @@ class CascadeGraph {
 
         const dampingFactor = 0.85; // Standard PageRank damping
         const teleportProbability = (1 - dampingFactor) / size;
+        const inDegree = new Map();
+        this.nodes.forEach(node => {
+            node.neighbors.forEach(neighbor => inDegree.set(neighbor, (inDegree.get(neighbor) || 0) + 1));
+        });
+
         let scores = new Array(size).fill(1 / size);
 
         const nameToIndex = new Map(names.map((name, idx) => [name, idx]));
@@ -616,7 +625,12 @@ class CascadeGraph {
         }
 
         names.forEach((name, i) => {
-            this.nodes.get(name).score = scores[i];
+            const node = this.nodes.get(name);
+            const inCount = inDegree.get(name) || 0;
+            const outCount = node.neighbors.size;
+            // IMPROVED SCORE: Centrality + (Out-Degree / (In-Degree + 1))
+            // This balances "utility" nodes (high in-degree) with "orchestrator" nodes (high out-degree)
+            node.score = scores[i] + (outCount / (inCount + 1)) * 0.01;
         });
     }
 
