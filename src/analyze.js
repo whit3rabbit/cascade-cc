@@ -83,14 +83,21 @@ function ensureTargetExists() {
 
     // 4. If not found or if version check succeeded but folder doesn't exist, download latest from npm
     if (version !== 'unknown') {
-        console.log(`[*] Downloading version ${version} of ${PACKAGE_NAME}...`);
+        process.stdout.write(`[*] Downloading version ${version} of ${PACKAGE_NAME}...\r`);
         try {
             const versionPath = path.join(ANALYSIS_DIR, version);
             if (!fs.existsSync(versionPath)) {
                 fs.mkdirSync(versionPath, { recursive: true });
-                execSync(`npm pack ${PACKAGE_NAME}@${version}`, { cwd: versionPath });
+                execSync(`npm pack ${PACKAGE_NAME}@${version}`, { cwd: versionPath, stdio: 'ignore' });
                 const tarball = fs.readdirSync(versionPath).find(f => f.endsWith('.tgz'));
-                execSync(`tar -xzf "${tarball}" --strip-components=1`, { cwd: versionPath });
+                execSync(`tar -xzf "${tarball}" --strip-components=1`, { cwd: versionPath, stdio: 'ignore' });
+            }
+
+            // Verify version from package.json if possible
+            const pkgJsonPath = path.join(versionPath, 'package.json');
+            if (fs.existsSync(pkgJsonPath)) {
+                const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+                if (pkg.version) version = pkg.version;
             }
 
             const downloadedCli = path.join(versionPath, 'cli.js');
@@ -98,7 +105,7 @@ function ensureTargetExists() {
                 return { targetFile: downloadedCli, version };
             }
         } catch (err) {
-            console.error(`[!] Failed to download bundle: ${err.message}`);
+            console.error(`\n[!] Failed to download bundle: ${err.message}`);
         }
     }
 
@@ -128,21 +135,32 @@ function findStrings(node, strings = []) {
 }
 
 // --- NEW: STRUCTURAL AST EXPORT FOR ML ---
+const crypto = require('crypto');
+
 /**
  * Strips identifiers and values from a node to create a "shape-only" representation.
- * This makes the representation name-agnostic for structural similarity matching.
+ * Now includes a literal hashing channel to preserve semantic signal.
  */
 function simplifyAST(node) {
     if (!node || typeof node !== 'object') return null;
     if (Array.isArray(node)) {
-        return node.map(simplifyAST).filter(Boolean);
+        return node.map((item, idx) => {
+            const res = simplifyAST(item);
+            if (res) res.slot = idx;
+            return res;
+        }).filter(Boolean);
     }
 
     const structure = { type: node.type };
-    if (node.callee && node.callee.name) structure.call = node.callee.name; // Keep builtin calls
-    if (node.type === 'Identifier') structure.name = node.name; // Preserve for symbol alignment
+    if (node.callee && node.callee.name) structure.call = node.callee.name;
+    if (node.type === 'Identifier') structure.name = node.name;
 
-    // We only care about the structural arrangement of nodes
+    // Literal Hashing Channel
+    if (node.type === 'StringLiteral' || node.type === 'NumericLiteral' || node.type === 'BooleanLiteral') {
+        const val = String(node.value);
+        structure.valHash = crypto.createHash('md5').update(val).digest('hex').slice(0, 8);
+    }
+
     const children = [];
     for (const key in node) {
         const val = node[key];
@@ -150,8 +168,14 @@ function simplifyAST(node) {
             const childResult = simplifyAST(val);
             if (childResult) {
                 if (Array.isArray(childResult)) {
-                    children.push(...childResult);
+                    childResult.forEach(c => {
+                        if (c) {
+                            c.slot = key;
+                            children.push(c);
+                        }
+                    });
                 } else {
+                    childResult.slot = key;
                     children.push(childResult);
                 }
             }
@@ -163,6 +187,46 @@ function simplifyAST(node) {
     }
 
     return structure;
+}
+
+function collapseProxyNodes(nodes) {
+    console.log(`[*] Phase 2.5: Collapsing Proxy Nodes (Metadata-Safe)...`);
+    let collapsedCount = 0;
+
+    const names = Array.from(nodes.keys());
+    for (const name of names) {
+        const node = nodes.get(name);
+        if (!node) continue;
+
+        // Simple heuristic for a "proxy" function:
+        // 1. Very small (few tokens)
+        // 2. Exactly one outbound neighbor
+        // 3. Code contains a return or call to that neighbor
+        if (node.tokens < 50 && node.neighbors.size === 1) {
+            const neighbor = Array.from(node.neighbors)[0];
+            const escapedNeighbor = neighbor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`\\b${escapedNeighbor}\\b`);
+
+            if (regex.test(node.code)) {
+                // This is a proxy. Redirect all nodes that point to this proxy 
+                // to point directly to the neighbor instead.
+                for (const [otherName, otherNode] of nodes) {
+                    if (otherNode.neighbors.has(name)) {
+                        otherNode.neighbors.delete(name);
+                        if (otherName !== neighbor) {
+                            otherNode.neighbors.add(neighbor);
+                        }
+                        // SAFE METADATA UPDATE: Refresh all fields
+                        otherNode.neighborCount = otherNode.neighbors.size;
+                        otherNode.outbound = Array.from(otherNode.neighbors);
+                    }
+                }
+                nodes.delete(name);
+                collapsedCount++;
+            }
+        }
+    }
+    console.log(`    [+] Collapsed ${collapsedCount} proxy nodes.`);
 }
 
 // --- 2. DEOBFUSCATION HEURISTICS ---
@@ -337,11 +401,8 @@ class CascadeGraph {
         const finalizeChunk = () => {
             if (currentChunkNodes.length === 0) return;
             const chunkName = `chunk${chunkIndex.toString().padStart(3, '0')}`;
-            // PERFORMANCE: Use code.slice instead of generate where possible
-            // We need the start/end of the first and last node to slice from the original code
-            const chunkStart = currentChunkNodes[0].start;
-            const chunkEnd = currentChunkNodes[currentChunkNodes.length - 1].end;
-            const chunkCode = code.slice(chunkStart, chunkEnd);
+            // PERFORMANCE: Use Babel generator to preserve Phase 0.5/0.6/0.7 transformations
+            const chunkCode = currentChunkNodes.map(node => generate(node, { minified: true }).code).join('\n');
 
             const startLine = currentChunkNodes[0].loc?.start.line || 0;
             const endLine = currentChunkNodes[currentChunkNodes.length - 1].loc?.end.line || 0;
@@ -364,7 +425,7 @@ class CascadeGraph {
                         triggerKeywords.forEach(kwEntry => {
                             const kw = typeof kwEntry === 'string' ? kwEntry : kwEntry.word;
                             const weight = typeof kwEntry === 'string' ? 1 : (kwEntry.weight || 1);
-                            if (code.includes(kw)) {
+                            if (chunkCode.includes(kw)) {
                                 weightedSum += weight;
                             }
                         });
@@ -388,7 +449,7 @@ class CascadeGraph {
                 // 2. Scan for Name Hints (Logic Anchors)
                 if (KB.name_hints) {
                     for (const hint of KB.name_hints) {
-                        if (hint.logic_anchor && hint.logic_anchor.length > 0 && code.includes(hint.logic_anchor)) {
+                        if (hint.logic_anchor && hint.logic_anchor.length > 0 && chunkCode.includes(hint.logic_anchor)) {
                             hints.push({
                                 suggested_name: hint.suggested_name.replace(/`/g, ''),
                                 logic_anchor: hint.logic_anchor
@@ -400,7 +461,7 @@ class CascadeGraph {
                 // 3. Scan for Error Anchors
                 if (KB.error_anchors) {
                     for (const anchor of KB.error_anchors) {
-                        if (code.includes(anchor.content)) {
+                        if (chunkCode.includes(anchor.content)) {
                             errorSignature = anchor.role;
                             console.log(`    [!] Error Anchor: Found ${anchor.role}`);
                         }
@@ -417,7 +478,7 @@ class CascadeGraph {
             if (!suggestedName) {
                 const collectedStrings = [];
                 currentChunkNodes.forEach(node => {
-                    try { traverse(node, { ...removeDeadCodeVisitor, noScope: true }); } catch (e) { }
+                    // Dead code removal is now done globally in Phase 0.9 with full scope awareness
                     findStrings(node, collectedStrings);
                 });
 
@@ -565,7 +626,8 @@ class CascadeGraph {
                 if (chunkName === targetChunk) return;
 
                 if (nodeData.code.includes(definedName)) {
-                    const regex = new RegExp(`\\b${definedName}\\b`);
+                    const escapedName = definedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const regex = new RegExp(`\\b${escapedName}\\b`);
                     if (regex.test(nodeData.code)) {
                         nodeData.neighbors.add(targetChunk);
                     }
@@ -590,7 +652,10 @@ class CascadeGraph {
 
         let scores = new Array(size).fill(1 / size);
 
-        const nameToIndex = new Map(names.map((name, idx) => [name, idx]));
+        const founderIndices = names
+            .map((name, idx) => (this.nodes.get(name).category === 'priority' ? idx : -1))
+            .filter(idx => idx !== -1);
+        const redistributionTargets = founderIndices.length > 0 ? founderIndices : Array.from({ length: size }, (_, i) => i);
 
         for (let iter = 0; iter < 100; iter++) {
             let nextScores = new Array(size).fill(teleportProbability);
@@ -607,8 +672,17 @@ class CascadeGraph {
                         if (neighborIdx !== undefined && neighborIdx !== -1) nextScores[neighborIdx] += contribution;
                     });
                 } else {
-                    // Sink node: redistribute its score equally
-                    for (let j = 0; j < size; j++) nextScores[j] += (scores[i] * dampingFactor) / size;
+                    // Hybrid Teleportation for Sink nodes: 80% to founders, 20% globally
+                    const sinkContribution = (scores[i] * dampingFactor);
+                    const founderPart = (sinkContribution * 0.8) / redistributionTargets.length;
+                    const globalPart = (sinkContribution * 0.2) / size;
+
+                    for (const targetIdx of redistributionTargets) {
+                        nextScores[targetIdx] += founderPart;
+                    }
+                    for (let g = 0; g < size; g++) {
+                        nextScores[g] += globalPart;
+                    }
                 }
             }
 
@@ -634,9 +708,13 @@ class CascadeGraph {
         });
     }
 
-    // Phase 4: Re-classify based on aggregated chunk data (Relational Identity)
-    classify() {
-        console.log(`[*] Phase 4: Final Classification (Relational Identity System)...`);
+    // Phase 4: Re-classify based on aggregated chunk data (NN + Relational Identity)
+    classify(versionPath) {
+        console.log(`[*] Phase 4: Final Classification (NN + Relational Identity)...`);
+
+        // Load the mapping we just generated in Phase 3.5
+        const mappingPath = path.join(versionPath, 'metadata', 'mapping.json');
+        const nnMapping = fs.existsSync(mappingPath) ? JSON.parse(fs.readFileSync(mappingPath, 'utf8')) : { processed_chunks: [] };
 
         // 1. Pre-calculate Metrics (In-Degree)
         const inDegree = new Map();
@@ -687,8 +765,18 @@ class CascadeGraph {
             const inCount = inDegree.get(name) || 0;
             const outCount = node.neighbors.size;
             const isFamily = familySet.has(name);
+            const isAnchored = nnMapping.processed_chunks.includes(name);
 
-            if (isFamily && node.category !== 'founder') {
+            if (isAnchored) {
+                // The NN found a match in the Gold Standard library DB
+                node.category = 'vendor';
+                node.label = 'LIBRARY_MATCH';
+
+                // Try to find the suggested name from anchored variables
+                const matchEntry = Object.values(nnMapping.variables).find(v => v.source === name || v.source.includes(name));
+                if (matchEntry) node.role = `LIB: ${matchEntry.name}`;
+
+            } else if (isFamily && node.category !== 'founder') {
                 node.category = 'family';
             } else if (!isFamily) {
                 node.category = 'vendor';
@@ -912,13 +1000,39 @@ async function run() {
         }
     }
 
+    // Phase 0.9: Global Dead Code Removal (Scope-Aware)
+    console.log(`[*] Phase 0.9: Running global dead code removal...`);
+    try {
+        traverse(ast, removeDeadCodeVisitor);
+        console.log(`    [+] Dead code removal complete.`);
+    } catch (e) {
+        console.warn(`    [!] Dead code removal failed: ${e.message}`);
+    }
+
     graph.identifyNodes(ast, code);
     graph.detectNeighbors();
+    collapseProxyNodes(graph.nodes); // Collapse simple proxies before centrality
     graph.applyMarkovAnalysis();
-    graph.classify();
-
     OUTPUT_BASE = path.join(OUTPUT_ROOT, version);
     console.log(`[*] Output directory: ${OUTPUT_BASE}`);
+
+    // Phase 3.5: Integrating Neural Anchoring
+    console.log(`[*] Phase 3.5: Integrating Neural Anchoring...`);
+    const modelPath = path.join(__dirname, '../ml/model.pth');
+    if (!fs.existsSync(modelPath)) {
+        console.warn(`    [!] Neural Network model not found at ${modelPath}`);
+        console.warn(`    [!] Performance will be degraded. Run 'npm run bootstrap && npm run train' first for deep analysis.`);
+    } else {
+        const { anchorLogic } = require('./anchor_logic');
+        try {
+            await anchorLogic(version);
+            console.log(`    [+] Neural Anchoring complete.`);
+        } catch (e) {
+            console.error(`    [!] Neural Anchoring failed: ${e.message}`);
+        }
+    }
+
+    graph.classify(OUTPUT_BASE);
 
     graph.saveResults(OUTPUT_BASE);
 

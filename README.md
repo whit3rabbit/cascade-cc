@@ -4,6 +4,14 @@ Pre-processor for CASCADE-style analysis of Claude Code bundles.
 
 Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Fingerprinting + LLM Deobfuscation).
 
+### Workflow
+
+1. Bootstrap Library DNA - Download the libraries Claude depends on (Zod, React, etc.) and extract their structural fingerprints. Mangles and minifies the libraries to simulate real-world obfuscation. We train the neural network on this data. ```npm run bootstrap && npm run train```
+2. Analyze & Anchor Claude - Analyze a real Claude bundle. This is a two-part process: **Structural Analysis** (JavaScript) followed by **Neural Anchoring** (Python). ```npm run analyze && npm run anchor -- <version>```
+3. Deobfuscate (LLM Phase) - Process the proprietary "Founder" logic using the LLM. ```npm run deobfuscate -- <version>```
+4. Assemble Final Codebase - Organize deobfuscated chunks into a coherent file structure based on inferred roles. ```npm run assemble -- <version>```
+5. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
+
 ---
 
 ## 1. Installation & Setup

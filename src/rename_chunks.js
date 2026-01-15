@@ -7,7 +7,7 @@ const generate = require('@babel/generator').default;
 /**
  * Safely renames identifiers in a piece of code using Babel's scope-aware renaming.
  */
-function renameIdentifiers(code, mapping, sourceFile = null) {
+function renameIdentifiers(code, mapping, sourceFile = null, neighbors = []) {
     try {
         const ast = parser.parse(code, {
             sourceType: 'module',
@@ -33,9 +33,13 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                             const entry = mapping.variables[oldName];
                             if (!entry) return;
 
-                            // If multiple sources exist, prioritize the one matching current file
+                            // If multiple sources exist, prioritize the one matching current file or its neighbors
                             const newName = Array.isArray(entry)
-                                ? (entry.find(e => e && e.source === sourceFile)?.name || (entry[0] ? entry[0].name : null))
+                                ? (
+                                    entry.find(e => e && e.source === sourceFile)?.name ||
+                                    entry.find(e => e && neighbors.includes(e.source))?.name ||
+                                    (entry[0] ? entry[0].name : null)
+                                )
                                 : (typeof entry === 'string' ? entry : (entry ? entry.name : null));
 
                             if (newName) {
@@ -63,10 +67,16 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                             newName = chunkMatch.name;
                             confidence = chunkMatch.confidence || 0.8;
                         } else {
-                            const highConf = entry.find(e => e && e.confidence >= 0.9);
-                            if (highConf) {
-                                newName = highConf.name;
-                                confidence = highConf.confidence;
+                            const neighborMatch = entry.find(e => e && neighbors.includes(e.source));
+                            if (neighborMatch) {
+                                newName = neighborMatch.name;
+                                confidence = neighborMatch.confidence || 0.8;
+                            } else {
+                                const highConf = entry.find(e => e && e.confidence >= 0.9);
+                                if (highConf) {
+                                    newName = highConf.name;
+                                    confidence = highConf.confidence;
+                                }
                             }
                         }
                     } else {
@@ -75,8 +85,9 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                     }
 
                     if (newName) {
-                        // SAFETY CHECKS
-                        const isObjectKnown = p.node.object.type === 'Identifier' && mapping.variables[p.node.object.name];
+                        // SAFETY CHECKS: Allow renaming if object is known OR it's a 'this' expression
+                        const isObjectKnown = (p.node.object.type === 'Identifier' && mapping.variables[p.node.object.name]) ||
+                            p.node.object.type === 'ThisExpression';
                         const isHighConfidence = confidence >= 0.98;
                         const isUnique = propName.length > 2;
 
@@ -103,10 +114,16 @@ function renameIdentifiers(code, mapping, sourceFile = null) {
                             newName = chunkMatch.name;
                             confidence = chunkMatch.confidence || 0.8;
                         } else {
-                            const highConf = entry.find(e => e && e.confidence >= 0.9);
-                            if (highConf) {
-                                newName = highConf.name;
-                                confidence = highConf.confidence;
+                            const neighborMatch = entry.find(e => e && neighbors.includes(e.source));
+                            if (neighborMatch) {
+                                newName = neighborMatch.name;
+                                confidence = neighborMatch.confidence || 0.8;
+                            } else {
+                                const highConf = entry.find(e => e && e.confidence >= 0.9);
+                                if (highConf) {
+                                    newName = highConf.name;
+                                    confidence = highConf.confidence;
+                                }
                             }
                         }
                     } else {
@@ -188,7 +205,9 @@ async function main() {
             const chunkBase = path.basename(file, '.js');
             const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
             const outputPath = path.join(deobfuscatedDir, finalName);
-            const renamedCode = renameIdentifiers(code, mapping, chunkBase);
+
+            const neighbors = chunkMeta ? [...chunkMeta.neighbors || [], ...chunkMeta.outbound || []] : [];
+            const renamedCode = renameIdentifiers(code, mapping, chunkBase, neighbors);
 
             if (renamedCode) {
                 fs.writeFileSync(outputPath, renamedCode);

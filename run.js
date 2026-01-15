@@ -1,6 +1,26 @@
-const { execSync, spawn } = require('child_process');
+const { execSync, spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+
+const findPython = () => {
+    const paths = [
+        path.join(__dirname, '.venv/bin/python3'),
+        path.join(__dirname, 'ml/.venv/bin/python3'),
+        path.join(__dirname, 'ml/venv/bin/python3'),
+        path.join(__dirname, '.venv/Scripts/python.exe'),
+        path.join(__dirname, 'ml/venv/Scripts/python.exe'),
+        'python3',
+        'python'
+    ];
+    for (const p of paths) {
+        try {
+            if (fs.existsSync(p)) return p;
+        } catch (e) { }
+    }
+    return 'python3';
+};
+
+const PYTHON_BIN = findPython();
 
 const command = process.argv[2];
 const args = process.argv.slice(3);
@@ -53,22 +73,6 @@ const scripts = {
 if (!command || !scripts[command]) {
     console.log('Usage: node run <command> [args]');
     console.log('\nAvailable commands:');
-    const findPython = () => {
-        const paths = [
-            path.join(__dirname, '.venv/bin/python3'),
-            path.join(__dirname, 'ml/.venv/bin/python3'),
-            'python3',
-            'python'
-        ];
-        for (const p of paths) {
-            try {
-                if (fs.existsSync(p)) return p;
-            } catch (e) { }
-        }
-        return 'python3';
-    };
-
-    const PYTHON_BIN = findPython();
     Object.entries(scripts).forEach(([name, cfg]) => {
         console.log(`  ${name.padEnd(12)} - ${cfg.desc}`);
     });
@@ -102,7 +106,6 @@ switch (command) {
 
     case 'bootstrap': {
         console.log(`[*] Initiating Library Bootstrapping...`);
-        const { spawnSync } = require('child_process');
         const runPython = (scriptPath, args = []) => {
             return spawnSync(PYTHON_BIN, [scriptPath, ...args], { stdio: 'inherit', shell: true });
         };
@@ -116,7 +119,7 @@ switch (command) {
             const libs = fs.readdirSync(bootstrapDir).filter(f => fs.statSync(path.join(bootstrapDir, f)).isDirectory());
             for (const lib of libs) {
                 console.log(`    [+] Vectorizing ${lib}...`);
-                spawnSync(pythonEnv, ['ml/vectorize.py', path.join(bootstrapDir, lib)], { stdio: 'inherit' });
+                spawnSync(PYTHON_BIN, ['ml/vectorize.py', path.join(bootstrapDir, lib)], { stdio: 'inherit' });
             }
         }
 
@@ -129,10 +132,9 @@ switch (command) {
 
     case 'train': {
         const bootstrapDir = './ml/bootstrap_data';
-        const pythonEnv = fs.existsSync('./ml/venv/bin/python3') ? './ml/venv/bin/python3' : 'python3';
 
         console.log(`[*] Initiating Model Training on Gold Standards...`);
-        const child = spawn(pythonEnv, ['ml/train.py', bootstrapDir], {
+        const child = spawn(PYTHON_BIN, ['ml/train.py', bootstrapDir], {
             stdio: 'inherit',
             shell: true
         });

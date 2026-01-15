@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .constants import NODE_TYPES, TYPE_TO_ID, VOCAB_SIZE
+from constants import NODE_TYPES, TYPE_TO_ID, VOCAB_SIZE
 
 class CodeStructureEncoder(nn.Module):
     def __init__(self, vocab_size=VOCAB_SIZE, embedding_dim=64, hidden_dim=128):
@@ -14,20 +14,34 @@ class CodeStructureEncoder(nn.Module):
         self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, bidirectional=True)
         
         # Final projection to a fixed-size fingerprint
-        self.fc = nn.Linear(hidden_dim * 2, hidden_dim)
+        # Concatenate avg_pool (hidden_dim * 2) + final_hidden (hidden_dim * 2)
+        self.fc = nn.Linear(hidden_dim * 4, hidden_dim)
 
     def forward(self, x):
         # x shape: (batch_size, sequence_length)
         embedded = self.nodes_embedding(x)
         
         # Process structural sequence
-        _, (hidden, _) = self.lstm(embedded)
+        lstm_out, (hn, cn) = self.lstm(embedded) # lstm_out: (batch_size, seq_len, hidden_dim * 2)
         
-        # Concatenate forward and backward hidden states
-        hidden_cat = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim=1)
+        # Capture final hidden state (bidirectional)
+        # hn shape: (num_layers * num_directions, batch_size, hidden_dim)
+        # For bidirectional: [forward_layer_1, backward_layer_1, ...]
+        final_hidden = torch.cat([hn[-2], hn[-1]], dim=1) # (batch_size, hidden_dim * 2)
         
-        # Return the normalized Logic Vector
-        return F.normalize(self.fc(hidden_cat), p=2, dim=1)
+        # Global Average Pooling over the sequence dimension
+        # We mask out the padding (0) to get a true average
+        mask = (x != 0).float().unsqueeze(-1) # (batch_size, seq_len, 1)
+        masked_out = lstm_out * mask
+        sum_out = torch.sum(masked_out, dim=1)
+        count = torch.clamp(torch.sum(mask, dim=1), min=1e-9)
+        avg_pool = sum_out / count
+        
+        # Combine average pool and final hidden state
+        combined = torch.cat([avg_pool, final_hidden], dim=1)
+        
+        # Final projection and normalization
+        return F.normalize(self.fc(combined), p=2, dim=1)
 
 class ASTPreprocessor:
     def __init__(self):
@@ -53,7 +67,7 @@ class ASTPreprocessor:
             
         return sequence
 
-    def process_chunk(self, structural_ast_nodes, max_seq_len=256):
+    def process_chunk(self, structural_ast_nodes, max_seq_len=1024):
         """Converts a list of structural AST nodes into a single padded tensor."""
         full_sequence = []
         for node in structural_ast_nodes:

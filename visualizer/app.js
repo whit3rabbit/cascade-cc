@@ -97,9 +97,14 @@ async function init() {
                 layoutBtns.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 if (btn.dataset.layout === 'circular') {
+                    if (window.FA2Layout) window.FA2Layout.stop();
                     graphologyLibrary.layout.circular.assign(graph);
                 } else if (btn.dataset.layout === 'force') {
-                    graphologyLibrary.layoutForceAtlas2.assign(graph, { iterations: 100, settings: { gravity: 1 } });
+                    if (window.FA2Layout) window.FA2Layout.stop();
+                    window.FA2Layout = new graphologyLibrary.layoutForceAtlas2.FA2Layout(graph, {
+                        settings: { gravity: 1 }
+                    });
+                    window.FA2Layout.start();
                 }
             });
         });
@@ -121,7 +126,13 @@ async function init() {
             console.log(`[*] Large graph detected (${graph.order} nodes), using Circular layout.`);
             graphologyLibrary.layout.circular.assign(graph);
         } else {
-            graphologyLibrary.layoutForceAtlas2.assign(graph, { iterations: 100, settings: { gravity: 1 } });
+            // Use Web Worker for ForceAtlas2 layout to keep UI responsive
+            if (window.FA2Layout) window.FA2Layout.stop();
+            window.FA2Layout = new graphologyLibrary.layoutForceAtlas2.FA2Layout(graph, {
+                settings: { gravity: 1 }
+            });
+            window.FA2Layout.start();
+            setTimeout(() => window.FA2Layout.stop(), 5000); // Auto-stop after 5s or when user clicks
         }
 
     } catch (err) {
@@ -165,7 +176,12 @@ function updateGraphFromFilter() {
     });
 
     if (typeof graphologyLibrary !== 'undefined') {
-        graphologyLibrary.layoutForceAtlas2.assign(graph, { iterations: 50 });
+        if (window.FA2Layout) window.FA2Layout.stop();
+        window.FA2Layout = new graphologyLibrary.layoutForceAtlas2.FA2Layout(graph, {
+            settings: { gravity: 1 }
+        });
+        window.FA2Layout.start();
+        setTimeout(() => window.FA2Layout.stop(), 2000);
     }
 }
 

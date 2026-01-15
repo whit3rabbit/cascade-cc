@@ -116,13 +116,14 @@ function initKBHintsMap(kb) {
     });
 }
 
-function filterKBHints(code, kb, maxHints = 100) {
+function filterKBHints(code, kb, chunkVector = null, logicDb = [], maxHints = 100) {
     if (!kb || !kb.name_hints) return 'None';
     if (!KB_HINTS_MAP) initKBHintsMap(kb);
 
     const codeWords = new Set(code.toLowerCase().match(/[a-z0-9]+/g) || []);
     const candidateHints = new Map(); // hint -> score
 
+    // Word-based scoring
     codeWords.forEach(w => {
         const hints = KB_HINTS_MAP.get(w);
         if (hints) {
@@ -131,6 +132,19 @@ function filterKBHints(code, kb, maxHints = 100) {
             });
         }
     });
+
+    // Vector-based scoring (if available)
+    if (chunkVector && logicDb.length > 0) {
+        const calculateSim = (v1, v2) => v1.reduce((sum, a, i) => sum + a * v2[i], 0);
+        kb.name_hints.forEach(hint => {
+            if (hint.logic_vector) {
+                const sim = calculateSim(chunkVector, hint.logic_vector);
+                if (sim > 0.9) {
+                    candidateHints.set(hint, (candidateHints.get(hint) || 0) + sim * 10);
+                }
+            }
+        });
+    }
 
     const relevantHints = Array.from(candidateHints.keys())
         .map(h => ({ ...h, score: candidateHints.get(h) }))
@@ -275,7 +289,9 @@ async function run() {
     }
 
     const graphMapPath = path.join(versionPath, 'metadata', 'graph_map.json');
+    const logicDbPath = path.join(versionPath, 'metadata', 'logic_db.json');
     let graphData = [];
+    let logicDb = [];
     if (fs.existsSync(graphMapPath)) {
         try {
             const rawData = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
@@ -287,6 +303,14 @@ async function run() {
     } else {
         console.error(`[!] Error: graph_map.json not found at ${graphMapPath}`);
         process.exit(1);
+    }
+
+    if (fs.existsSync(logicDbPath)) {
+        try {
+            logicDb = JSON.parse(fs.readFileSync(logicDbPath, 'utf8'));
+        } catch (err) {
+            console.warn(`[!] Warning: Error parsing logic_db.json: ${err.message}`);
+        }
     }
 
     // Sort by Centrality (descending) AND Category priority
@@ -386,10 +410,25 @@ async function run() {
             }
 
             const filteredMapping = {
-                variables: { ...neighborMapping.variables },
-                properties: { ...neighborMapping.properties }
+                variables: {},
+                properties: {}
             };
 
+            const codeLower = code.toLowerCase();
+
+            // SKELETONIZE: Only include neighbor mappings for identifiers used in this chunk
+            for (const [id, name] of Object.entries(neighborMapping.variables)) {
+                if (codeLower.includes(id.toLowerCase())) {
+                    filteredMapping.variables[id] = name;
+                }
+            }
+            for (const [id, name] of Object.entries(neighborMapping.properties)) {
+                if (codeLower.includes(id.toLowerCase())) {
+                    filteredMapping.properties[id] = name;
+                }
+            }
+
+            // Also include any already mapped identifiers for this chunk
             for (const key of variables) {
                 if (globalMapping.variables[key]) {
                     const entry = globalMapping.variables[key];
@@ -404,8 +443,8 @@ async function run() {
             }
 
             const finalFilteredMapping = {
-                variables: Object.fromEntries(Object.entries(filteredMapping.variables).slice(0, 150)),
-                properties: Object.fromEntries(Object.entries(filteredMapping.properties).slice(0, 150))
+                variables: Object.fromEntries(Object.entries(filteredMapping.variables).slice(0, 100)),
+                properties: Object.fromEntries(Object.entries(filteredMapping.properties).slice(0, 100))
             };
 
             const neighborInfo = chunkMeta.outbound.map(targetId => {
@@ -415,6 +454,54 @@ async function run() {
 
             console.log(`[*] Submitting ${file} to LLM...`);
 
+            // --- TWO-PASS STRATEGY FOR FOUNDER CHUNKS ---
+            let discoveryInfo = null;
+            if (chunkMeta.category === 'founder') {
+                console.log(`[*]   [PASS 1: DISCOVERY] Analyzing ${file}...`);
+                const discoveryPrompt = `
+Role: Senior Reverse Engineer
+Task: Discovery Pass (High-level Logic Identification)
+
+Analyze this "FOUNDER" chunk of an AI Agent codebase.
+IDENTIFY:
+1. The High-level Purpose/Role of this chunk.
+2. The "Public API" (Functions and Variables intended to be used by other modules).
+3. Any key internal state properties it manages.
+
+CODE:
+\`\`\`javascript
+${code}
+\`\`\`
+
+RESPONSE FORMAT (JSON ONLY):
+{
+  "role": "Description of the role",
+  "public_api": { "mangled_id": "suggested_name", ... },
+  "summary": "Concise summary"
+}
+`;
+                try {
+                    const discoveryResponse = await callLLM(discoveryPrompt);
+                    const { cleaned: cleanedDiscovery } = cleanLLMResponse(discoveryResponse);
+                    if (cleanedDiscovery) {
+                        const discoveryData = JSON.parse(require('jsonrepair').jsonrepair(cleanedDiscovery));
+                        discoveryInfo = discoveryData;
+                        console.log(`[*]   [DISCOVERY] ${file} identified as: ${discoveryData.role}`);
+
+                        // Seed the mapping with discovered public API
+                        if (discoveryData.public_api) {
+                            for (const [id, name] of Object.entries(discoveryData.public_api)) {
+                                if (!globalMapping.variables[id]) {
+                                    globalMapping.variables[id] = { name, confidence: 0.9, source: `${chunkMeta.name}_discovery` };
+                                }
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn(`    [!] Discovery pass failed for ${file}: ${err.message}`);
+                }
+            }
+
             const prompt = `
 Role: Senior Reverse Engineer
 Task: Semantic Identity Mapping (Unobfuscation)
@@ -423,7 +510,8 @@ Analyze the provided JavaScript code chunk from an AI Agent CLI tool.
 Goal: Map obfuscated variables and object properties to human-readable names.
 
 CHUNK METADATA:
-- Role: ${chunkMeta.role}
+- Role: ${discoveryInfo?.role || chunkMeta.role}
+- Discovery Summary: ${discoveryInfo?.summary || 'None'}
 - Label: ${chunkMeta.label}
 - Logical Source: ${chunkMeta.kb_info?.suggested_path || 'unknown'}
 - Bundle Line Range: ${chunkMeta.startLine} - ${chunkMeta.endLine}
@@ -438,7 +526,7 @@ EXISTING MAPPINGS (Subset for context):
 ${JSON.stringify(finalFilteredMapping, null, 2)}
 
 REFERENCE HINTS FROM KNOWLEDGE BASE:
-${filterKBHints(code, KB)}
+${filterKBHints(code, KB, logicDb.find(c => c.name === chunkMeta.name)?.vector, logicDb)}
 
 CODE:
 \`\`\`javascript
@@ -488,12 +576,12 @@ RESPONSE FORMAT (JSON ONLY):
                     const { jsonrepair } = require('jsonrepair');
                     try {
                         responseData = JSON.parse(jsonrepair(cleanedJson));
+                        if (!responseData || !responseData.mappings) {
+                            throw new Error("Invalid response structure: 'mappings' key missing.");
+                        }
                     } catch (e) {
-                        const open = (cleanedJson.match(/\{/g) || []).length;
-                        const close = (cleanedJson.match(/\}/g) || []).length;
-                        if (open > close) {
-                            responseData = JSON.parse(cleanedJson.trim().replace(/[a-zA-Z0-9_\-]$/, '"') + '}'.repeat(open - close));
-                        } else throw e;
+                        console.warn(`    [!] JSON Repair failed for ${file}: ${e.message}`);
+                        throw e; // Retry
                     }
 
                     const newMappings = responseData.mappings || {};

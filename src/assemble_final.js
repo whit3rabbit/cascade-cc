@@ -193,7 +193,12 @@ async function assemble(version) {
         }
 
         let mergedCode = `/**\n * File: ${filePath}\n * Role: ${chunkList[0].role}\n * Aggregated from ${chunkList.length} chunks\n */\n\n`;
-        mergedCode += Array.from(headers).join('\n') + '\n\n';
+
+        if (headers.size > 0) {
+            mergedCode += `if (!globalThis.__CASCADE_HELPERS_LOADED) {\n`;
+            mergedCode += Array.from(headers).join('\n') + '\n';
+            mergedCode += `  globalThis.__CASCADE_HELPERS_LOADED = true;\n}\n\n`;
+        }
 
         for (const { meta, code } of finalChunks) {
             mergedCode += `// --- Chunk: ${meta.name} (Original lines: ${meta.startLine}-${meta.endLine}) ---\n`;

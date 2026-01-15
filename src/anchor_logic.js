@@ -18,9 +18,12 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
     const refSymbolMap = new Map();
     refSymbols.forEach(ref => {
         if (ref && typeof ref === 'object' && ref.key) {
+            // We use the key as the primary match point
             refSymbolMap.set(ref.key, ref.name);
         }
     });
+
+    const unmatchedTargetSymbols = [];
 
     // Match target symbols to ref symbols using keys
     for (const targetSymbol of targetSymbols) {
@@ -29,32 +32,33 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
         const targetMangled = targetSymbol.name;
         const refMangled = refSymbolMap.get(targetSymbol.key);
 
-        if (!refMangled) continue;
+        if (refMangled) {
+            const resolvedVar = resolvedVariables[refMangled];
+            const resolvedProp = resolvedProperties[refMangled];
 
-        const resolvedVar = resolvedVariables[refMangled];
-        const resolvedProp = resolvedProperties[refMangled];
-
-        if (resolvedVar) {
-            if (!targetMapping.variables[targetMangled]) {
-                targetMapping.variables[targetMangled] = {
-                    name: typeof resolvedVar === 'string' ? resolvedVar : resolvedVar.name,
-                    confidence: 0.95,
-                    source: `anchored_from_${sourceLabel}`
-                };
-                alignedCount++;
+            if (resolvedVar) {
+                if (!targetMapping.variables[targetMangled]) {
+                    targetMapping.variables[targetMangled] = {
+                        name: typeof resolvedVar === 'string' ? resolvedVar : resolvedVar.name,
+                        confidence: 0.95,
+                        source: `anchored_from_${sourceLabel}`
+                    };
+                    alignedCount++;
+                }
             }
-        }
-        if (resolvedProp) {
-            if (!targetMapping.properties[targetMangled]) {
-                targetMapping.properties[targetMangled] = {
-                    name: typeof resolvedProp === 'string' ? resolvedProp : resolvedProp.name,
-                    confidence: 0.95,
-                    source: `anchored_from_${sourceLabel}`
-                };
-                alignedCount++;
+            if (resolvedProp) {
+                if (!targetMapping.properties[targetMangled]) {
+                    targetMapping.properties[targetMangled] = {
+                        name: typeof resolvedProp === 'string' ? resolvedProp : resolvedProp.name,
+                        confidence: 0.95,
+                        source: `anchored_from_${sourceLabel}`
+                    };
+                    alignedCount++;
+                }
             }
         }
     }
+
     return alignedCount;
 }
 

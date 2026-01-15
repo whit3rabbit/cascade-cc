@@ -1,6 +1,6 @@
 # Common Babel node types.
 NODE_TYPES = [
-    "UNKNOWN", "File", "Program", "FunctionDeclaration", "FunctionExpression", 
+    "PAD", "UNKNOWN", "File", "Program", "FunctionDeclaration", "FunctionExpression", 
     "ArrowFunctionExpression", "VariableDeclaration", "VariableDeclarator",
     "Identifier", "StringLiteral", "NumericLiteral", "BooleanLiteral",
     "NullLiteral", "RegExpLiteral", "BinaryExpression", "UnaryExpression",
