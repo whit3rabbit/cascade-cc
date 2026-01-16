@@ -14,6 +14,20 @@ Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Fi
 
 ---
 
+## TL;DR
+
+Install prerequisites below. Then run the following commands:
+
+```bash
+1.  `npm run sync-vocab`
+2.  `npm run bootstrap`
+3.  `node src/update_registry_from_bootstrap.js`
+4.  `npm run train -- --force` # Optional, if you want to retrain the model
+5.  `npm run analyze`
+6.  `npm run anchor -- <version>`
+7.  `npm run deobfuscate -- <version> --skip-vendor`
+```
+
 ## 1. Installation & Setup
 
 ### Requirements
@@ -157,3 +171,35 @@ In `src/anchor_logic.js`, we use similarity thresholds and symbol alignment to e
 ### The "Cold Start" Advantage
 
 By training on many libraries, the NN learns what **"Library-ness"** looks like. It can categorize vendor code even if it has never seen that specific version before, allowing the LLM to focus purely on the proprietary "Founder" logic.
+
+---
+
+## 7. Incremental Knowledge Transfer (Upgrading Versions)
+
+When Claude releases a new version (e.g., `2.1.7` -> `2.1.9`), much of the underlying logic remains identical. You can "upgrade" your analysis and transfer deobfuscation knowledge from an earlier version to a new one.
+
+### How to Upgrade
+
+If you have already deobfuscated version `2.1.7` and want to analyze `2.1.9`, run:
+
+```bash
+# 1. Analyze the new version
+npm run analyze -- 2.1.9
+
+# 2. Transfer knowledge from the old version
+node run anchor 2.1.9 2.1.7
+```
+
+### How Knowledge Transfer Works
+
+The `anchor` command performs a direct version-to-version comparison:
+
+1.  **Vectorization:** Both the new version (`2.1.9`) and the reference version (`2.1.7`) are vectorized.
+2.  **Structural Matching:** The tool looks for high-similarity matches (>90%) between chunks. Because vectors focus on "Logic Topology," minor code shifts (renamed variables or reordered statements) don't break the match.
+3.  **Symbol Alignment:** When a match is found, the tool uses **Structural Keys** (AST-based fingerprints) to align symbols between versions.
+4.  **Mapping Injection:** Resolved names from the `2.1.7` `mapping.json` are injected into the `2.1.9` `mapping.json`.
+
+**Benefits:**
+*   **Token Savings:** Already deobfuscated logic is skipped in the next LLM pass.
+*   **Consistency:** Maintains naming conventions across versions.
+*   **Speed:** Only new or significantly changed logic needs fresh deobfuscation.

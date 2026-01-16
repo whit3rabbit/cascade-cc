@@ -50,7 +50,8 @@ async function updateRegistryFromBootstrap() {
             // We map each symbol to itself. 
             // We put them in both variables and properties to be safe, 
             // as anchor_logic.js will favor properties if present.
-            for (const symbol of chunk.symbols) {
+            for (const symbolObj of chunk.symbols) {
+                const symbol = typeof symbolObj === 'string' ? symbolObj : symbolObj.name;
                 const whitelist = ['_', '$', 'z', 'd', 'e', 'i', 'j', 'k']; // Standard library/loop symbols
                 if (!symbol || (symbol.length < 2 && !whitelist.includes(symbol))) continue; // Skip single chars if not in whitelist
 

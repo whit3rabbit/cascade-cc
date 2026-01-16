@@ -57,7 +57,7 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
             if (!targetMapping.variables[targetMangled]) {
                 targetMapping.variables[targetMangled] = {
                     name: typeof resolvedVar === 'string' ? resolvedVar : resolvedVar.name,
-                    confidence: match.method === 'key' ? 0.95 : 0.8,
+                    confidence: match.method === 'key' ? 0.85 : 0.8,
                     source: `anchored_${match.method}_${sourceLabel}`
                 };
                 alignedCount++;
@@ -67,7 +67,7 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
             if (!targetMapping.properties[targetMangled]) {
                 targetMapping.properties[targetMangled] = {
                     name: typeof resolvedProp === 'string' ? resolvedProp : resolvedProp.name,
-                    confidence: match.method === 'key' ? 0.95 : 0.8,
+                    confidence: match.method === 'key' ? 0.85 : 0.8,
                     source: `anchored_${match.method}_${sourceLabel}`
                 };
                 alignedCount++;
@@ -113,6 +113,9 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
 
         let matchedCount = 0;
         let totalNamesAnchored = 0;
+        let existingMatchedCount = 0;
+        let totalSimilarity = 0;
+        let highSimCount = 0;
 
         for (const targetChunk of targetLogicDb) {
             let bestMatch = { ref: null, similarity: -1, label: null };
@@ -123,9 +126,12 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 }
             }
 
-            if (bestMatch.similarity > 0.95) { // Lowered from 0.98 for cold start reliability
+            if (bestMatch.similarity > 0.85) { // Lowered for cold start reliability
                 const isNewChunk = !targetMapping.processed_chunks.includes(targetChunk.name);
                 const logPrefix = isNewChunk ? '[ANCHOR/REGISTRY] NEW MATCH' : '[ANCHOR/REGISTRY] EXISTING';
+
+                totalSimilarity += bestMatch.similarity;
+                highSimCount++;
 
                 console.log(`    ${logPrefix}: ${targetChunk.name} -> ${bestMatch.label} (${(bestMatch.similarity * 100).toFixed(2)}%)`);
 
@@ -142,14 +148,21 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     targetMapping.processed_chunks.push(targetChunk.name);
                     matchedCount++;
                     totalNamesAnchored += namesAdded;
+                } else {
+                    existingMatchedCount++;
                 }
             }
         }
         fs.writeFileSync(targetMappingPath, JSON.stringify(targetMapping, null, 2));
-        console.log(`[+] Registry Anchoring complete.`);
-        console.log(`    - Total chunks in mapping: ${targetMapping.processed_chunks.length}`);
-        console.log(`    - New chunks matched this run: ${matchedCount}`);
-        console.log(`    - New symbols aligned this run: ${totalNamesAnchored}`);
+        const avgSim = highSimCount > 0 ? (totalSimilarity / highSimCount * 100).toFixed(2) : 0;
+
+        console.log(`\n[+] Registry Anchoring complete.`);
+        console.log(`    - Average Match Similarity: ${avgSim}%`);
+        console.log(`    - Chunks Matched (Total):   ${highSimCount} / ${targetLogicDb.length}`);
+        console.log(`    - Chunks Matched (New):     ${matchedCount}`);
+        console.log(`    - Chunks Matched (Already): ${existingMatchedCount}`);
+        console.log(`    - Total Aligned Symbols:    ${Object.keys(targetMapping.variables).length + Object.keys(targetMapping.properties).length}`);
+        console.log(`    - New Symbols Added:        ${totalNamesAnchored}`);
 
     } else {
         // Mode: Version-to-version anchoring (Legacy/Direct)
@@ -180,6 +193,9 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
 
         let matchedCount = 0;
         let totalNamesAnchored = 0;
+        let existingMatchedCount = 0;
+        let totalSimilarity = 0;
+        let highSimCount = 0;
 
         for (const targetChunk of targetLogicDb) {
             let bestMatch = { ref: null, similarity: -1 };
@@ -190,7 +206,10 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 }
             }
 
-            if (bestMatch.similarity > 0.95) { // Lowered from 0.98 for cold start reliability
+            if (bestMatch.similarity > 0.85) { // Lowered for cold start reliability
+                totalSimilarity += bestMatch.similarity;
+                highSimCount++;
+
                 console.log(`    [ANCHOR/DIRECT] Match: ${targetChunk.name} -> ${bestMatch.ref.name} (${(bestMatch.similarity * 100).toFixed(2)}%)`);
 
                 // For direct anchoring, we need to extract the relevant mappings from refMapping for THAT chunk
@@ -217,11 +236,21 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     targetMapping.processed_chunks.push(targetChunk.name);
                     matchedCount++;
                     totalNamesAnchored += namesAdded;
+                } else {
+                    existingMatchedCount++;
                 }
             }
         }
         fs.writeFileSync(targetMappingPath, JSON.stringify(targetMapping, null, 2));
-        console.log(`[+] Direct Anchoring complete. Matched ${matchedCount} chunks, aligned ${totalNamesAnchored} symbols.`);
+        const avgSim = highSimCount > 0 ? (totalSimilarity / highSimCount * 100).toFixed(2) : 0;
+
+        console.log(`\n[+] Direct Anchoring complete.`);
+        console.log(`    - Average Match Similarity: ${avgSim}%`);
+        console.log(`    - Chunks Matched (Total):   ${highSimCount} / ${targetLogicDb.length}`);
+        console.log(`    - Chunks Matched (New):     ${matchedCount}`);
+        console.log(`    - Chunks Matched (Already): ${existingMatchedCount}`);
+        console.log(`    - Total Aligned Symbols:    ${Object.keys(targetMapping.variables).length + Object.keys(targetMapping.properties).length}`);
+        console.log(`    - New Symbols Added:        ${totalNamesAnchored}`);
     }
 }
 

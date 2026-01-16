@@ -9,7 +9,32 @@
 - `cascade_graph_analysis/`: Generated outputs; treat as build artifacts.
 - `claude-analysis/`: Sample input bundles and analysis references.
 
+## File Structure (Key Files)
+- `src/analyze.js`: Bundle analysis, simplified AST generation, and centrality scoring.
+- `src/anchor_logic.js`: ML-backed structural similarity matching and mapping.
+- `src/assemble_final.js`: Assemble deobfuscated chunks into final codebase.
+- `src/bootstrap_libs.js`: Bootstrap vendor/runtime library detection.
+- `src/deobfuscate_pipeline.js`: LLM pipeline and resume-aware orchestration.
+- `src/deobfuscation_helpers.js`: Shared helpers for deobfuscation steps.
+- `src/init_registry.js`: Initialize naming/metadata registries.
+- `src/llm_client.js`: LLM provider selection, retries, and request plumbing.
+- `src/rename_chunks.js`: Scope-aware Babel renames for deobfuscated chunks.
+- `src/sync_vocab.js`: Sync vocabulary/term lists for analysis.
+- `src/update_registry_from_bootstrap.js`: Update registry from bootstrap data.
+- `ml/constants.py`: Shared ML constants and configuration.
+- `ml/encoder.py`: Model definition for structural fingerprinting.
+- `ml/model.pth`: Trained model weights.
+- `ml/train.py`: Training loop for the structural fingerprint model.
+- `ml/vectorize.py`: Vectorization pipeline for chunk logic embeddings.
+- `visualizer/app.js`: WebGL graph renderer logic.
+- `visualizer/index.html`: Visualizer entry point.
+- `visualizer/style.css`: Visualizer styles.
+- `docs/ARCHITECTURE.md`: System architecture overview.
+- `docs/NN.md`: Neural network internals.
+- `docs/SCHEMA.md`: JSON schema documentation.
+
 ## Build, Test, and Development Commands
+- `source .venv/bin/activate`: Activate the local Python virtualenv (macOS).
 - `npm install`: Install dependencies.
 - `npm start`: Run the analyzer (defaults to `./cli.js` or fetches latest bundle).
 - `npm run analyze -- path/to/bundle.js`: Analyze a specific bundle (generates `simplified_asts.json`).
@@ -72,3 +97,4 @@ flowchart TD
 - `src/llm_client.js` defaults to Gemini if unset, selects the matching key, and retries OpenRouter 429s with backoff.
 - Use `GEMINI_API_KEY` for Gemini or `OPENROUTER_API_KEY` for OpenRouter; keys with `your_` are treated as invalid.
 - Large generated outputs belong in `cascade_graph_analysis/` and should not be hand-edited.
+- This repo assumes macOS for local development.
