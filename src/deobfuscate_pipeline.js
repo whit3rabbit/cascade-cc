@@ -16,6 +16,30 @@ if (fs.existsSync(KB_PATH)) {
     console.log(`[*] Loaded Knowledge Base with ${KB.name_hints?.length || 0} name hints.`);
 }
 
+// --- REFERENCE CONTEXT ---
+const REFERENCE_ROOT = './example_output/2.1.9';
+let REFERENCE_TREE = "";
+
+function loadReferenceTree(dir, prefix = "") {
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir);
+    files.forEach(file => {
+        const fullPath = path.join(dir, file);
+        const relPath = path.relative(REFERENCE_ROOT, fullPath);
+        if (fs.statSync(fullPath).isDirectory()) {
+            REFERENCE_TREE += `${prefix}DIR: ${relPath}\n`;
+            loadReferenceTree(fullPath, prefix + "  ");
+        } else if (file.endsWith('.js') || file.endsWith('.jsx')) {
+            REFERENCE_TREE += `${prefix}FILE: ${relPath}\n`;
+        }
+    });
+}
+
+if (fs.existsSync(REFERENCE_ROOT)) {
+    console.log(`[*] Loading Reference Structure from ${REFERENCE_ROOT}...`);
+    loadReferenceTree(REFERENCE_ROOT);
+}
+
 // --- UTILS ---
 function getLatestVersion(baseDir) {
     if (!fs.existsSync(baseDir)) return null;
@@ -346,6 +370,10 @@ Goal: Map obfuscated identifiers to human-readable names.
 CHUNK METADATA:
 - Role: ${chunkMeta.role}
 - Neighbors: ${(chunkMeta.outbound || []).join(', ')}
+
+${REFERENCE_TREE ? `REFERENCE STRUCTURE (Version 2.1.9):
+Use this tree to infer logical paths and names:
+${REFERENCE_TREE}` : ""}
 
 UNKNOWN IDENTIFIERS:
 - Variables: ${(vars || []).join(', ')}

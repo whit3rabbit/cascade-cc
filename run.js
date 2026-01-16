@@ -51,7 +51,7 @@ const PYTHON_BIN = findPython();
 const command = process.argv[2];
 const args = process.argv.slice(3).map(arg => arg.replace(/[^a-zA-Z0-9.\-_=:/]/g, ''));
 
-const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'train', 'bootstrap', 'clean'];
+const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'train', 'bootstrap', 'clean', 'refine'];
 
 const scripts = {
     'analyze': {
@@ -93,6 +93,11 @@ const scripts = {
         cmd: 'node',
         args: ['src/bootstrap_libs.js', ...args],
         desc: 'Bootstrap library DNA (Gold Standards)'
+    },
+    'refine': {
+        cmd: 'node',
+        args: ['src/refine_codebase.js', ...args],
+        desc: 'Perform final LLM refinement on the assembled codebase'
     }
 };
 
@@ -119,6 +124,7 @@ switch (command) {
     case 'clean':
     case 'deobfuscate':
     case 'assemble':
+    case 'refine':
     case 'anchor': {
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',

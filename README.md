@@ -10,7 +10,8 @@ Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Fi
 2. Analyze & Anchor Claude - Analyze a real Claude bundle. This is a two-part process: **Structural Analysis** (JavaScript) followed by **Neural Anchoring** (Python). ```npm run analyze && npm run anchor -- <version>```
 3. Deobfuscate (LLM Phase) - Process the proprietary "Founder" logic using the LLM. ```npm run deobfuscate -- <version>```
 4. Assemble Final Codebase - Organize deobfuscated chunks into a coherent file structure based on inferred roles. ```npm run assemble -- <version>```
-5. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
+5. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
+6. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
 
 ---
 
@@ -19,13 +20,15 @@ Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Fi
 Install prerequisites below. Then run the following commands:
 
 ```bash
-1.  `npm run sync-vocab`
-2.  `npm run bootstrap`
-3.  `node src/update_registry_from_bootstrap.js`
+1.  `npm run sync-vocab` # Sync the vocabulary
+2.  `npm run bootstrap` # Download the libraries Claude depends on (Zod, React, etc.) and extract their structural fingerprints. Mangles and minifies the libraries to simulate real-world obfuscation. We train the neural network on this data.
+3.  `node src/update_registry_from_bootstrap.js` # Update the logic registry with the bootstrap data
 4.  `npm run train -- --force` # Optional, if you want to retrain the model
-5.  `npm run analyze`
-6.  `npm run anchor -- <version>`
-7.  `npm run deobfuscate -- <version> --skip-vendor`
+5.  `npm run analyze` # Analyze the Claude bundle
+6.  `npm run anchor -- <version>` # Identify the libraries using the "Brain"
+7.  `npm run deobfuscate -- <version> --skip-vendor` # Deobfuscate the proprietary "Founder" logic using the LLM
+8.  `npm run assemble -- <version>` # Split the deobfuscated chunks into a coherent file structure based on inferred roles
+9.  `npm run refine -- <version>` # Final LLM pass over the assembled codebase for a more readable output
 ```
 
 ## 1. Installation & Setup
@@ -104,6 +107,16 @@ Organize deobfuscated chunks into a coherent file structure based on inferred ro
 ```bash
 npm run assemble -- 2.1.7
 ```
+
+### LLM Refinement Pass
+
+Perform final logic reconstruction on the fully assembled codebase. This stage restores clean control flow (if/else), groups related functions, and removes any remaining obfuscation artifacts.
+
+```bash
+npm run refine -- 2.1.7
+```
+
+*Output: Refined source code is saved in `cascade_graph_analysis/2.1.7/refined_assemble/`.*
 
 ### Interactive Visualization
 
