@@ -259,7 +259,7 @@ async function run() {
     const versionPath = path.join(OUTPUT_ROOT, version);
     if (!fs.existsSync(versionPath)) {
         console.error(`[!] Error: Version directory not found at ${versionPath}`);
-        console.error(`    Available versions: ${fs.readdirSync(OUTPUT_ROOT).filter(f => fs.statSync(path.join(OUTPUT_ROOT, f)).isDirectory()).join(', ') || 'None'}`);
+        console.error(`    Available versions: ${fs.readdirSync(OUTPUT_ROOT).filter(f => fs.statSync(path.join(OUTPUT_ROOT, f)).isDirectory()).map(String).join(', ') || 'None'}`);
         process.exit(1);
     }
 
@@ -345,11 +345,11 @@ Goal: Map obfuscated identifiers to human-readable names.
 
 CHUNK METADATA:
 - Role: ${chunkMeta.role}
-- Neighbors: ${chunkMeta.outbound.join(', ')}
+- Neighbors: ${(chunkMeta.outbound || []).join(', ')}
 
 UNKNOWN IDENTIFIERS:
-- Variables: ${vars.join(', ')}
-- Properties: ${props.join(', ')}
+- Variables: ${(vars || []).join(', ')}
+- Properties: ${(props || []).join(', ')}
 
 CODE:
 \`\`\`javascript

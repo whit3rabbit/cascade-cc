@@ -189,6 +189,8 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
     }
 }
 
+const crypto = require('crypto');
+
 async function main() {
     const versionPath = process.argv[2];
     if (!versionPath) {
@@ -213,10 +215,17 @@ async function main() {
 
     if (!fs.existsSync(deobfuscatedDir)) fs.mkdirSync(deobfuscatedDir, { recursive: true });
 
-    console.log(`[*] Renaming ${chunkFiles.length} chunks...`);
+    // Track all files in the deobfuscated directory before processing
+    const existingDeobfFiles = new Set(fs.readdirSync(deobfuscatedDir).filter(f => f.endsWith('.js')));
+    const generatedFiles = new Set();
+
+    console.log(`[*] Synchronizing ${chunkFiles.length} deobfuscated chunks...`);
 
     let successCount = 0;
     let failCount = 0;
+    let newCount = 0;
+    let updatedCount = 0;
+    let unchangedCount = 0;
 
     for (const file of chunkFiles) {
         try {
@@ -231,19 +240,17 @@ async function main() {
                 if (chunkMeta.suggestedFilename) {
                     logicalName = chunkMeta.suggestedFilename;
                 } else if (chunkMeta.kb_info && chunkMeta.kb_info.suggested_path) {
-                    // Extract basename from suggested_path (e.g., `src/utils/foo.ts` -> foo)
                     logicalName = path.basename(chunkMeta.kb_info.suggested_path.replace(/`/g, ''), '.ts').replace('.js', '');
                 }
             }
 
-            // Sanitize logicalName: replace slashes and other dangerous characters with underscore
             logicalName = logicalName.replace(/[\/\\?%*:|"<>]/g, '_');
-
             const chunkBase = path.basename(file, '.js');
             const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
             const outputPath = path.join(deobfuscatedDir, finalName);
+            generatedFiles.add(finalName);
 
-            const neighbors = chunkMeta ? [...chunkMeta.neighbors || [], ...chunkMeta.outbound || []] : [];
+            const neighbors = chunkMeta ? [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])] : [];
             const renamedCode = renameIdentifiers(code, mapping, {
                 sourceFile: chunkBase,
                 neighbors,
@@ -251,27 +258,51 @@ async function main() {
                 suggestedPath: chunkMeta?.kb_info?.suggested_path
             });
 
-            if (renamedCode) {
-                fs.writeFileSync(outputPath, renamedCode);
-                successCount++;
+            const finalCode = renamedCode || code;
+            const newHash = crypto.createHash('md5').update(finalCode).digest('hex');
+
+            if (fs.existsSync(outputPath)) {
+                const oldHash = crypto.createHash('md5').update(fs.readFileSync(outputPath, 'utf8')).digest('hex');
+                if (newHash === oldHash) {
+                    unchangedCount++;
+                } else {
+                    fs.writeFileSync(outputPath, finalCode);
+                    updatedCount++;
+                    console.log(`    [UPDATE] ${finalName}`);
+                }
             } else {
-                console.error(`    [!] Failed to transform ${file}, copying original.`);
-                fs.writeFileSync(outputPath, code);
-                failCount++;
+                fs.writeFileSync(outputPath, finalCode);
+                newCount++;
+                console.log(`    [NEW] ${finalName}`);
             }
+
+            if (renamedCode) successCount++;
+            else failCount++;
+
         } catch (err) {
             console.error(`    [!] Error processing ${file}: ${err.message}`);
-            // Attempt to write original as fallback
-            try {
-                const chunkBase = path.basename(file, '.js');
-                const fallbackPath = path.join(deobfuscatedDir, file);
-                fs.writeFileSync(fallbackPath, fs.readFileSync(path.join(chunksDir, file), 'utf8'));
-            } catch (e) { }
             failCount++;
         }
     }
 
-    console.log(`[OK] Stage 2 Complete: ${successCount} succeeded, ${failCount} failed.`);
+    // --- CLEANUP STALE FILES ---
+    let deleteCount = 0;
+    for (const existingFile of existingDeobfFiles) {
+        if (!generatedFiles.has(existingFile)) {
+            const filePath = path.join(deobfuscatedDir, existingFile);
+            fs.unlinkSync(filePath);
+            deleteCount++;
+            console.log(`    [DELETE] ${existingFile}`);
+        }
+    }
+
+    console.log(`\n[COMPLETE] Sync Summary:`);
+    console.log(`    - New:       ${newCount}`);
+    console.log(`    - Updated:   ${updatedCount}`);
+    console.log(`    - Unchanged: ${unchangedCount}`);
+    console.log(`    - Deleted:   ${deleteCount}`);
+    console.log(`    - Total:     ${generatedFiles.size} chunks in deobfuscated_chunks/`);
+    if (failCount > 0) console.warn(`    - Failed to transform ${failCount} chunks (used original code).`);
 }
 
 main().catch(console.error);

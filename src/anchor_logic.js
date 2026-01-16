@@ -220,18 +220,23 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         fs.writeFileSync(targetMappingPath, JSON.stringify(targetMapping, null, 2));
 
         // Match anchoring results back to graph_map.json
-        const graphMapRaw = JSON.parse(fs.readFileSync(path.join(targetPath, 'metadata', 'graph_map.json'), 'utf8'));
-        const graphMap = Array.isArray(graphMapRaw) ? graphMapRaw : (graphMapRaw.chunks || []);
+        const graphMapPath = path.join(targetPath, 'metadata', 'graph_map.json');
+        const graphMapRaw = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
+        const chunks = Array.isArray(graphMapRaw) ? graphMapRaw : (graphMapRaw.chunks || []);
 
         for (const targetChunk of targetLogicDb) {
             if (targetChunk.suggestedFilename) {
-                const mapEntry = graphMap.find(m => m.name === targetChunk.name);
+                const mapEntry = chunks.find(m => m.name === targetChunk.name);
                 if (mapEntry) mapEntry.suggestedFilename = targetChunk.suggestedFilename;
             }
         }
 
-        const graphMapPath = path.join(targetPath, 'metadata', 'graph_map.json');
-        fs.writeFileSync(graphMapPath, JSON.stringify(graphMap, null, 2));
+        if (Array.isArray(graphMapRaw)) {
+            fs.writeFileSync(graphMapPath, JSON.stringify(chunks, null, 2));
+        } else {
+            graphMapRaw.chunks = chunks;
+            fs.writeFileSync(graphMapPath, JSON.stringify(graphMapRaw, null, 2));
+        }
         const avgSim = highSimCount > 0 ? (totalSimilarity / highSimCount * 100).toFixed(2) : 0;
 
         console.log(`\n[+] Registry Anchoring complete.`);
