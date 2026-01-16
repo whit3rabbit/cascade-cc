@@ -11,7 +11,8 @@ Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Fi
 3. Deobfuscate (LLM Phase) - Process the proprietary "Founder" logic using the LLM. ```npm run deobfuscate -- <version>```
 4. Assemble Final Codebase - Organize deobfuscated chunks into a coherent file structure based on inferred roles. ```npm run assemble -- <version>```
 5. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
-6. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
+6. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
+7. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
 
 ---
 
@@ -29,6 +30,7 @@ Install prerequisites below. Then run the following commands:
 7.  `npm run deobfuscate -- <version> --skip-vendor` # Deobfuscate the proprietary "Founder" logic using the LLM
 8.  `npm run assemble -- <version>` # Split the deobfuscated chunks into a coherent file structure based on inferred roles
 9.  `npm run refine -- <version>` # Final LLM pass over the assembled codebase for a more readable output
+10. `npm run visualize` # View the dependency graph and Markov centrality scores
 ```
 
 ## 1. Installation & Setup
@@ -133,7 +135,8 @@ npm run visualize
 - `ml/`: Python ML core (Triplet Loss training, Vectorization).
 - `cascade_graph_analysis/`: Project metadata, Logic DB, and mappings.
 - `claude-analysis/`: Source bundles.
-- `docs/`: [Detailed Architecture](docs/ARCHITECTURE.md), [NN Internals](docs/NN.md), and [Schema Definitions](docs/SCHEMA.md).
+- `claude-analysis/`: Source bundles.
+- `docs/`: [Detailed Architecture](docs/ARCHITECTURE.md), [NN Internals](docs/NN.md), [Schema Definitions](docs/SCHEMA.md), and [Environment Configuration](docs/ENVIRONMENT.md).
 
 ---
 

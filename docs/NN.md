@@ -61,27 +61,17 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
 | :--- | :--- | :--- |
 | `MAX_NODES` | `2048` | Maximum length of the AST sequence. Longer chunks are truncated. |
 | `MAX_LITERALS` | `32` | Maximum number of hashed literals captured per chunk. |
-| `Embedding Dim` | `32` | Dimension of the AST Node Type embeddings. |
-| `Hidden Dim` | `64` | Dimension of the LSTM hidden state (Bi-LSTM results in `128`). |
-| `Literal Dim` | `16` | Dimension of the literal feature vector. |
-| `Fingerprint Dim`| `64` | Final L2-normalized output vector size. |
+| `Embedding Dim` | `64` | Dimension of the AST Node Type embeddings. |
+| `Hidden Dim` | `128` | Dimension of the LSTM hidden state (Bi-LSTM results in `256`). |
+| `Fingerprint Dim`| `128` | Final L2-normalized output vector size. |
 
 ### Architecture Detail
 
 1.  **Structural Channel (Bi-LSTM)**:
     - Inputs: `(Batch, 2048)` token IDs.
-    - Logic: Processes the sequence of AST nodes in both directions to capture local context (e.g., being inside a `try/catch` or a specific `CallExpression`).
-    - Pooling: Uses **Global Average Pooling** (ignoring padding) to create a fixed-size structural representation.
-
-2.  **Literal Channel (Linear + Relu)**:
-    - Inputs: `(Batch, 32)` numeric hashes (0.0 to 1.0).
-    - Logic: Preserves the "semantic texture" of the code (e.g., specific error strings, math constants).
-    - Pooling: Uses order-independent average pooling so that literal order doesn't affect the fingerprint.
-
-3.  **Fusion Layer**:
-    - Concatenates the structural summary and literal features.
-    - Projects them through a final Linear layer to a 64-dimensional space.
-    - Applies **L2 Normalization** to ensure that similarity can be calculated via a simple dot product.
+    - Logic: Processes the sequence of AST nodes in both directions to capture local context.
+    - Concatenation: Joins the **Global Average Pooling** and the **Final Hidden States** (forward and backward) to capture both semantic summary and temporal conclusion.
+    - Normalization: Applies **L2 Normalization** to ensure that similarity can be calculated via a simple dot product.
 
 ---
 

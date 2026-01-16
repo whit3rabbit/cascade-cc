@@ -33,6 +33,7 @@ This file contains high-level metadata about the deobfuscated chunks and their r
       "role": "MODULE",
       "state_touchpoints": ["sessionId"],
       "centrality": 0.05,
+      "score": 0.051,
       "neighborCount": 5,
       "outbound": ["chunk002", "chunk005"],
       "kb_info": {
@@ -41,6 +42,9 @@ This file contains high-level metadata about the deobfuscated chunks and their r
         "weighted_sum": 10
       },
       "hints": [],
+      "hasGenerator": false,
+      "hasStateMutator": false,
+      "error_signature": null,
       "startsWithImport": true
     }
   ],

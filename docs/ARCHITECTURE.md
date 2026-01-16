@@ -59,8 +59,13 @@ graph TD
         L3 --> L4[Final Assembly]
     end
 
+    subgraph "Phase 4: Refinement"
+        R1[Refine Codebase] --> R2[Final Clean Source]
+    end
+
     B4 -.-> A3
     A5 --> L1
+    L4 --> R1
 ```
 
 ### Step 1: Bootstrapping Library DNA
@@ -83,6 +88,9 @@ Chunks identified as "Founder" logic (unique to the application) are sent to an 
 
 ### Step 6: Reconstruction
 The final step uses the `mapping.json` to perform a scope-safe rename across all chunks and writes them to a new directory structure that mirrors the inferred original codebase.
+
+### Step 7: Logic Refinement
+The assembled codebase undergoes a final refinement pass (`npm run refine`). This stage uses an LLM to restore high-level control flow (converting complex ternary chains back to if/else blocks), remove lingering obfuscation boilerplate, and group related functions into logical modules.
 
 ---
 
