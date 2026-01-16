@@ -1,3 +1,4 @@
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
@@ -106,7 +107,7 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
             if (!targetMapping.variables[targetMangled]) {
                 targetMapping.variables[targetMangled] = {
                     name: typeof resolvedVar === 'string' ? resolvedVar : resolvedVar.name,
-                    confidence: match.method === 'key' ? 0.85 : 0.8,
+                    confidence: match.method === 'key' ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9) : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85),
                     source: `anchored_${match.method}_${sourceLabel}`
                 };
                 alignedCount++;
@@ -116,7 +117,7 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
             if (!targetMapping.properties[targetMangled]) {
                 targetMapping.properties[targetMangled] = {
                     name: typeof resolvedProp === 'string' ? resolvedProp : resolvedProp.name,
-                    confidence: match.method === 'key' ? 0.85 : 0.8,
+                    confidence: match.method === 'key' ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9) : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85),
                     source: `anchored_${match.method}_${sourceLabel}`
                 };
                 alignedCount++;
@@ -183,7 +184,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 }
             }
 
-            if (bestMatch.similarity > 0.85) { // Lowered for cold start reliability
+            if (bestMatch.similarity > (parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.9)) { // Lowered for cold start reliability
                 const isNewChunk = !targetMapping.processed_chunks.includes(targetChunk.name);
                 const logPrefix = isNewChunk ? '[ANCHOR/REGISTRY] NEW MATCH' : '[ANCHOR/REGISTRY] EXISTING';
 
@@ -289,7 +290,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 }
             }
 
-            if (bestMatch.similarity > 0.85) { // Lowered for cold start reliability
+            if (bestMatch.similarity > (parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.9)) { // Lowered for cold start reliability
                 totalSimilarity += bestMatch.similarity;
                 highSimCount++;
 

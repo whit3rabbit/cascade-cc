@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -627,12 +628,13 @@ class CascadeGraph {
             // Only allow splitting at the Top Level of the program
             const isTopLevel = statements.includes(node);
 
+            const chunkThreshold = parseInt(process.env.CHUNKING_TOKEN_THRESHOLD) || 2000;
             const shouldSplit = currentChunkNodes.length > 0 && isTopLevel && !isInsideLargeDeclaration && (
                 (isImport && currentChunkHasContent) ||
                 (isModuleWrapperCall && currentTokens > 3000) ||
                 (nodeCategory === 'priority' && currentCategory === 'vendor' && currentTokens > 1500) ||
-                (currentTokens + nodeTokensApprox > 2000) || // 2000*4 = approx 8k tokens
-                (isUtility && currentTokens > 2000)
+                (currentTokens + nodeTokensApprox > chunkThreshold) || // threshold*4 = approx 8k tokens
+                (isUtility && currentTokens > chunkThreshold)
             );
 
             if (shouldSplit) {
@@ -704,7 +706,7 @@ class CascadeGraph {
         if (size === 0) return;
         const nameToIndex = new Map(names.map((name, idx) => [name, idx]));
 
-        const dampingFactor = 0.85;
+        const dampingFactor = parseFloat(process.env.MARKOV_DAMPING_FACTOR) || 0.85;
         const teleportProbability = (1 - dampingFactor) / size;
         const inDegree = new Map();
 
@@ -830,7 +832,10 @@ class CascadeGraph {
                 const neighbors = Array.from(node.neighbors);
                 const familyNeighbors = neighbors.filter(n => familySet.has(n));
 
-                if (neighbors.length > 0 && (familyNeighbors.length / neighbors.length >= 0.3 || familyNeighbors.length >= 2)) {
+                const spreadingRatio = parseFloat(process.env.SPREADING_THRESHOLD_RATIO) || 0.3;
+                const spreadingCount = parseInt(process.env.SPREADING_THRESHOLD_COUNT) || 2;
+
+                if (neighbors.length > 0 && (familyNeighbors.length / neighbors.length >= spreadingRatio || familyNeighbors.length >= spreadingCount)) {
                     familySet.add(name);
                 }
             }
@@ -860,9 +865,14 @@ class CascadeGraph {
                 node.category = 'vendor';
             }
 
-            if (!isFamily && inCount > 15 && outCount < 5) {
+            const vendorIn = parseInt(process.env.VENDOR_LIBRARY_IN_DEGREE) || 15;
+            const vendorOut = parseInt(process.env.VENDOR_LIBRARY_OUT_DEGREE) || 5;
+            const coreIn = parseInt(process.env.CORE_ORCHESTRATOR_IN_DEGREE) || 5;
+            const coreOut = parseInt(process.env.CORE_ORCHESTRATOR_OUT_DEGREE) || 5;
+
+            if (!isFamily && inCount > vendorIn && outCount < vendorOut) {
                 node.label = 'VENDOR_LIBRARY';
-            } else if (isFamily && inCount > 5 && outCount > 5) {
+            } else if (isFamily && inCount > coreIn && outCount > coreOut) {
                 node.label = 'CORE_ORCHESTRATOR';
             }
 
