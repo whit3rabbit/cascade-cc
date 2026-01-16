@@ -5,33 +5,119 @@ const path = require('path');
 /**
  * Updated Library Manifest (2026 Stable Versions)
  * Expanded to include all critical dependencies for deobfuscation mapping.
+ * 
+ * NOTE ON VERSION DRIFT: Multiple versions of the same library are included to 
+ * account for "version drift". This provides the model with a broader range of 
+ * "Gold Standard" logic fingerprints, allowing it to correctly identify core 
+ * library logic even if the target codebase uses a slightly older or newer version.
  */
 const LIBS = [
     // --- The "Brain" and UI Framework ---
     { name: 'zod', version: '4.3.5' },
-    { name: 'zod', version: '3.23.8' }, // Version Drift
+    { name: 'zod', version: '4.2.1' },
+    { name: 'zod', version: '3.23.8' },
     { name: 'react', version: '19.2.3' },
-    { name: 'react', version: '18.3.1' }, // Version Drift
+    { name: 'react', version: '18.3.1' },
     { name: 'ink', version: '6.6.0' },
     { name: '@inkjs/ui', version: '2.0.0' },
     { name: 'ink-text-input', version: '6.0.0' },
     { name: 'ink-select-input', version: '6.2.0' },
+    { name: 'ink-link', version: '5.0.0' },
+    { name: 'ink-spinner', version: '5.0.0' },
 
-    // --- Primary SDKs (Anthropic & MCP) ---
+    // --- Primary SDKs (Anthropic, AWS, GCP, MCP) ---
     { name: '@anthropic-ai/sdk', version: '0.71.2' },
-    { name: '@anthropic-ai/sdk', version: '0.40.0' }, // Version Drift
-    { name: '@modelcontextprotocol/sdk', version: '1.25.2' },
+    { name: '@anthropic-ai/sdk', version: '0.40.0' },
+    { name: '@anthropic-ai/bedrock-sdk', version: '0.26.0' },
+    { name: '@anthropic-ai/vertex-sdk', version: '0.14.0' },
+    { name: '@aws-sdk/client-bedrock', version: '3.962.0' },
+    { name: '@aws-sdk/client-bedrock-runtime', version: '3.962.0' },
+    { name: '@aws-sdk/client-s3', version: '3.958.0' },
+    { name: '@aws-sdk/client-sts', version: '3.958.0' },
+    { name: '@aws-sdk/credential-providers', version: '3.958.0' },
+    { name: '@modelcontextprotocol/sdk', version: '1.25.1' },
 
-    // --- Common Utilities (High Drift) ---
+    // --- Common Utilities & Data Handling ---
+    { name: 'axios', version: '1.13.2' },
     { name: 'axios', version: '1.7.9' },
-    { name: 'axios', version: '0.27.2' }, // Version Drift
+    { name: 'axios', version: '0.27.2' },
+    { name: 'lodash-es', version: '4.17.22' },
     { name: 'lodash-es', version: '4.17.21' },
+    { name: 'ajv', version: '8.17.1' },
+    { name: 'date-fns', version: 'latest' },
+    { name: 'js-yaml', version: '4.1.1' },
+    { name: 'dotenv', version: '17.2.3' },
+    { name: 'uuid', version: 'latest' },
+    { name: 'semver', version: '7.7.3' },
+    { name: 'lru-cache', version: '11.2.4' },
+    { name: 'memoize', version: '10.2.0' },
+    { name: 'micromatch', version: '4.0.8' },
+    { name: 'mime-types', version: '3.0.2' },
 
-    // ... other core libs
+    // --- CLI & Terminal UX ---
     { name: 'execa', version: '9.6.1' },
     { name: 'chalk', version: '5.6.2' },
     { name: 'commander', version: '14.0.2' },
-    { name: 'ws', version: '8.18.3' }
+    { name: 'ansi-escapes', version: '7.2.0' },
+    { name: 'ansi-styles', version: '6.2.3' },
+    { name: 'cli-highlight', version: '2.1.11' },
+    { name: 'cli-table3', version: '0.6.5' },
+    { name: 'figures', version: '6.1.0' },
+    { name: 'is-unicode-supported', version: '2.1.0' },
+    { name: 'string-width', version: '8.1.0' },
+    { name: 'wrap-ansi', version: '9.0.2' },
+    { name: 'supports-hyperlinks', version: '4.4.0' },
+    { name: 'wcwidth', version: '1.0.1' },
+
+    // --- Observability & Analytics ---
+    { name: '@opentelemetry/api', version: '1.9.0' },
+    { name: '@opentelemetry/core', version: '2.2.0' },
+    { name: '@opentelemetry/sdk-trace-node', version: '2.2.0' },
+    { name: '@segment/analytics-node', version: 'latest' },
+    { name: '@sentry/node', version: '10.32.1' },
+    { name: 'statsig-js', version: '5.1.0' },
+
+    // --- Logic & Parsing (Tree-sitter, etc) ---
+    { name: 'tree-sitter', version: '0.21.0' },
+    { name: 'tree-sitter-typescript', version: '0.23.2' },
+    { name: 'web-tree-sitter', version: '0.26.3' },
+    { name: 'jsdom', version: '27.4.0' },
+    { name: 'parse5', version: 'latest' },
+    { name: 'domino', version: 'latest' },
+    { name: 'turndown', version: '7.2.2' },
+    { name: 'marked', version: '17.0.1' },
+    { name: 'gray-matter', version: '4.0.3' },
+
+    // --- System & Hardware ---
+    { name: 'sharp', version: '0.34.5' },
+    { name: '@resvg/resvg-js', version: '2.6.2' },
+    { name: 'pdf-parse', version: '2.4.5' },
+    { name: 'chokidar', version: '5.0.0' },
+    { name: 'proper-lockfile', version: '4.1.2' },
+    { name: 'open', version: '11.0.0' },
+
+    // --- Network & Protocol ---
+    { name: 'ws', version: '8.18.3' },
+    { name: 'https-proxy-agent', version: '7.0.6' },
+    { name: 'abort-controller', version: '3.0.0' },
+
+    // --- Others ---
+    { name: 'diff', version: '8.0.2' },
+    { name: 'fflate', version: 'latest' },
+    { name: 'fuse.js', version: '7.1.0' },
+    { name: 'grapheme-splitter', version: '1.0.4' },
+    { name: 'highlight.js', version: '11.11.1' },
+    { name: 'html-entities', version: 'latest' },
+    { name: 'localforage', version: 'latest' },
+    { name: 'ordered-map', version: '0.1.0' },
+    { name: 'plist', version: '3.1.0' },
+    { name: 'shell-quote', version: '1.8.3' },
+    { name: 'tslib', version: 'latest' },
+    { name: 'uri-js', version: 'latest' },
+    { name: 'word-wrap', version: '1.2.5' },
+    { name: 'xmlbuilder2', version: '3.1.1' },
+    { name: 'xss', version: 'latest' },
+    { name: 'yoga-layout-prebuilt', version: '1.10.0' }
 ];
 
 const BOOTSTRAP_DIR = path.resolve('./ml/bootstrap_data');
