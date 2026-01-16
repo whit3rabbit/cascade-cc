@@ -437,7 +437,30 @@ RESPONSE FORMAT (JSON ONLY):
 
         await Promise.all(tasks);
         fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
+
+        // Persist updated metadata back to graph_map.json
+        console.log(`[*] Persisting updated metadata (suggested filenames) to graph_map.json...`);
+        const originalMetadata = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
+        if (Array.isArray(originalMetadata)) {
+            fs.writeFileSync(graphMapPath, JSON.stringify(graphData, null, 2));
+        } else if (originalMetadata.chunks) {
+            originalMetadata.chunks = graphData;
+            fs.writeFileSync(graphMapPath, JSON.stringify(originalMetadata, null, 2));
+        }
+
         console.log(`[*] Stage 1 Complete. Mapping saved.`);
+    }
+
+    // Ensure metadata is synchronized if we're in a state where it might be stale
+    if (isRenameOnly && !isDryRun) {
+        console.log(`[*] Syncing metadata for rename-only pass...`);
+        const originalMetadata = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
+        if (originalMetadata.chunks && graphData.length > 0) {
+            originalMetadata.chunks = graphData;
+            fs.writeFileSync(graphMapPath, JSON.stringify(originalMetadata, null, 2));
+        } else if (Array.isArray(originalMetadata) && graphData.length > 0) {
+            fs.writeFileSync(graphMapPath, JSON.stringify(graphData, null, 2));
+        }
     }
 
     if (!isDryRun) {

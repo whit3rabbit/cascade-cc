@@ -66,17 +66,24 @@ async function assemble(version) {
     }
 
     const graphData = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
-    const chunks = Array.isArray(graphData) ? graphData : graphData.chunks;
+    const chunks = Array.isArray(graphData) ? graphData : (graphData.chunks || []);
 
-    if (!chunks) {
+    console.log(`[*] Total chunks loaded from metadata: ${chunks.length}`);
+
+    if (!chunks || chunks.length === 0) {
         console.error(`[!] No chunks found in metadata: ${metadataPath}`);
         return;
     }
 
-    // 1. Filter for "Core" chunks (Skip vendor)
-    const coreChunks = chunks.filter(c => c.category === 'family' || c.category === 'priority' || c.category === 'founder');
+    // 1. Filter for "Core" chunks (family, priority, founder) OR vendor chunks that have been identified (suggestedFilename)
+    const coreChunks = chunks.filter(c =>
+        c.category === 'family' ||
+        c.category === 'priority' ||
+        c.category === 'founder' ||
+        (c.category === 'vendor' && c.suggestedFilename)
+    );
 
-    console.log(`[*] Assembling ${coreChunks.length} core chunks into a structured codebase...`);
+    console.log(`[*] Assembling ${coreChunks.length} core/identified chunks into a structured codebase...`);
 
     // 2. Map chunks to their final file paths
     const fileMap = new Map(); // path -> Array<chunkMetadata>
