@@ -282,7 +282,8 @@ async function run() {
     let graphData = [];
     let logicDb = [];
     if (fs.existsSync(graphMapPath)) {
-        graphData = JSON.parse(fs.readFileSync(graphMapPath, 'utf8')).chunks || JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
+        const raw = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
+        graphData = Array.isArray(raw) ? raw : (raw.chunks || []);
     }
     if (fs.existsSync(logicDbPath)) {
         logicDb = JSON.parse(fs.readFileSync(logicDbPath, 'utf8'));

@@ -66,6 +66,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                 if (p.node.computed) return;
 
                 const propName = p.node.property.name;
+                if (!propName) return;
                 if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
                     if (!entry) return;
@@ -128,6 +129,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                 if (p.node.computed) return;
 
                 const propName = p.node.key.name;
+                if (!propName) return;
                 if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
                     const entry = mapping.properties[propName];
                     if (!entry) return;
@@ -201,7 +203,8 @@ async function main() {
     }
 
     const mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
-    const graphData = fs.existsSync(graphMapPath) ? JSON.parse(fs.readFileSync(graphMapPath, 'utf8')) : [];
+    const graphDataRaw = fs.existsSync(graphMapPath) ? JSON.parse(fs.readFileSync(graphMapPath, 'utf8')) : [];
+    const graphData = Array.isArray(graphDataRaw) ? graphDataRaw : (graphDataRaw.chunks || []);
     const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.endsWith('.js'));
 
     if (!fs.existsSync(deobfuscatedDir)) fs.mkdirSync(deobfuscatedDir, { recursive: true });
