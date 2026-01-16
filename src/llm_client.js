@@ -60,6 +60,17 @@ async function callLLM(prompt, retryCount = 0) {
                 return response.text();
             } catch (err) {
                 clearTimeout(timeoutId);
+
+                // Retry for Gemini transient errors (e.g. 503, connectivity)
+                const isTransient = err.message?.includes('503') || err.message?.includes('500') || err.message?.includes('429');
+                const isNetwork = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.message?.includes('fetch failed');
+
+                if ((isTransient || isNetwork) && retryCount < 5) {
+                    const delay = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
+                    console.warn(`[!] Gemini Error: ${err.message}. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
+                    await sleep(delay);
+                    return callLLM(prompt, retryCount + 1);
+                }
                 throw err;
             }
         } else {
@@ -67,27 +78,45 @@ async function callLLM(prompt, retryCount = 0) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
 
-            // Using fetch directly for OpenRouter to ensure we see the full error body
-            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                method: "POST",
-                signal: controller.signal,
-                headers: {
-                    "Authorization": `Bearer ${API_KEY}`,
-                    "HTTP-Referer": "https://github.com/whit3rabbit/cascade-like",
-                    "X-Title": "Cascade-Like Deobfuscator",
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    model: MODEL,
-                    messages: [{ role: 'user', content: prompt }]
-                })
-            });
+            let response;
+            try {
+                response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    signal: controller.signal,
+                    headers: {
+                        "Authorization": `Bearer ${API_KEY}`,
+                        "HTTP-Referer": "https://github.com/whit3rabbit/cascade-like",
+                        "X-Title": "Cascade-Like Deobfuscator",
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        model: MODEL,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+            } catch (fetchErr) {
+                clearTimeout(timeoutId);
+                const isNetwork = fetchErr.code === 'ECONNRESET' || fetchErr.code === 'ETIMEDOUT' || fetchErr.message?.includes('fetch failed') || fetchErr.name === 'AbortError';
+                if (isNetwork && retryCount < 5) {
+                    const delay = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
+                    console.warn(`[!] OpenRouter Network Error: ${fetchErr.message}. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
+                    await sleep(delay);
+                    return callLLM(prompt, retryCount + 1);
+                }
+                throw fetchErr;
+            }
 
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                const errorBody = await response.json().catch(() => ({}));
                 const status = response.status;
+                let errorBody = {};
+                try {
+                    errorBody = await response.json();
+                } catch (e) {
+                    errorBody = { message: "Could not parse error response" };
+                }
+
                 let detailedMessage = errorBody.error ? errorBody.error.message : JSON.stringify(errorBody);
 
                 // Check for insufficient credits
@@ -100,13 +129,12 @@ async function callLLM(prompt, retryCount = 0) {
                 if (status === 401 || status === 403) {
                     throw new Error(`[!] API Key error (${status}): ${detailedMessage}. Please check your OPENROUTER_API_KEY in .env.`);
                 }
-                if (status === 429) {
-                    const isQuota = detailedMessage.toLowerCase().includes('quota') || detailedMessage.toLowerCase().includes('credit');
-                    if (isQuota) throw new Error(`[!] Quota/Credit Exceeded (429): ${detailedMessage}`);
 
-                    if (retryCount < 10) { // Increased retries for free tier
+                // Retry for Rate Limited (429) OR Transient Server Errors (5xx)
+                if (status === 429 || (status >= 500 && status <= 504)) {
+                    if (retryCount < (status === 429 ? 10 : 5)) {
                         const delay = Math.pow(2, retryCount) * 3000 + Math.random() * 2000;
-                        console.warn(`[!] Rate limited (429): ${detailedMessage}. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
+                        console.warn(`[!] ${status === 429 ? 'Rate limited' : 'Server error'} (${status}): ${detailedMessage}. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
                         await sleep(delay);
                         return callLLM(prompt, retryCount + 1);
                     }
@@ -121,8 +149,11 @@ async function callLLM(prompt, retryCount = 0) {
             return data.choices[0].message.content;
         }
     } catch (err) {
-        if (err.name === 'AbortError') {
-            throw new Error(`[!] ${PROVIDER} request timed out after ${LLM_TIMEOUT_MS / 1000}s`);
+        if (err.name === 'AbortError' && retryCount < 5) {
+            const delay = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
+            console.warn(`[!] Request timed out. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
+            await sleep(delay);
+            return callLLM(prompt, retryCount + 1);
         }
         throw err;
     }

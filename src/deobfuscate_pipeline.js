@@ -417,44 +417,59 @@ RESPONSE FORMAT (JSON ONLY):
 
                     const isFirstBatch = (vOffset === 0 && pOffset === 0);
                     const codeToPass = isFirstBatch ? code : skeletonize(code);
-                    const prompt = generatePrompt(varSub, propSub, codeToPass);
-                    try {
-                        const llmResponse = await callLLM(prompt);
-                        const { cleaned: cleanedJson, isTruncated } = cleanLLMResponse(llmResponse);
-                        if (!cleanedJson) throw new Error("No JSON found");
+                    const PROMPT_RETRIES = 3;
+                    let success = false;
 
-                        const { jsonrepair } = require('jsonrepair');
-                        const responseData = JSON.parse(jsonrepair(cleanedJson));
+                    for (let attempt = 1; attempt <= PROMPT_RETRIES; attempt++) {
+                        try {
+                            const llmResponse = await callLLM(prompt);
+                            const { cleaned: cleanedJson, isTruncated } = cleanLLMResponse(llmResponse);
+                            if (!cleanedJson) throw new Error("No JSON found in LLM response");
 
-                        const updateMapping = (source, target, chunkName) => {
-                            for (const [key, mapping] of Object.entries(source)) {
-                                if (!mapping) continue;
-                                const newEntry = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: chunkName } : { ...mapping, source: chunkName };
+                            const { jsonrepair } = require('jsonrepair');
+                            const responseData = JSON.parse(jsonrepair(cleanedJson));
 
-                                if (target[key]) {
-                                    const existing = target[key];
-                                    if (newEntry.confidence > (existing.confidence || 0)) {
+                            const updateMapping = (source, target, chunkName) => {
+                                for (const [key, mapping] of Object.entries(source)) {
+                                    if (!mapping) continue;
+                                    const newEntry = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: chunkName } : { ...mapping, source: chunkName };
+
+                                    if (target[key]) {
+                                        const existing = target[key];
+                                        if (newEntry.confidence > (existing.confidence || 0)) {
+                                            target[key] = newEntry;
+                                        }
+                                    } else {
                                         target[key] = newEntry;
                                     }
-                                } else {
-                                    target[key] = newEntry;
                                 }
+                            };
+
+                            if (responseData.mappings?.variables) updateMapping(responseData.mappings.variables, globalMapping.variables, chunkMeta.name);
+                            if (responseData.mappings?.properties) updateMapping(responseData.mappings.properties, globalMapping.properties, chunkMeta.name);
+                            if (responseData.suggestedFilename) chunkMeta.suggestedFilename = responseData.suggestedFilename;
+
+                            console.log(`    [+] Mapped identifiers in ${file} (Sub-pass)`);
+                            success = true;
+                            break; // Exit retry loop on success
+                        } catch (err) {
+                            const isTransient = err.message?.includes('JSON') || err.message?.includes('Colon expected') || err.message?.includes('Unexpected token');
+                            if (isTransient && attempt < PROMPT_RETRIES) {
+                                const backoff = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
+                                console.warn(`    [!] Attempt ${attempt}/${PROMPT_RETRIES} failed for ${file}: ${err.message}. Retrying in ${Math.round(backoff / 1000)}s...`);
+                                await sleep(backoff);
+                                // Optional: we could try skeletonizing more aggressively or adjusting prompt here
+                            } else {
+                                console.warn(`    [!] Error ${file} (Attempt ${attempt}/${PROMPT_RETRIES}): ${err.message}`);
+                                if (attempt === PROMPT_RETRIES) break;
                             }
-                        };
-
-                        if (responseData.mappings?.variables) updateMapping(responseData.mappings.variables, globalMapping.variables, chunkMeta.name);
-                        if (responseData.mappings?.properties) updateMapping(responseData.mappings.properties, globalMapping.properties, chunkMeta.name);
-                        if (responseData.suggestedFilename) chunkMeta.suggestedFilename = responseData.suggestedFilename;
-
-                        console.log(`    [+] Mapped identifiers in ${file} (Sub-pass)`);
-
-                        // Reliability delay
-                        const { PROVIDER_CONFIG } = require('./llm_client');
-                        const delay = (PROVIDER_CONFIG && PROVIDER_CONFIG[PROVIDER]?.delay) || 3000;
-                        await sleep(delay + Math.random() * 1000);
-                    } catch (err) {
-                        console.warn(`    [!] Error ${file}: ${err.message}`);
+                        }
                     }
+
+                    // Reliability delay between batches
+                    const { PROVIDER_CONFIG } = require('./llm_client');
+                    const delay = (PROVIDER_CONFIG && PROVIDER_CONFIG[PROVIDER]?.delay) || 3000;
+                    await sleep(delay + Math.random() * 1000);
                 }
             }
 
