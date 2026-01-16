@@ -44,15 +44,15 @@ Here are instructions for building your own model if you don't want to use the p
 
 ### Step 1: Bootstrap Library DNA
 
-This downloads the libraries Claude depends on (Zod, React, etc.) and extracts their structural fingerprints.
+This downloads the libraries Claude depends on (Zod, React, etc.) and extracts their structural fingerprints. It loads libraries into `ml/bootstrap_data` and creates a logic registry in `cascade_graph_analysis/bootstrap`.
 
 ```bash
 npm run bootstrap
 ```
 
-### Step 2: Train the Neural Network
+### Step 2: Train the Neural Network (Optional)
 
-This teaches the model to recognize the DNA of those libraries even when they are mangled/minified.
+This teaches the model to recognize the DNA of those libraries even when they are mangled/minified. This is optional and I have included a pre-trained model in the repository.
 
 ```bash
 npm run train
@@ -106,6 +106,7 @@ npm run visualize
 - `ml/`: Python ML core (Triplet Loss training, Vectorization).
 - `cascade_graph_analysis/`: Project metadata, Logic DB, and mappings.
 - `claude-analysis/`: Source bundles.
+- `docs/`: [Detailed Architecture](docs/ARCHITECTURE.md), [NN Internals](docs/NN.md), and [Schema Definitions](docs/SCHEMA.md).
 
 ---
 

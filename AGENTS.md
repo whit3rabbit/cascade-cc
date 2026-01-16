@@ -39,6 +39,12 @@
 - `src/assemble_final.js` (run via `npm run assemble`) performs Path-First Aggregation to create `final_codebase/`.
 - `visualizer/` reads `metadata/` plus chunks.
 
+## Detailed Documentation
+For more in-depth information about the system, please refer to:
+- [Architecture Overview](docs/ARCHITECTURE.md) - Detailed breakdown of the analysis and deobfuscation pipeline.
+- [Neural Network (NN) Internals](docs/NN.md) - Deep dive into the machine learning models and vectorization logic.
+- [Data Schemas](docs/SCHEMA.md) - Documentation for the JSON schemas used throughout the project.
+
 ```mermaid
 flowchart TD
   A[claude-analysis/bundle.js] --> B[src/analyze.js]
