@@ -2,6 +2,42 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
+/**
+ * PROTECTED_GLOBALS: Global variables that should never be renamed.
+ * These are standard JavaScript/Node.js built-ins.
+ */
+const PROTECTED_GLOBALS = new Set([
+    'Object', 'Array', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'JSON', 'Math',
+    'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'globalThis', 'window', 'global',
+    'process', 'require', 'module', 'exports', 'URL', 'Buffer', 'console', 'TypeError',
+    'RangeError', 'ReferenceError', 'SyntaxError', 'URIError', 'EvalError', 'InternalError',
+    'Intl', 'WebAssembly', 'Atomics', 'SharedArrayBuffer', 'DataView', 'ArrayBuffer',
+    'Float32Array', 'Float64Array', 'Int8Array', 'Int16Array', 'Int32Array', 'Uint8Array',
+    'Uint16Array', 'Uint32Array', 'Uint8ClampedArray', 'BigInt64Array', 'BigUint64Array',
+    'arguments', 'undefined', 'null', 'true', 'false', 'Infinity', 'NaN', 'parseInt',
+    'parseFloat', 'isNaN', 'isFinite', 'decodeURI', 'decodeURIComponent', 'encodeURI',
+]);
+
+/**
+ * RESERVED_PROPERTIES: Property names that reflect standard API methods.
+ * Renaming these would break standard library usage.
+ */
+const RESERVED_PROPERTIES = new Set([
+    'then', 'catch', 'finally', 'length', 'map', 'forEach', 'filter', 'reduce',
+    'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'join', 'split',
+    'includes', 'indexOf', 'lastIndexOf', 'hasOwnProperty', 'toString',
+    'valueOf', 'prototype', 'constructor', 'apply', 'call', 'bind',
+    'message', 'stack', 'name', 'code', 'status', 'headers', 'body',
+    'write', 'end', 'on', 'once', 'emit', 'removeListener', 'removeAllListeners',
+    'substring', 'substr', 'replace', 'trim', 'toLowerCase', 'toUpperCase', 'charAt',
+    'match', 'search', 'slice', 'concat', 'entries', 'keys', 'values', 'from',
+    'stdout', 'stderr', 'stdin', 'destroyed', 'preInit'
+]);
+
+/**
+ * Calculates cosine similarity (dot product) between two logic vectors.
+ * Higher similarity indicates more similar structural logic.
+ */
 function calculateSimilarity(vecA, vecB) {
     if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
     return vecA.reduce((sum, a, i) => sum + a * vecB[i], 0); // Dot product
@@ -10,6 +46,12 @@ function calculateSimilarity(vecA, vecB) {
 /**
  * Aligns symbols between two matched entities and updates the target mapping.
  * Uses structural key-based alignment for robustness against code reordering.
+ * 
+ * Workflow:
+ * 1. Build maps of reference symbols for fast lookup.
+ * 2. Attempt high-confidence "key-based" alignment (structural matching).
+ * 3. Fallback to name-based alignment if necessary.
+ * 4. Apply matches to targetMapping, filtering out protected/reserved names.
  */
 function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targetSymbols, refSymbols, sourceLabel) {
     let alignedCount = 0;
@@ -25,6 +67,7 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
     });
 
     // Strategy 1: Key-based alignment (Structural)
+    // We match identifiers that have the same structural usage pattern (key).
     const matchesFound = [];
     for (const targetSymbol of targetSymbols) {
         if (!targetSymbol || typeof targetSymbol !== 'object' || !targetSymbol.key) continue;
@@ -38,20 +81,26 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
     if (matchesFound.length === 0) {
         for (const targetSymbol of targetSymbols) {
             if (!targetSymbol || typeof targetSymbol !== 'object') continue;
-            // Only fallback for non-trivial names if possible, but here we use what we have
             if (refNameMap.has(targetSymbol.name)) {
                 matchesFound.push({ target: targetSymbol.name, ref: targetSymbol.name, method: 'name' });
             }
         }
     }
 
-    // Apply matches
+    // Apply matches: Resolve mangled names back to their logical origins
     for (const match of matchesFound) {
         const targetMangled = match.target;
         const refMangled = match.ref;
 
+        // Never rename standard JS/Node objects or common property names
+        if (PROTECTED_GLOBALS.has(targetMangled) || RESERVED_PROPERTIES.has(targetMangled)) continue;
+
         const resolvedVar = resolvedVariables[refMangled];
         const resolvedProp = resolvedProperties[refMangled];
+
+        // Filter: Avoid global collisions for 1-character variables (e.g., 'A', 'Q').
+        // Properties are allowed since they are context-specific.
+        if (targetMangled.length === 1 && !resolvedProp) continue;
 
         if (resolvedVar) {
             if (!targetMapping.variables[targetMangled]) {
@@ -78,6 +127,14 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
     return alignedCount;
 }
 
+/**
+ * Main anchoring entry point.
+ * Orchestrates:
+ * 1. Vectorization of the target version using Python ML scripts.
+ * 2. Comparison of target chunks against a Registry (known libraries) or a Reference Version.
+ * 3. Symbol alignment and mapping generation.
+ * 4. Updating graph_map.json with logical filename suggestions.
+ */
 async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './cascade_graph_analysis') {
     const targetPath = path.resolve(baseDir, targetVersion);
     const pythonEnv = process.env.PYTHON_BIN || (fs.existsSync(path.join(__dirname, '../.venv/bin/python3'))
@@ -144,6 +201,13 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     bestMatch.label
                 );
 
+                // Match anchoring results back to filenames
+                const libName = bestMatch.label;
+                if (libName.includes('_v')) {
+                    const logicalName = libName.split('_v')[0].replace(/_/g, '-');
+                    targetChunk.suggestedFilename = logicalName;
+                }
+
                 if (isNewChunk) {
                     targetMapping.processed_chunks.push(targetChunk.name);
                     matchedCount++;
@@ -154,6 +218,20 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
             }
         }
         fs.writeFileSync(targetMappingPath, JSON.stringify(targetMapping, null, 2));
+
+        // Match anchoring results back to graph_map.json
+        const graphMapRaw = JSON.parse(fs.readFileSync(path.join(targetPath, 'metadata', 'graph_map.json'), 'utf8'));
+        const graphMap = Array.isArray(graphMapRaw) ? graphMapRaw : (graphMapRaw.chunks || []);
+
+        for (const targetChunk of targetLogicDb) {
+            if (targetChunk.suggestedFilename) {
+                const mapEntry = graphMap.find(m => m.name === targetChunk.name);
+                if (mapEntry) mapEntry.suggestedFilename = targetChunk.suggestedFilename;
+            }
+        }
+
+        const graphMapPath = path.join(targetPath, 'metadata', 'graph_map.json');
+        fs.writeFileSync(graphMapPath, JSON.stringify(graphMap, null, 2));
         const avgSim = highSimCount > 0 ? (totalSimilarity / highSimCount * 100).toFixed(2) : 0;
 
         console.log(`\n[+] Registry Anchoring complete.`);

@@ -52,7 +52,16 @@ function extractIdentifiers(code) {
         const keywords = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'async', 'null', 'true', 'false', 'undefined']);
         const globals = new Set(['console', 'Object', 'Array', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'JSON', 'Math', 'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'globalThis', 'window', 'global', 'process', 'require', 'module', 'exports', 'URL', 'Buffer']);
 
-        const builtInProps = new Set(['toString', 'constructor', 'hasOwnProperty', 'valueOf', 'propertyIsEnumerable', 'toLocaleString', 'isPrototypeOf', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__', '__proto__']);
+        const builtInProps = new Set([
+            'toString', 'constructor', 'hasOwnProperty', 'valueOf', 'propertyIsEnumerable', 'toLocaleString', 'isPrototypeOf', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__', '__proto__',
+            'length', 'map', 'forEach', 'filter', 'reduce', 'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'join', 'split',
+            'includes', 'indexOf', 'lastIndexOf', 'apply', 'call', 'bind',
+            'message', 'stack', 'name', 'code', 'status', 'headers', 'body',
+            'write', 'end', 'on', 'once', 'emit', 'removeListener', 'removeAllListeners',
+            'substring', 'substr', 'replace', 'trim', 'toLowerCase', 'toUpperCase', 'charAt',
+            'match', 'search', 'concat', 'entries', 'keys', 'values', 'from',
+            'stdout', 'stderr', 'stdin', 'destroyed', 'preInit'
+        ]);
 
         traverse(ast, {
             Identifier(path) {
@@ -319,10 +328,10 @@ async function run() {
             const code = fs.readFileSync(chunkPath, 'utf8');
             const { variables, properties } = extractIdentifiers(code);
 
-            const unknownVariables = variables.filter(v => !globalMapping.variables[v]);
-            const unknownProperties = properties.filter(p => !globalMapping.properties[p]);
+            const unknownVariables = variables.filter(v => !globalMapping.variables[v] || (globalMapping.variables[v].confidence || 0) < 0.9);
+            const unknownProperties = properties.filter(p => !globalMapping.properties[p] || (globalMapping.properties[p].confidence || 0) < 0.9);
 
-            if (unknownVariables.length === 0 && unknownProperties.length === 0) {
+            if (unknownVariables.length === 0 && unknownProperties.length === 0 && !isForce) {
                 if (!globalMapping.processed_chunks.includes(chunkMeta.name)) globalMapping.processed_chunks.push(chunkMeta.name);
                 return;
             }
@@ -346,6 +355,12 @@ CODE:
 \`\`\`javascript
 ${codeContent}
 \`\`\`
+
+EXISTING HINTS (from previous stages):
+${[...variables, ...properties].filter(id => globalMapping.variables[id] || globalMapping.properties[id]).map(id => {
+                const m = globalMapping.variables[id] || globalMapping.properties[id];
+                return `- ${id} is likely "${m.name}" (Confidence: ${m.confidence})`;
+            }).join('\n') || 'None'}
 
 RESPONSE FORMAT (JSON ONLY):
 {

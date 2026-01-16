@@ -9,7 +9,11 @@ const RESERVED_PROPERTIES = new Set([
     'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'join', 'split',
     'includes', 'indexOf', 'lastIndexOf', 'hasOwnProperty', 'toString',
     'valueOf', 'prototype', 'constructor', 'apply', 'call', 'bind',
-    'message', 'stack', 'name', 'code', 'status', 'headers', 'body'
+    'message', 'stack', 'name', 'code', 'status', 'headers', 'body',
+    'write', 'end', 'on', 'once', 'emit', 'removeListener', 'removeAllListeners',
+    'substring', 'substr', 'replace', 'trim', 'toLowerCase', 'toUpperCase', 'charAt',
+    'match', 'search', 'slice', 'concat', 'entries', 'keys', 'values', 'from',
+    'stdout', 'stderr', 'stdin', 'destroyed', 'preInit'
 ]);
 
 /**
@@ -220,7 +224,7 @@ async function main() {
             const code = fs.readFileSync(inputPath, 'utf8');
 
             // Find metadata for this chunk
-            const chunkMeta = graphData.find(m => path.basename(m.file) === file);
+            const chunkMeta = graphData.find(m => m.file && path.basename(m.file) === file);
 
             let logicalName = "";
             if (chunkMeta) {

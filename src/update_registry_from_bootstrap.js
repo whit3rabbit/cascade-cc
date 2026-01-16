@@ -52,12 +52,28 @@ async function updateRegistryFromBootstrap() {
             // as anchor_logic.js will favor properties if present.
             for (const symbolObj of chunk.symbols) {
                 const symbol = typeof symbolObj === 'string' ? symbolObj : symbolObj.name;
-                const whitelist = ['_', '$', 'z', 'd', 'e', 'i', 'j', 'k']; // Standard library/loop symbols
-                if (!symbol || (symbol.length < 2 && !whitelist.includes(symbol))) continue; // Skip single chars if not in whitelist
-
-                // Skip common minified patterns (e.g., _a, t)
+                const whitelist = ['_']; // ONLY allow extremely common prefixes
+                if (!symbol || (symbol.length < 2 && !whitelist.includes(symbol))) continue;
                 if (symbol.length === 2 && symbol.startsWith('_')) continue;
-                if (['if', 'for', 'let', 'var', 'const', 'try', 'catch', 'map', 'set'].includes(symbol)) continue;
+
+                const blacklistedNames = [
+                    'then', 'catch', 'finally', 'length', 'map', 'forEach', 'filter', 'reduce',
+                    'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'join', 'split',
+                    'includes', 'indexOf', 'lastIndexOf', 'hasOwnProperty', 'toString',
+                    'valueOf', 'prototype', 'constructor', 'apply', 'call', 'bind',
+                    'message', 'stack', 'name', 'code', 'status', 'headers', 'body',
+                    'write', 'end', 'on', 'once', 'emit', 'removeListener', 'removeAllListeners',
+                    'substring', 'substr', 'replace', 'trim', 'toLowerCase', 'toUpperCase', 'charAt',
+                    'match', 'search', 'concat', 'entries', 'keys', 'values', 'from',
+                    'stdout', 'stderr', 'stdin', 'destroyed', 'preInit',
+                    'if', 'for', 'let', 'var', 'const', 'try', 'catch', 'map', 'set',
+                    'type', 'value', 'key', 'id', 'data', 'data_', 'obj', 'item', 'val', 'args'
+                ];
+                if (blacklistedNames.includes(symbol)) continue;
+
+                // Only allow names that look "logical" or "unique"
+                const isDescriptive = symbol.length > 4 || /[A-Z]/.test(symbol) || symbol.includes('_');
+                if (!isDescriptive) continue;
 
                 variables[symbol] = {
                     name: symbol,
