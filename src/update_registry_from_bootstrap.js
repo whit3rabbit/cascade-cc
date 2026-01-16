@@ -58,8 +58,16 @@ async function updateRegistryFromBootstrap() {
                 if (symbol.length === 2 && symbol.startsWith('_')) continue;
                 if (['if', 'for', 'let', 'var', 'const', 'try', 'catch', 'map', 'set'].includes(symbol)) continue;
 
-                variables[symbol] = symbol;
-                properties[symbol] = symbol;
+                variables[symbol] = {
+                    name: symbol,
+                    confidence: 1.0,
+                    source: 'bootstrap'
+                };
+                properties[symbol] = {
+                    name: symbol,
+                    confidence: 1.0,
+                    source: 'bootstrap'
+                };
             }
 
             // Group by library and chunk name to avoid collisions

@@ -111,8 +111,9 @@ async function assemble(version) {
 
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-        // Sort chunks using a Directed Acyclic Graph (DAG) topological sort
+        // Sort chunks using a Directed Acyclic Graph (DAG) topological sort with SCC for cycles
         const { Graph } = require('graphology');
+        const { stronglyConnectedComponents } = require('graphology-library/components');
         const { topologicalSort } = require('graphology-dag');
 
         const graph = new Graph({ directed: true });
@@ -123,41 +124,72 @@ async function assemble(version) {
                 chunk.outbound.forEach(targetId => {
                     if (graph.hasNode(targetId)) {
                         try {
-                            graph.addDirectedEdge(chunk.name, targetId);
-                        } catch (e) {
-                            // Circular dependency or existing edge, skip
-                        }
+                            if (!graph.hasDirectedEdge(chunk.name, targetId)) {
+                                graph.addDirectedEdge(chunk.name, targetId);
+                            }
+                        } catch (e) { }
                     }
                 });
             }
         });
 
-        let sortedNames;
+        // Use SCC to handle cycles
+        console.log(`[*] Detecting Strongly Connected Components for ${chunkList.length} chunks...`);
+        const sccs = stronglyConnectedComponents(graph);
+
+        // Map node to its SCC index
+        const nodeToScc = new Map();
+        sccs.forEach((nodes, idx) => {
+            nodes.forEach(node => nodeToScc.set(node, idx));
+        });
+
+        // Create condensation graph (DAG of SCCs)
+        const condensation = new Graph({ directed: true });
+        sccs.forEach((_, idx) => condensation.addNode(idx));
+
+        graph.forEachDirectedEdge((source, target) => {
+            const sccSource = nodeToScc.get(source);
+            const sccTarget = nodeToScc.get(target);
+            if (sccSource !== sccTarget && !condensation.hasDirectedEdge(sccTarget, sccSource)) {
+                // Dependency: source -> target means target should come AFTER source in assembly
+                // BUT wait, topoSort usually gives order where source comes first.
+                // In assembly, we want dependencies to be defined before they are used.
+                // So if source -> target, target is the dependency. target should come first?
+                // Actually, in JS bundles, if module A depends on B, B is often defined after A if it's a lazy load, 
+                // but usually dependencies are at the top.
+                // The existing logic used .reverse() on topologicalSort.
+                if (!condensation.hasDirectedEdge(sccSource, sccTarget)) {
+                    condensation.addDirectedEdge(sccSource, sccTarget);
+                }
+            }
+        });
+
+        let sortedNames = [];
         try {
-            // graphology's topologicalSort returns nodes in order such that for every edge u -> v, u comes before v.
-            // In our case, if 'a' depends on 'b' (a -> b), we might want 'b' first for imports,
-            // but for logical flow, we usually want 'a' before 'b' if 'a' is the caller.
-            // The original logic was: `if (b.outbound && b.outbound.includes(a.name)) return -1;`
-            // This means if 'b' points to 'a', 'a' comes first.
-            // So we want the REVERSE of a standard topological sort if we consider outbound as "calls".
-            // Actually, for imports/dependencies, if B is a neighbor of A (A -> B), B should likely come after A OR before A depending on context.
-            // Standard topological sort: for edge u -> v, u comes before v.
-            // If A -> B (A depends on B), then A comes before B.
-            // This is usually what we want for logical flow (High level -> Low level).
-            // Reverse standard topological sort: for edge u -> v (u depends on v), v should come before u.
-            // Actually, in our graph, edges are Chunk -> Target (Dependent -> Dependency).
-            // topologicalSort(graph) returns [Dependent, Dependency].
-            // We want [Dependency, Dependent].
-            sortedNames = topologicalSort(graph).reverse();
-        } catch (e) {
-            // If there's a cycle, fall back to the original heuristic
-            console.warn(`    [!] Cycle detected in ${filePath}, falling back to heuristic sort.`);
-            sortedNames = chunkList.sort((a, b) => {
-                if (b.outbound && b.outbound.includes(a.name)) return -1;
-                if (a.outbound && a.outbound.includes(b.name)) return 1;
+            const sortedSccIndices = topologicalSort(condensation).reverse();
+            sortedSccIndices.forEach(idx => {
+                const nodesInScc = sccs[idx];
+                // Heuristic sort within the SCC
+                const sortedNodesInScc = nodesInScc.sort((aName, bName) => {
+                    const a = chunkList.find(c => c.name === aName);
+                    const b = chunkList.find(c => c.name === bName);
+                    if (a.startsWithImport && !b.startsWithImport) return -1;
+                    if (!a.startsWithImport && b.startsWithImport) return 1;
+                    if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
+                    return (a.startLine || 0) - (b.startLine || 0);
+                });
+                sortedNames.push(...sortedNodesInScc);
+            });
+            console.log(`    [*] SCC-based sort successful.`);
+        } catch (err) {
+            console.warn(`    [!] SCC Topo-sort failed: ${err.message}. Falling back to pure heuristic.`);
+            sortedNames = chunkList.slice().sort((a, b) => {
                 if (a.startsWithImport && !b.startsWithImport) return -1;
                 if (!a.startsWithImport && b.startsWithImport) return 1;
-                return a.startLine - b.startLine;
+                if (b.outbound && b.outbound.includes(a.name)) return -1;
+                if (a.outbound && a.outbound.includes(b.name)) return 1;
+                if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
+                return (a.startLine || 0) - (b.startLine || 0);
             }).map(c => c.name);
         }
 

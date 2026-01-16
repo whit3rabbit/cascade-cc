@@ -14,6 +14,7 @@
     "anchor": "node run anchor",
     "train": "node run train",
     "bootstrap": "node run bootstrap",
+    "sync-vocab": "node src/sync_vocab.js",
     "execute": "npm run analyze && npm run deobfuscate"
   },
   "dependencies": {

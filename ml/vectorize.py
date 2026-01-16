@@ -4,7 +4,8 @@ import json
 import sys
 import os
 import hashlib
-from constants import NODE_TYPES, TYPE_TO_ID
+import argparse
+from constants import NODE_TYPES, TYPE_TO_ID, MAX_NODES, MAX_LITERALS
 
 class CodeFingerprinter(nn.Module):
     def __init__(self, vocab_size=100, embed_dim=32, hidden_dim=64):
@@ -51,24 +52,26 @@ def get_literal_hash(value):
     if value is None: return -1.0
     s = str(value)
     # Range 0.0 to 1.0 (float)
-    return int(hashlib.md5(s.encode()).hexdigest(), 16) % 100000 / 100000.0
+    return int(hashlib.md5(s.encode()).hexdigest(), 16) % 10000000 / 10000000.0
 
-def flatten_ast(node, sequence, symbols, literals, stats, path="Program"):
+def flatten_ast(node, sequence, symbols, literals, stats, path="Root"):
     """Convert AST tree into a linear sequence of type IDs (DFS) and extract symbols with relative context keys"""
     stats["total_nodes"] += 1
     if isinstance(node, list):
         for i, item in enumerate(node):
-            # In structural AST, lists are already flattened or handled by simplifyAST slots
             flatten_ast(item, sequence, symbols, literals, stats, f"{path}[{i}]")
         return
 
     node_type = node.get("type", "UNKNOWN")
     
+    # AST Skeletonization: Skip redundant/noisy nodes
+    if node_type in ["EmptyStatement", "DebuggerStatement", "CommentLine", "CommentBlock"]:
+        return
+
     # Literal Extraction
     if "valHash" in node:
-        # Convert hex string hash to float [0, 1] for the NN
         val_hash_int = int(node["valHash"], 16)
-        literals.append((val_hash_int % 100000) / 100000.0)
+        literals.append((val_hash_int % 10000000) / 10000000.0)
     
     # Built-in detection
     if node_type == "CallExpression" and "call" in node:
@@ -84,7 +87,11 @@ def flatten_ast(node, sequence, symbols, literals, stats, path="Program"):
     if type_id == 1: stats["unknown_nodes"] += 1
     sequence.append(type_id)
     
-    # Relative Context Keys: Use property 'slot' from simplifyAST for stability
+    # Relative Context Keys: Reset path at major logic boundaries (Functions, Blocks)
+    # This prevents absolute path shifts from breaking alignment.
+    if node_type in ["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression", "BlockStatement", "ClassBody"]:
+        path = node_type # Reset context
+
     if node_type == "Identifier" and "name" in node:
         symbols.append({
             "name": node["name"],
@@ -95,24 +102,48 @@ def flatten_ast(node, sequence, symbols, literals, stats, path="Program"):
         slot = child.get("slot", "child")
         flatten_ast(child, sequence, symbols, literals, stats, f"{path}/{slot}")
 
-def run_vectorization(version_path):
-    # Set seed for deterministic fingerprints across runs
+def run_vectorization(version_path, force=False):
     torch.manual_seed(42)
-    
-    # Initialize Model with full vocab size + safety buffer for UNKNOWN nodes
-    model = CodeFingerprinter(vocab_size=len(NODE_TYPES) + 5)
-    
-    # Try to load pre-trained weights if they exist
+    current_vocab_size = len(NODE_TYPES) + 5
+    model = CodeFingerprinter(vocab_size=current_vocab_size)
     model_path = os.path.join(os.path.dirname(__file__), "model.pth")
+    
     if os.path.exists(model_path):
         print(f"[*] Loading pre-trained weights from {model_path}")
-        model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+        try:
+            checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
+            checkpoint_vocab_size = checkpoint.get('embedding.weight', torch.zeros(0)).shape[0]
+            
+            if checkpoint_vocab_size != current_vocab_size:
+                print(f"[!] Warning: Vocabulary mismatch! Checkpoint: {checkpoint_vocab_size}, Current: {current_vocab_size}")
+                if force:
+                    print("[!] --force used. Partially loading weights...")
+                    state_dict = model.state_dict()
+                    for name, param in checkpoint.items():
+                        if name in state_dict:
+                            if param.shape == state_dict[name].shape:
+                                state_dict[name].copy_(param)
+                            elif name == 'embedding.weight':
+                                min_size = min(checkpoint_vocab_size, current_vocab_size)
+                                state_dict[name][:min_size].copy_(param[:min_size])
+                                print(f"    [+] Resized embedding weights (mapped {min_size} types)")
+                            else:
+                                print(f"    [!] Skipping layer {name} due to shape mismatch: {param.shape} vs {state_dict[name].shape}")
+                    model.load_state_dict(state_dict)
+                else:
+                    print("[!] Error: Model vocabulary mismatch. Use --force to load matching layers anyway.")
+                    sys.exit(1)
+            else:
+                model.load_state_dict(checkpoint)
+                print("[+] Successfully loaded weights.")
+        except Exception as e:
+            print(f"[!] Error loading weights: {e}")
+            sys.exit(1)
     else:
         print("[!] Warning: No pre-trained weights found. Using seeded random weights.")
     
     model.eval()
 
-    # Load simplified ASTs from metadata
     ast_path = os.path.join(version_path, "metadata", "simplified_asts.json")
     if not os.path.exists(ast_path):
         print(f"Error: Could not find simplified ASTs at {ast_path}", file=sys.stderr)
@@ -122,7 +153,6 @@ def run_vectorization(version_path):
         chunks = json.load(f)
 
     results = []
-    MAX_NODES = 1024
     
     stats = {"total_nodes": 0, "unknown_nodes": 0}
     with torch.no_grad():
@@ -140,9 +170,9 @@ def run_vectorization(version_path):
                 seq_tensor = torch.nn.functional.pad(seq_tensor, (0, MAX_NODES - seq_tensor.size(1)))
             
             # Literal Hashing Channel (Pad with -1.0)
-            lit_tensor = torch.tensor(literals[:32]).unsqueeze(0)
-            if lit_tensor.size(1) < 32:
-                lit_tensor = torch.nn.functional.pad(lit_tensor, (0, 32 - lit_tensor.size(1)), value=-1.0)
+            lit_tensor = torch.tensor(literals[:MAX_LITERALS]).unsqueeze(0)
+            if lit_tensor.size(1) < MAX_LITERALS:
+                lit_tensor = torch.nn.functional.pad(lit_tensor, (0, MAX_LITERALS - lit_tensor.size(1)), value=-1.0)
             
             try:
                 fingerprint = model(seq_tensor, lit_tensor).squeeze().tolist()
@@ -170,7 +200,9 @@ def run_vectorization(version_path):
     print(f"[+] logic_db.json saved ({len(results)} chunks)")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python3 vectorize.py <version_path>")
-        sys.exit(1)
-    run_vectorization(sys.argv[1])
+    parser = argparse.ArgumentParser(description="Vectorize simplified ASTs using the brain model")
+    parser.add_argument("version_path", help="Path to the version directory (e.g., claude-analysis/v3.5)")
+    parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
+    
+    args = parser.parse_args()
+    run_vectorization(args.version_path, force=args.force)

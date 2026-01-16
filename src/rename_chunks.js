@@ -4,10 +4,19 @@ const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const generate = require('@babel/generator').default;
 
+const RESERVED_PROPERTIES = new Set([
+    'then', 'catch', 'finally', 'length', 'map', 'forEach', 'filter', 'reduce',
+    'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'join', 'split',
+    'includes', 'indexOf', 'lastIndexOf', 'hasOwnProperty', 'toString',
+    'valueOf', 'prototype', 'constructor', 'apply', 'call', 'bind',
+    'message', 'stack', 'name', 'code', 'status', 'headers', 'body'
+]);
+
 /**
  * Safely renames identifiers in a piece of code using Babel's scope-aware renaming.
  */
-function renameIdentifiers(code, mapping, sourceFile = null, neighbors = []) {
+function renameIdentifiers(code, mapping, sourceInfo = {}) {
+    const { sourceFile = null, neighbors = [], displayName = null, suggestedPath = null } = sourceInfo;
     try {
         const ast = parser.parse(code, {
             sourceType: 'module',
@@ -15,6 +24,7 @@ function renameIdentifiers(code, mapping, sourceFile = null, neighbors = []) {
         });
 
         const renamedBindings = new Set();
+        const chunkBase = sourceFile ? path.basename(String(sourceFile), '.js') : null;
 
         traverse(ast, {
             Identifier(p) {
@@ -24,23 +34,24 @@ function renameIdentifiers(code, mapping, sourceFile = null, neighbors = []) {
                 if (mapping.variables && Object.prototype.hasOwnProperty.call(mapping.variables, oldName) && !renamedBindings.has(oldName)) {
                     const binding = p.scope.getBinding(oldName);
                     if (binding) {
-                        // Refined scope check: Renaming if Program level OR in a shallow wrapper (common in esbuild)
-                        // This allows renaming module-level globals that are wrapped in __commonJS routines.
                         const isTopLevel = binding.scope.block.type === 'Program';
-                        const isShallow = binding.scope.depth <= 2;
+                        const isGlobalConstant = binding.scope.depth <= 2 && binding.constant;
 
-                        if (isTopLevel || isShallow) {
+                        if (isTopLevel || isGlobalConstant) {
                             const entry = mapping.variables[oldName];
                             if (!entry) return;
 
-                            // If multiple sources exist, prioritize the one matching current file or its neighbors
-                            const newName = Array.isArray(entry)
-                                ? (
-                                    entry.find(e => e && e.source === sourceFile)?.name ||
-                                    entry.find(e => e && neighbors.includes(e.source))?.name ||
-                                    (entry[0] ? entry[0].name : null)
-                                )
-                                : (typeof entry === 'string' ? entry : (entry ? entry.name : null));
+                            let newName = null;
+                            if (Array.isArray(entry)) {
+                                // Prioritize exact chunk match
+                                const match = entry.find(e => e && (e.source === chunkBase || e.source === sourceFile)) ||
+                                    entry.find(e => e && (neighbors.includes(e.source) || neighbors.includes(path.basename(String(e.source), '.js')))) ||
+                                    (displayName && entry.find(e => e && e.source && e.source.includes(displayName))) ||
+                                    entry[0];
+                                newName = match ? match.name : null;
+                            } else {
+                                newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                            }
 
                             if (newName) {
                                 p.scope.rename(oldName, newName);
@@ -59,21 +70,33 @@ function renameIdentifiers(code, mapping, sourceFile = null, neighbors = []) {
                     const entry = mapping.properties[propName];
                     if (!entry) return;
                     let newName = null;
-                    let confidence = 0.8;
+                    let confidence = 0.5;
 
                     if (Array.isArray(entry)) {
-                        const chunkMatch = entry.find(e => e && e.source === path.basename(String(sourceFile)));
+                        const chunkMatch = entry.find(e => e && (e.source === chunkBase || e.source === sourceFile));
                         if (chunkMatch) {
                             newName = chunkMatch.name;
                             confidence = chunkMatch.confidence || 0.8;
                         } else {
-                            const neighborMatch = entry.find(e => e && neighbors.includes(e.source));
+                            const neighborMatch = entry.find(e => e && (neighbors.includes(e.source) || neighbors.includes(path.basename(String(e.source), '.js'))));
                             if (neighborMatch) {
                                 newName = neighborMatch.name;
                                 confidence = neighborMatch.confidence || 0.8;
-                            } else {
-                                const highConf = entry.find(e => e && e.confidence >= 0.9);
-                                if (highConf) {
+                            } else if (displayName || suggestedPath) {
+                                const contextMatch = entry.find(e =>
+                                    (displayName && e.source && e.source.includes(displayName)) ||
+                                    (suggestedPath && e.source && suggestedPath.includes(e.source))
+                                );
+                                if (contextMatch) {
+                                    newName = contextMatch.name;
+                                    confidence = contextMatch.confidence || 0.7;
+                                }
+                            }
+
+                            // Fallback to absolute highest confidence only if prop name is descriptive
+                            if (!newName) {
+                                const highConf = entry.find(e => e && e.confidence >= 0.98);
+                                if (highConf && propName.length > 4) {
                                     newName = highConf.name;
                                     confidence = highConf.confidence;
                                 }
@@ -85,13 +108,16 @@ function renameIdentifiers(code, mapping, sourceFile = null, neighbors = []) {
                     }
 
                     if (newName) {
-                        // SAFETY CHECKS: Allow renaming if object is known OR it's a 'this' expression
+                        // SAFETY CHECKS:
                         const isObjectKnown = (p.node.object.type === 'Identifier' && mapping.variables[p.node.object.name]) ||
-                            p.node.object.type === 'ThisExpression';
-                        const isHighConfidence = confidence >= 0.98;
-                        const isUnique = propName.length > 2;
+                            p.node.object.type === 'ThisExpression' ||
+                            p.node.object.type === 'MemberExpression'; // Allow nested properties if they look logical
+                        const isHighConfidence = confidence >= 0.95;
+                        const isDescriptive = propName.length > 2;
 
-                        if (isObjectKnown || isHighConfidence || isUnique) {
+                        if (RESERVED_PROPERTIES.has(propName)) {
+                            // SKIP: Never rename reserved properties
+                        } else if (isObjectKnown || (isHighConfidence && isDescriptive)) {
                             p.node.property.name = newName;
                         }
                     }
@@ -106,23 +132,26 @@ function renameIdentifiers(code, mapping, sourceFile = null, neighbors = []) {
                     const entry = mapping.properties[propName];
                     if (!entry) return;
                     let newName = null;
-                    let confidence = 0.8;
+                    let confidence = 0.5;
 
                     if (Array.isArray(entry)) {
-                        const chunkMatch = entry.find(e => e && e.source === path.basename(String(sourceFile)));
+                        const chunkMatch = entry.find(e => e && (e.source === chunkBase || e.source === sourceFile));
                         if (chunkMatch) {
                             newName = chunkMatch.name;
                             confidence = chunkMatch.confidence || 0.8;
                         } else {
-                            const neighborMatch = entry.find(e => e && neighbors.includes(e.source));
+                            const neighborMatch = entry.find(e => e && (neighbors.includes(e.source) || neighbors.includes(path.basename(String(e.source), '.js'))));
                             if (neighborMatch) {
                                 newName = neighborMatch.name;
                                 confidence = neighborMatch.confidence || 0.8;
-                            } else {
-                                const highConf = entry.find(e => e && e.confidence >= 0.9);
-                                if (highConf) {
-                                    newName = highConf.name;
-                                    confidence = highConf.confidence;
+                            } else if (displayName || suggestedPath) {
+                                const contextMatch = entry.find(e =>
+                                    (displayName && e.source && e.source.includes(displayName)) ||
+                                    (suggestedPath && e.source && suggestedPath.includes(e.source))
+                                );
+                                if (contextMatch) {
+                                    newName = contextMatch.name;
+                                    confidence = contextMatch.confidence || 0.7;
                                 }
                             }
                         }
@@ -132,11 +161,12 @@ function renameIdentifiers(code, mapping, sourceFile = null, neighbors = []) {
                     }
 
                     if (newName) {
-                        // SAFETY CHECKS: For object properties, we are slightly more lenient if it's high confidence or unique
-                        const isHighConfidence = confidence >= 0.98;
-                        const isUnique = propName.length > 2;
+                        const isHighConfidence = confidence >= 0.95;
+                        const isDescriptive = propName.length > 3;
 
-                        if (isHighConfidence || isUnique) {
+                        if (RESERVED_PROPERTIES.has(propName)) {
+                            // SKIP
+                        } else if (isHighConfidence || isDescriptive) {
                             p.node.key.name = newName;
                         }
                     }
@@ -207,7 +237,12 @@ async function main() {
             const outputPath = path.join(deobfuscatedDir, finalName);
 
             const neighbors = chunkMeta ? [...chunkMeta.neighbors || [], ...chunkMeta.outbound || []] : [];
-            const renamedCode = renameIdentifiers(code, mapping, chunkBase, neighbors);
+            const renamedCode = renameIdentifiers(code, mapping, {
+                sourceFile: chunkBase,
+                neighbors,
+                displayName: chunkMeta?.displayName,
+                suggestedPath: chunkMeta?.kb_info?.suggested_path
+            });
 
             if (renamedCode) {
                 fs.writeFileSync(outputPath, renamedCode);

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from constants import NODE_TYPES, TYPE_TO_ID, VOCAB_SIZE
+from constants import NODE_TYPES, TYPE_TO_ID, VOCAB_SIZE, MAX_NODES
 
 class CodeStructureEncoder(nn.Module):
     def __init__(self, vocab_size=VOCAB_SIZE, embedding_dim=64, hidden_dim=128):
@@ -67,7 +67,7 @@ class ASTPreprocessor:
             
         return sequence
 
-    def process_chunk(self, structural_ast_nodes, max_seq_len=1024):
+    def process_chunk(self, structural_ast_nodes, max_seq_len=MAX_NODES):
         """Converts a list of structural AST nodes into a single padded tensor."""
         full_sequence = []
         for node in structural_ast_nodes:

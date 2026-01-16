@@ -14,47 +14,63 @@ function calculateSimilarity(vecA, vecB) {
 function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targetSymbols, refSymbols, sourceLabel) {
     let alignedCount = 0;
 
-    // Create a map of ref symbols by their structural key
+    // Create a map of ref symbols by their structural key and by name
     const refSymbolMap = new Map();
+    const refNameMap = new Map();
     refSymbols.forEach(ref => {
-        if (ref && typeof ref === 'object' && ref.key) {
-            // We use the key as the primary match point
-            refSymbolMap.set(ref.key, ref.name);
+        if (ref && typeof ref === 'object') {
+            if (ref.key) refSymbolMap.set(ref.key, ref.name);
+            refNameMap.set(ref.name, ref.name);
         }
     });
 
-    const unmatchedTargetSymbols = [];
-
-    // Match target symbols to ref symbols using keys
+    // Strategy 1: Key-based alignment (Structural)
+    const matchesFound = [];
     for (const targetSymbol of targetSymbols) {
         if (!targetSymbol || typeof targetSymbol !== 'object' || !targetSymbol.key) continue;
-
-        const targetMangled = targetSymbol.name;
         const refMangled = refSymbolMap.get(targetSymbol.key);
-
         if (refMangled) {
-            const resolvedVar = resolvedVariables[refMangled];
-            const resolvedProp = resolvedProperties[refMangled];
+            matchesFound.push({ target: targetSymbol.name, ref: refMangled, method: 'key' });
+        }
+    }
 
-            if (resolvedVar) {
-                if (!targetMapping.variables[targetMangled]) {
-                    targetMapping.variables[targetMangled] = {
-                        name: typeof resolvedVar === 'string' ? resolvedVar : resolvedVar.name,
-                        confidence: 0.95,
-                        source: `anchored_from_${sourceLabel}`
-                    };
-                    alignedCount++;
-                }
+    // Strategy 2: Fallback to Name-based alignment if Key-based yielded very low results
+    if (matchesFound.length === 0) {
+        for (const targetSymbol of targetSymbols) {
+            if (!targetSymbol || typeof targetSymbol !== 'object') continue;
+            // Only fallback for non-trivial names if possible, but here we use what we have
+            if (refNameMap.has(targetSymbol.name)) {
+                matchesFound.push({ target: targetSymbol.name, ref: targetSymbol.name, method: 'name' });
             }
-            if (resolvedProp) {
-                if (!targetMapping.properties[targetMangled]) {
-                    targetMapping.properties[targetMangled] = {
-                        name: typeof resolvedProp === 'string' ? resolvedProp : resolvedProp.name,
-                        confidence: 0.95,
-                        source: `anchored_from_${sourceLabel}`
-                    };
-                    alignedCount++;
-                }
+        }
+    }
+
+    // Apply matches
+    for (const match of matchesFound) {
+        const targetMangled = match.target;
+        const refMangled = match.ref;
+
+        const resolvedVar = resolvedVariables[refMangled];
+        const resolvedProp = resolvedProperties[refMangled];
+
+        if (resolvedVar) {
+            if (!targetMapping.variables[targetMangled]) {
+                targetMapping.variables[targetMangled] = {
+                    name: typeof resolvedVar === 'string' ? resolvedVar : resolvedVar.name,
+                    confidence: match.method === 'key' ? 0.95 : 0.8,
+                    source: `anchored_${match.method}_${sourceLabel}`
+                };
+                alignedCount++;
+            }
+        }
+        if (resolvedProp) {
+            if (!targetMapping.properties[targetMangled]) {
+                targetMapping.properties[targetMangled] = {
+                    name: typeof resolvedProp === 'string' ? resolvedProp : resolvedProp.name,
+                    confidence: match.method === 'key' ? 0.95 : 0.8,
+                    source: `anchored_${match.method}_${sourceLabel}`
+                };
+                alignedCount++;
             }
         }
     }
@@ -64,18 +80,17 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
 
 async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './cascade_graph_analysis') {
     const targetPath = path.resolve(baseDir, targetVersion);
-    const pythonEnv = fs.existsSync(path.join(__dirname, '../.venv/bin/python3'))
+    const pythonEnv = process.env.PYTHON_BIN || (fs.existsSync(path.join(__dirname, '../.venv/bin/python3'))
         ? path.join(__dirname, '../.venv/bin/python3')
         : fs.existsSync(path.join(__dirname, '../ml/venv/bin/python3'))
             ? path.join(__dirname, '../ml/venv/bin/python3')
-            : 'python3';
+            : 'python3');
 
     console.log(`[*] Vectorizing target version: ${targetVersion}`);
     try {
         execSync(`${pythonEnv} ml/vectorize.py ${targetPath}`, { stdio: 'inherit' });
     } catch (error) {
-        console.error(`[!] Error during vectorization: ${error.message}`);
-        return;
+        throw new Error(`Python Vectorization failed: ${error.message}`);
     }
 
     if (!referenceVersion) {
@@ -144,8 +159,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         try {
             execSync(`${pythonEnv} ml/vectorize.py ${referencePath}`, { stdio: 'inherit' });
         } catch (error) {
-            console.error(`[!] Error during reference vectorization: ${error.message}`);
-            return;
+            throw new Error(`Python Vectorization failed: ${error.message}`);
         }
 
         const targetLogicDb = JSON.parse(fs.readFileSync(path.join(targetPath, 'metadata', 'logic_db.json'), 'utf8'));

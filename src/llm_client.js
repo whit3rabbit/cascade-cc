@@ -24,6 +24,17 @@ if (PROVIDER === 'gemini' && API_KEY && !API_KEY.includes('your_')) {
     });
 }
 
+const PROVIDER_CONFIG = {
+    gemini: {
+        delay: 4000, // 4s flat delay for Gemini free tier reliability
+        retries: 3
+    },
+    openrouter: {
+        delay: 1000,
+        retries: 5
+    }
+};
+
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }

@@ -392,17 +392,56 @@ class CascadeGraph {
     // Step A: Initial Pass - Group logical chunks
     identifyNodes(ast, code) {
         console.log(`[*] Phase 1: Identifying Chunks...`);
-        const statements = ast.program.body;
+        let statements = ast.program.body;
+
+        // --- IIFE UNWRAPPING (Drill-down) ---
+        while (statements.length === 1) {
+            const node = statements[0];
+            if (node.type === 'ExpressionStatement') {
+                let expr = node.expression;
+                // Handle !function(){}() or (function(){})()
+                if (expr.type === 'UnaryExpression' && expr.operator === '!') expr = expr.argument;
+
+                if (expr.type === 'CallExpression') {
+                    const callee = expr.callee;
+                    if (callee.type === 'FunctionExpression' || callee.type === 'ArrowFunctionExpression') {
+                        console.log(`[*] Phase 1.1: Unwrapping IIFE wrapper...`);
+                        statements = callee.body.type === 'BlockStatement' ? callee.body.body : [callee.body];
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+
         let currentChunkNodes = [];
         let currentTokens = 0;
         let currentCategory = 'unknown';
         let chunkIndex = 1;
 
+        const seenHashes = new Map(); // hash -> chunkName
+
         const finalizeChunk = () => {
             if (currentChunkNodes.length === 0) return;
-            const chunkName = `chunk${chunkIndex.toString().padStart(3, '0')}`;
-            // PERFORMANCE: Use Babel generator to preserve Phase 0.5/0.6/0.7 transformations
             const chunkCode = currentChunkNodes.map(node => generate(node, { minified: true }).code).join('\n');
+
+            // --- DE-DUPLICATION ---
+            const hash = crypto.createHash('md5').update(chunkCode).digest('hex');
+            if (seenHashes.has(hash)) {
+                const originalName = seenHashes.get(hash);
+                // Mark this as an alias in the internal mapping, but don't create a new node
+                currentChunkNodes.forEach(node => {
+                    this.extractInternalNames(node).forEach(name => {
+                        this.internalNameToChunkId.set(name, originalName);
+                    });
+                });
+                currentChunkNodes = [];
+                currentTokens = 0;
+                return;
+            }
+
+            const chunkName = `chunk${chunkIndex.toString().padStart(3, '0')}`;
+            seenHashes.set(hash, chunkName);
 
             const startLine = currentChunkNodes[0].loc?.start.line || 0;
             const endLine = currentChunkNodes[currentChunkNodes.length - 1].loc?.end.line || 0;
@@ -617,36 +656,73 @@ class CascadeGraph {
 
     // Step B: Neighbor Detection (The Edges)
     detectNeighbors() {
-        console.log(`[*] Phase 2: Neighbor Detection (Building Edges)...`);
-        const internalNames = Array.from(this.internalNameToChunkId.keys());
+        console.log(`[*] Phase 2: Neighbor Detection (AST-based Edges)...`);
+        const internalNamesSet = new Set(this.internalNameToChunkId.keys());
 
         for (const [chunkName, nodeData] of this.nodes) {
-            internalNames.forEach(definedName => {
-                const targetChunk = this.internalNameToChunkId.get(definedName);
-                if (chunkName === targetChunk) return;
+            try {
+                const ast = parser.parse(nodeData.code, {
+                    sourceType: 'module',
+                    plugins: ['jsx']
+                });
 
-                if (nodeData.code.includes(definedName)) {
-                    const escapedName = definedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    const regex = new RegExp(`\\b${escapedName}\\b`);
-                    if (regex.test(nodeData.code)) {
-                        nodeData.neighbors.add(targetChunk);
+                traverse(ast, {
+                    Identifier(p) {
+                        const name = p.node.name;
+                        if (internalNamesSet.has(name) && p.isReferencedIdentifier()) {
+                            const targetChunk = this.internalNameToChunkId.get(name);
+                            if (chunkName !== targetChunk) {
+                                nodeData.neighbors.add(targetChunk);
+                            }
+                        }
                     }
-                }
-            });
+                });
+            } catch (err) {
+                // Fallback to regex if parse fails (unlikely since we generated this code)
+                const internalNames = Array.from(internalNamesSet);
+                internalNames.forEach(definedName => {
+                    const targetChunk = this.internalNameToChunkId.get(definedName);
+                    if (chunkName === targetChunk) return;
+
+                    if (nodeData.code.includes(definedName)) {
+                        const escapedName = definedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const regex = new RegExp(`\\b${escapedName}\\b`);
+                        if (regex.test(nodeData.code)) {
+                            nodeData.neighbors.add(targetChunk);
+                        }
+                    }
+                });
+            }
         }
     }
 
     // Step C: Markov Chain Analysis
     applyMarkovAnalysis() {
-        console.log(`[*] Phase 3: Markov Chain Centrality Calculation...`);
+        console.log(`[*] Phase 3: Markov Chain Centrality Calculation (Weighted PageRank variant)...`);
         const names = Array.from(this.nodes.keys());
         const size = names.length;
         if (size === 0) return;
+        const nameToIndex = new Map(names.map((name, idx) => [name, idx]));
 
-        const dampingFactor = 0.85; // Standard PageRank damping
+        const dampingFactor = 0.85;
         const teleportProbability = (1 - dampingFactor) / size;
         const inDegree = new Map();
-        this.nodes.forEach(node => {
+
+        // Pre-calculate edge weights
+        // Edges pointing to "priority" (founder) chunks carry more weight
+        const edgeWeights = new Map(); // chunkName -> {neighbors: Array<{name, weight}>, totalWeight: number}
+        this.nodes.forEach((node, name) => {
+            let totalWeight = 0;
+            const weightedNeighbors = [];
+            node.neighbors.forEach(neighborName => {
+                const neighborNode = this.nodes.get(neighborName);
+                const weight = (neighborNode && neighborNode.category === 'priority') ? 2.0 : 1.0;
+                weightedNeighbors.push({ name: neighborName, weight });
+                totalWeight += weight;
+            });
+            edgeWeights.set(name, { neighbors: weightedNeighbors, totalWeight });
+
+            // Still track in-degree for the final score adjustment
             node.neighbors.forEach(neighbor => inDegree.set(neighbor, (inDegree.get(neighbor) || 0) + 1));
         });
 
@@ -657,25 +733,28 @@ class CascadeGraph {
             .filter(idx => idx !== -1);
         const redistributionTargets = founderIndices.length > 0 ? founderIndices : Array.from({ length: size }, (_, i) => i);
 
-        for (let iter = 0; iter < 100; iter++) {
+        for (let iter = 0; iter < 100; iter++) { // Optimized from 200 iterations
             let nextScores = new Array(size).fill(teleportProbability);
             let maxDiff = 0;
 
             for (let i = 0; i < size; i++) {
-                const node = this.nodes.get(names[i]);
-                const outDegree = node.neighbors.size;
+                const name = names[i];
+                const nodeData = edgeWeights.get(name);
+                const { neighbors, totalWeight } = nodeData;
 
-                if (outDegree > 0) {
-                    const contribution = (scores[i] * dampingFactor) / outDegree;
-                    node.neighbors.forEach(neighborName => {
+                if (totalWeight > 0) {
+                    const availableProbability = scores[i] * dampingFactor;
+                    neighbors.forEach(({ name: neighborName, weight }) => {
                         const neighborIdx = nameToIndex.get(neighborName);
-                        if (neighborIdx !== undefined && neighborIdx !== -1) nextScores[neighborIdx] += contribution;
+                        if (neighborIdx !== undefined) {
+                            nextScores[neighborIdx] += (availableProbability * weight) / totalWeight;
+                        }
                     });
                 } else {
-                    // Hybrid Teleportation for Sink nodes: 80% to founders, 20% globally
+                    // Hybrid Teleportation for Sink nodes: 85% to founders, 15% globally
                     const sinkContribution = (scores[i] * dampingFactor);
-                    const founderPart = (sinkContribution * 0.8) / redistributionTargets.length;
-                    const globalPart = (sinkContribution * 0.2) / size;
+                    const founderPart = (sinkContribution * 0.85) / (redistributionTargets.length || 1);
+                    const globalPart = (sinkContribution * 0.15) / (size || 1);
 
                     for (const targetIdx of redistributionTargets) {
                         nextScores[targetIdx] += founderPart;
@@ -692,8 +771,8 @@ class CascadeGraph {
             }
 
             scores = nextScores;
-            if (maxDiff < 0.00001) {
-                console.log(`    [*] Markov Centrality converged after ${iter + 1} iterations (diff: ${maxDiff.toFixed(8)})`);
+            if (maxDiff < 1e-10) { // Tighter convergence threshold
+                console.log(`    [*] Markov Centrality converged after ${iter + 1} iterations (diff: ${maxDiff.toExponential(2)})`);
                 break;
             }
         }
@@ -702,8 +781,7 @@ class CascadeGraph {
             const node = this.nodes.get(name);
             const inCount = inDegree.get(name) || 0;
             const outCount = node.neighbors.size;
-            // IMPROVED SCORE: Centrality + (Out-Degree / (In-Degree + 1))
-            // This balances "utility" nodes (high in-degree) with "orchestrator" nodes (high out-degree)
+            // Centrality + (Out-Degree / (In-Degree + 1)) adjustment
             node.score = scores[i] + (outCount / (inCount + 1)) * 0.01;
         });
     }
@@ -1016,6 +1094,8 @@ async function run() {
     OUTPUT_BASE = path.join(OUTPUT_ROOT, version);
     console.log(`[*] Output directory: ${OUTPUT_BASE}`);
 
+    graph.saveResults(OUTPUT_BASE);
+
     // Phase 3.5: Integrating Neural Anchoring
     console.log(`[*] Phase 3.5: Integrating Neural Anchoring...`);
     const modelPath = path.join(__dirname, '../ml/model.pth');
@@ -1033,8 +1113,6 @@ async function run() {
     }
 
     graph.classify(OUTPUT_BASE);
-
-    graph.saveResults(OUTPUT_BASE);
 
     console.log(`\n[COMPLETE]`);
     console.log(`Analysis saved to: ${OUTPUT_BASE}`);

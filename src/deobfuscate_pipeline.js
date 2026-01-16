@@ -100,6 +100,36 @@ function extractIdentifiers(code) {
     }
 }
 
+function skeletonize(code) {
+    try {
+        const ast = parser.parse(code, {
+            sourceType: 'module',
+            plugins: ['jsx', 'typescript']
+        });
+
+        traverse(ast, {
+            StringLiteral(path) {
+                path.node.value = '';
+            },
+            NumericLiteral(path) {
+                path.node.value = 0;
+            },
+            TemplateLiteral(path) {
+                path.node.quasis = [{ type: 'TemplateElement', value: { raw: '', cooked: '' }, tail: true }];
+                path.node.expressions = [];
+            }
+        });
+
+        const { code: skeleton } = generate(ast, { compact: true, minified: true, comments: false });
+        return skeleton;
+    } catch (err) {
+        // Fallback: simple regex to strip strings if Babel fails
+        return code.replace(/(['"])(?:(?!\1|\\).|\\.)*\1/g, '""').substring(0, 5000);
+    }
+}
+
+const { generate } = require('@babel/generator').default || require('@babel/generator');
+
 // --- KB OPTIMIZATION ---
 let KB_HINTS_MAP = null;
 function initKBHintsMap(kb) {
@@ -163,21 +193,27 @@ function sleep(ms) {
 function cleanLLMResponse(text) {
     if (!text) return { cleaned: null, isTruncated: false };
 
-    // 1. Remove markdown code blocks if present
-    let cleaned = text.trim();
-    const jsonBlockRegex = /```(?:json)?\s*([\s\S]*?)```/i;
-    const match = cleaned.match(jsonBlockRegex);
-    if (match) {
-        cleaned = match[1].trim();
+    // 1. Try to find JSON in markdown blocks first
+    const jsonBlockRegex = /```(?:json)?\s*([\s\S]*?)```/gi;
+    let match;
+    while ((match = jsonBlockRegex.exec(text)) !== null) {
+        const potential = match[1].trim();
+        try {
+            // Simple validation, jsonrepair will do the heavy lifting
+            if (potential.startsWith('{') && potential.endsWith('}')) {
+                return { cleaned: potential, isTruncated: false };
+            }
+        } catch (e) { }
     }
 
-    // 2. Find start and end
+    // 2. Fallback: Find the first '{' and last '}'
+    let cleaned = text.trim();
     const startIdx = cleaned.indexOf('{');
     const endIdx = cleaned.lastIndexOf('}');
 
     if (startIdx === -1) return { cleaned: null, isTruncated: false };
 
-    const isTruncated = endIdx === -1 || (cleaned.length - endIdx > 5 && !cleaned.substring(endIdx).includes('}'));
+    const isTruncated = endIdx === -1 || (cleaned.length - endIdx > 20 && !cleaned.substring(endIdx).toLowerCase().includes('}'));
 
     if (endIdx !== -1 && endIdx > startIdx) {
         cleaned = cleaned.substring(startIdx, endIdx + 1);
@@ -192,10 +228,12 @@ function cleanLLMResponse(text) {
 async function run() {
     let version = process.argv.filter((arg, i, arr) => !arg.startsWith('-') && (i === 0 || arr[i - 1] !== '--limit'))[2];
     const isRenameOnly = process.argv.includes('--rename-only') || process.argv.includes('-r');
+    const skipRationale = process.argv.includes('--no-rationale');
+    const isDryRun = process.argv.includes('--dry-run');
     const isForce = process.argv.includes('--force') || process.argv.includes('-f');
     const skipVendor = process.argv.includes('--skip-vendor');
     const limitArgIdx = process.argv.indexOf('--limit');
-    const limit = limitArgIdx !== -1 ? parseInt(process.argv[limitArgIdx + 1]) : Infinity;
+    let limitValue = limitArgIdx !== -1 ? parseInt(process.argv[limitArgIdx + 1]) : Infinity;
 
     if (!version) {
         version = getLatestVersion(OUTPUT_ROOT);
@@ -218,7 +256,8 @@ async function run() {
 
     const chunksDir = path.join(versionPath, 'chunks');
     const mappingPath = path.join(versionPath, 'metadata', 'mapping.json');
-    const deobfuscatedDir = path.join(versionPath, 'deobfuscated_chunks');
+    const graphMapPath = path.join(versionPath, 'metadata', 'graph_map.json');
+    const logicDbPath = path.join(versionPath, 'metadata', 'logic_db.json');
 
     if (!fs.existsSync(chunksDir)) {
         console.error(`[!] Error: Chunks directory not found at ${chunksDir}`);
@@ -230,422 +269,164 @@ async function run() {
         variables: {},
         properties: {},
         processed_chunks: [],
-        metadata: {
-            total_renamed: 0,
-            last_updated: new Date().toISOString()
-        }
+        metadata: { total_renamed: 0, last_updated: new Date().toISOString() }
     };
 
     if (fs.existsSync(mappingPath)) {
         try {
-            const raw = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
-            if (raw.version && raw.variables) {
-                globalMapping = raw;
-                if (!globalMapping.processed_chunks) globalMapping.processed_chunks = [];
-                if (!globalMapping.metadata) {
-                    globalMapping.metadata = {
-                        total_renamed: 0,
-                        last_updated: new Date().toISOString()
-                    };
-                }
-                console.log(`[*] Loaded structured mapping v${globalMapping.version} with ${Object.keys(globalMapping.variables).length} variables, ${Object.keys(globalMapping.properties).length} properties, and ${globalMapping.processed_chunks.length} processed chunks.`);
-
-                // Cleanup nulls from botched previous runs
-                let cleanedCount = 0;
-                const cleanupNulls = (obj) => {
-                    for (const key in obj) {
-                        if (obj[key] === null) {
-                            delete obj[key];
-                            cleanedCount++;
-                        } else if (Array.isArray(obj[key])) {
-                            const originalLen = obj[key].length;
-                            obj[key] = obj[key].filter(e => e !== null);
-                            cleanedCount += (originalLen - obj[key].length);
-                            if (obj[key].length === 0) delete obj[key];
-                        }
-                    }
-                };
-                cleanupNulls(globalMapping.variables);
-                cleanupNulls(globalMapping.properties);
-                if (cleanedCount > 0) {
-                    console.log(`[*] Cleaned up ${cleanedCount} null entries from mapping.`);
-                }
-            } else {
-                // Migration from flat format
-                console.log(`[*] Migrating old flat mapping to structure format...`);
-                for (const [key, val] of Object.entries(raw)) {
-                    globalMapping.variables[key] = {
-                        name: val,
-                        confidence: 0.8,
-                        source: "migration"
-                    };
-                }
-                console.log(`[*] Migration complete: ${Object.keys(globalMapping.variables).length} entries.`);
-                fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
-            }
-        } catch (err) {
-            console.warn(`[!] Error reading mapping.json, starting fresh: ${err.message}`);
-        }
+            globalMapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
+            if (!globalMapping.processed_chunks) globalMapping.processed_chunks = [];
+        } catch (err) { console.warn(`[!] Error reading mapping.json: ${err.message}`); }
     }
 
-    const graphMapPath = path.join(versionPath, 'metadata', 'graph_map.json');
-    const logicDbPath = path.join(versionPath, 'metadata', 'logic_db.json');
     let graphData = [];
     let logicDb = [];
     if (fs.existsSync(graphMapPath)) {
-        try {
-            const rawData = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
-            graphData = rawData.chunks || rawData; // Handle both old and new formats
-        } catch (err) {
-            console.error(`[!] Error parsing graph_map.json: ${err.message}`);
-            process.exit(1);
-        }
-    } else {
-        console.error(`[!] Error: graph_map.json not found at ${graphMapPath}`);
-        process.exit(1);
+        graphData = JSON.parse(fs.readFileSync(graphMapPath, 'utf8')).chunks || JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
     }
-
     if (fs.existsSync(logicDbPath)) {
-        try {
-            logicDb = JSON.parse(fs.readFileSync(logicDbPath, 'utf8'));
-        } catch (err) {
-            console.warn(`[!] Warning: Error parsing logic_db.json: ${err.message}`);
-        }
+        logicDb = JSON.parse(fs.readFileSync(logicDbPath, 'utf8'));
     }
 
-    // Sort by Centrality (descending) AND Category priority
-    const categoryPriority = { 'founder': 3, 'family': 2, 'vendor': 1, 'unknown': 0 };
-    let sortedChunks = graphData.slice().sort((a, b) => {
-        const primary = (b.centrality || 0) - (a.centrality || 0);
-        if (Math.abs(primary) > 0.0001) return primary;
-
-        // Tie-breaker: Category
-        const catA = categoryPriority[a.category] || 0;
-        const catB = categoryPriority[b.category] || 0;
-        return catB - catA;
-    });
-
-    if (limit < sortedChunks.length) {
-        console.log(`[*] Limit applied: Only processing top ${limit} chunks.`);
-        sortedChunks = sortedChunks.slice(0, limit);
-    }
+    let sortedChunks = graphData.slice().sort((a, b) => (b.centrality || 0) - (a.centrality || 0));
+    if (limitValue < sortedChunks.length) sortedChunks = sortedChunks.slice(0, limitValue);
 
     console.log(`[*] Starting Deobfuscation Pipeline [Provider: ${PROVIDER}, Model: ${MODEL}]`);
-    console.log(`[*] Processing ${sortedChunks.length} chunks.`);
+    if (isDryRun) console.log(`[!] DRY RUN MODE: No LLM calls will be made.`);
 
-    // --- KEY VALIDATION ---
     const isValid = await validateKey();
-    if (!isValid) {
-        process.exit(1);
-    }
+    if (!isValid) process.exit(1);
 
-    // Stage 1: Mapping Generation (LLM Pass)
     if (isRenameOnly) {
         console.log(`[*] Skipping Stage 1 (Mapping Generation) as --rename-only is set.`);
     } else {
         const pLimit = require('p-limit');
-        const limit = pLimit(3);
+        const limit = pLimit(PROVIDER === 'gemini' ? 1 : 3);
 
-        console.log(`[*] Starting Parallel LLM Naming Pass (Concurrency: 3)...`);
-
-        const tasks = sortedChunks.map((chunkMeta, i) => limit(async () => {
+        const tasks = sortedChunks.map((chunkMeta) => limit(async () => {
             const file = path.basename(chunkMeta.file);
             const chunkPath = path.join(chunksDir, file);
-
             if (!fs.existsSync(chunkPath)) return;
 
-            // Skip vendor logic
             if (skipVendor && chunkMeta.category === 'vendor') {
-                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
-                    globalMapping.processed_chunks.push(chunkMeta.name);
-                }
+                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) globalMapping.processed_chunks.push(chunkMeta.name);
                 return;
             }
 
-            // Resume check
-            if (globalMapping.processed_chunks.includes(chunkMeta.name) && !isForce) {
-                return;
-            }
+            if (globalMapping.processed_chunks.includes(chunkMeta.name) && !isForce) return;
 
             const code = fs.readFileSync(chunkPath, 'utf8');
             const { variables, properties } = extractIdentifiers(code);
-
-            // NN Anchor Coverage Check
-            const anchoredCount = variables.filter(v => globalMapping.variables[v]?.source?.startsWith('anchored')).length;
-            const anchorCoverage = variables.length > 0 ? anchoredCount / variables.length : 0;
-
-            if (anchorCoverage > 0.8) {
-                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
-                    globalMapping.processed_chunks.push(chunkMeta.name);
-                }
-                return;
-            }
 
             const unknownVariables = variables.filter(v => !globalMapping.variables[v]);
             const unknownProperties = properties.filter(p => !globalMapping.properties[p]);
 
             if (unknownVariables.length === 0 && unknownProperties.length === 0) {
-                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
-                    globalMapping.processed_chunks.push(chunkMeta.name);
-                }
+                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) globalMapping.processed_chunks.push(chunkMeta.name);
                 return;
             }
 
-            // --- CONTEXT INJECTION (GRAPH-INFORMED) ---
-            const neighborChunks = [...new Set([...chunkMeta.outbound, ...graphData.filter(c => c.outbound.includes(chunkMeta.name)).map(c => c.name)])];
-            const neighborMapping = { variables: {}, properties: {} };
-            for (const neighborId of neighborChunks) {
-                const neighborFileName = graphData.find(c => c.name === neighborId)?.file;
-                if (!neighborFileName) continue;
-                for (const [id, entry] of Object.entries(globalMapping.variables)) {
-                    if (!entry) continue;
-                    const match = Array.isArray(entry) ? entry.find(e => e && e.source === path.basename(neighborFileName)) : (entry.source === path.basename(neighborFileName) ? entry : null);
-                    if (match) neighborMapping.variables[id] = match.name;
-                }
-                for (const [id, entry] of Object.entries(globalMapping.properties)) {
-                    if (!entry) continue;
-                    const match = Array.isArray(entry) ? entry.find(e => e && e.source === path.basename(neighborFileName)) : (entry.source === path.basename(neighborFileName) ? entry : null);
-                    if (match) neighborMapping.properties[id] = match.name;
-                }
-            }
-
-            const filteredMapping = {
-                variables: {},
-                properties: {}
-            };
-
-            const codeLower = code.toLowerCase();
-
-            // SKELETONIZE: Only include neighbor mappings for identifiers used in this chunk
-            for (const [id, name] of Object.entries(neighborMapping.variables)) {
-                if (codeLower.includes(id.toLowerCase())) {
-                    filteredMapping.variables[id] = name;
-                }
-            }
-            for (const [id, name] of Object.entries(neighborMapping.properties)) {
-                if (codeLower.includes(id.toLowerCase())) {
-                    filteredMapping.properties[id] = name;
-                }
-            }
-
-            // Also include any already mapped identifiers for this chunk
-            for (const key of variables) {
-                if (globalMapping.variables[key]) {
-                    const entry = globalMapping.variables[key];
-                    filteredMapping.variables[key] = Array.isArray(entry) ? entry[0].name : entry.name;
-                }
-            }
-            for (const key of properties) {
-                if (globalMapping.properties[key]) {
-                    const entry = globalMapping.properties[key];
-                    filteredMapping.properties[key] = Array.isArray(entry) ? entry[0].name : entry.name;
-                }
-            }
-
-            const finalFilteredMapping = {
-                variables: Object.fromEntries(Object.entries(filteredMapping.variables).slice(0, 100)),
-                properties: Object.fromEntries(Object.entries(filteredMapping.properties).slice(0, 100))
-            };
-
-            const neighborInfo = chunkMeta.outbound.map(targetId => {
-                const target = graphData.find(c => c.name === targetId || path.basename(c.file, '.js') === targetId);
-                return target ? `${targetId} (${target.displayName || target.role || targetId})` : targetId;
-            }).join(', ');
-
-            console.log(`[*] Submitting ${file} to LLM...`);
-
-            // --- TWO-PASS STRATEGY FOR FOUNDER CHUNKS ---
-            let discoveryInfo = null;
-            if (chunkMeta.category === 'founder') {
-                console.log(`[*]   [PASS 1: DISCOVERY] Analyzing ${file}...`);
-                const discoveryPrompt = `
-Role: Senior Reverse Engineer
-Task: Discovery Pass (High-level Logic Identification)
-
-Analyze this "FOUNDER" chunk of an AI Agent codebase.
-IDENTIFY:
-1. The High-level Purpose/Role of this chunk.
-2. The "Public API" (Functions and Variables intended to be used by other modules).
-3. Any key internal state properties it manages.
-
-CODE:
-\`\`\`javascript
-${code}
-\`\`\`
-
-RESPONSE FORMAT (JSON ONLY):
-{
-  "role": "Description of the role",
-  "public_api": { "mangled_id": "suggested_name", ... },
-  "summary": "Concise summary"
-}
-`;
-                try {
-                    const discoveryResponse = await callLLM(discoveryPrompt);
-                    const { cleaned: cleanedDiscovery } = cleanLLMResponse(discoveryResponse);
-                    if (cleanedDiscovery) {
-                        const discoveryData = JSON.parse(require('jsonrepair').jsonrepair(cleanedDiscovery));
-                        discoveryInfo = discoveryData;
-                        console.log(`[*]   [DISCOVERY] ${file} identified as: ${discoveryData.role}`);
-
-                        // Seed the mapping with discovered public API
-                        if (discoveryData.public_api) {
-                            for (const [id, name] of Object.entries(discoveryData.public_api)) {
-                                if (!globalMapping.variables[id]) {
-                                    globalMapping.variables[id] = { name, confidence: 0.9, source: `${chunkMeta.name}_discovery` };
-                                }
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.warn(`    [!] Discovery pass failed for ${file}: ${err.message}`);
-                }
-            }
-
-            const prompt = `
+            const generatePrompt = (vars, props, codeContent) => `
 Role: Senior Reverse Engineer
 Task: Semantic Identity Mapping (Unobfuscation)
 
-Analyze the provided JavaScript code chunk from an AI Agent CLI tool.
-Goal: Map obfuscated variables and object properties to human-readable names.
+Analyze the provided JavaScript code chunk.
+Goal: Map obfuscated identifiers to human-readable names.
 
 CHUNK METADATA:
-- Role: ${discoveryInfo?.role || chunkMeta.role}
-- Discovery Summary: ${discoveryInfo?.summary || 'None'}
-- Label: ${chunkMeta.label}
-- Logical Source: ${chunkMeta.kb_info?.suggested_path || 'unknown'}
-- Bundle Line Range: ${chunkMeta.startLine} - ${chunkMeta.endLine}
-- State DNA: This code interacts with global state properties: ${chunkMeta.state_touchpoints.join(', ')}
-- Neighbors: Interacts with ${neighborInfo}
+- Role: ${chunkMeta.role}
+- Neighbors: ${chunkMeta.outbound.join(', ')}
 
-UNKNOWN IDENTIFIERS TO MAP:
-- Variables: ${unknownVariables.join(', ')}
-- Properties: ${unknownProperties.join(', ')}
-
-EXISTING MAPPINGS (Subset for context):
-${JSON.stringify(finalFilteredMapping, null, 2)}
-
-REFERENCE HINTS FROM KNOWLEDGE BASE:
-${filterKBHints(code, KB, logicDb.find(c => c.name === chunkMeta.name)?.vector, logicDb)}
+UNKNOWN IDENTIFIERS:
+- Variables: ${vars.join(', ')}
+- Properties: ${props.join(', ')}
 
 CODE:
 \`\`\`javascript
-${code}
+${codeContent}
 \`\`\`
-
-INSTRUCTIONS:
-1. Identify the purpose of obfuscated variables AND object properties based on their usage.
-2. CATEGORIZE your suggestions into "variables" (let, const, var, function names) and "properties" (this.prop, obj.prop, {prop: ...}).
-3. For "variables", prioritize names that reflect the variable's role in the ${chunkMeta.role} logic.
-4. For "properties", ensure names reflect the data being stored or the action being performed.
-5. If the logic matches a REFERENCE HINT, you MUST use that suggested name.
-6. Suggest a concise, descriptive FILENAME for this chunk (e.g., 'anthropicApiClient').
-
-CRITICAL:
-- I have provided a list of UNKNOWN IDENTIFIERS. Focus your response primarily on mapping these.
-- DO NOT propose new names for identifiers already present in the EXISTING MAPPINGS list; use them for consistency.
-- Your response must be valid JSON and ONLY JSON.
-- KEEP rationale and overallRationale extremely concise (one sentence each) to avoid hitting token limits for large chunks.
 
 RESPONSE FORMAT (JSON ONLY):
 {
   "mappings": {
-    "variables": {
-       "obfuscatedVar": { "name": "descriptiveVar", "rationale": "Shorter is better.", "confidence": 0.9 }
-    },
-    "properties": {
-       "obfuscatedProp": { "name": "descriptiveProp", "rationale": "Shorter is better.", "confidence": 0.9 }
-    }
+    "variables": { "mangled": { "name": "clean"${skipRationale ? '' : ', "rationale": "..."'}, "confidence": 0.9 } },
+    "properties": { "mangled": { "name": "clean"${skipRationale ? '' : ', "rationale": "..."'}, "confidence": 0.9 } }
   },
-  "suggestedFilename": "descriptive_name",
-  "overallRationale": "Concise summary."
+  "suggestedFilename": "descriptive_name"
 }
 `;
 
-            const MAX_RETRIES = 2;
-            for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-                try {
-                    const llmResponse = await callLLM(prompt);
-                    const { cleaned: cleanedJson, isTruncated } = cleanLLMResponse(llmResponse);
+            if (isDryRun) {
+                console.log(`[DRY RUN] Prompt for ${file} would be generated.`);
+                return;
+            }
 
-                    if (!cleanedJson) throw new Error("No JSON found");
+            // Auto-splitting logic
+            const VAR_CHUNK_SIZE = 40;
+            const PROP_CHUNK_SIZE = 40;
 
-                    if (isTruncated) console.warn(`    [!] Truncated response for ${file}. Repairing...`);
+            for (let vOffset = 0; vOffset < unknownVariables.length; vOffset += VAR_CHUNK_SIZE) {
+                for (let pOffset = 0; pOffset < unknownProperties.length; pOffset += PROP_CHUNK_SIZE) {
+                    const varSub = unknownVariables.slice(vOffset, vOffset + VAR_CHUNK_SIZE);
+                    const propSub = unknownProperties.slice(pOffset, pOffset + PROP_CHUNK_SIZE);
+                    if (varSub.length === 0 && propSub.length === 0) continue;
 
-                    let responseData;
-                    const { jsonrepair } = require('jsonrepair');
+                    const isFirstBatch = (vOffset === 0 && pOffset === 0);
+                    const codeToPass = isFirstBatch ? code : skeletonize(code);
+                    const prompt = generatePrompt(varSub, propSub, codeToPass);
                     try {
-                        responseData = JSON.parse(jsonrepair(cleanedJson));
-                        if (!responseData || !responseData.mappings) {
-                            throw new Error("Invalid response structure: 'mappings' key missing.");
-                        }
-                    } catch (e) {
-                        console.warn(`    [!] JSON Repair failed for ${file}: ${e.message}`);
-                        throw e; // Retry
-                    }
+                        const llmResponse = await callLLM(prompt);
+                        const { cleaned: cleanedJson, isTruncated } = cleanLLMResponse(llmResponse);
+                        if (!cleanedJson) throw new Error("No JSON found");
 
-                    const newMappings = responseData.mappings || {};
-                    let added = 0;
+                        const { jsonrepair } = require('jsonrepair');
+                        const responseData = JSON.parse(jsonrepair(cleanedJson));
 
-                    const updateMapping = (source, target, chunkName) => {
-                        for (const [key, mapping] of Object.entries(source)) {
-                            if (!mapping) continue;
-                            const newMapping = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: chunkName } : { ...mapping, source: chunkName };
-                            const existing = target[key];
-                            if (!existing) {
-                                target[key] = newMapping;
-                                added++;
-                            } else if (Array.isArray(existing)) {
-                                const idx = existing.findIndex(e => e && e.source === chunkName);
-                                if (idx !== -1) existing[idx] = newMapping;
-                                else existing.push(newMapping);
-                                added++;
-                            } else if (existing.source !== chunkName) {
-                                target[key] = [existing, newMapping];
-                                added++;
-                            } else {
-                                target[key] = newMapping;
-                                added++;
+                        const updateMapping = (source, target, chunkName) => {
+                            for (const [key, mapping] of Object.entries(source)) {
+                                if (!mapping) continue;
+                                const newEntry = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: chunkName } : { ...mapping, source: chunkName };
+
+                                if (target[key]) {
+                                    const existing = target[key];
+                                    if (newEntry.confidence > (existing.confidence || 0)) {
+                                        target[key] = newEntry;
+                                    }
+                                } else {
+                                    target[key] = newEntry;
+                                }
                             }
-                        }
-                    };
+                        };
 
-                    if (newMappings.variables) updateMapping(newMappings.variables, globalMapping.variables, chunkMeta.name);
-                    if (newMappings.properties) updateMapping(newMappings.properties, globalMapping.properties, chunkMeta.name);
-
-                    if (added > 0 || responseData.suggestedFilename) {
-                        if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
-                            globalMapping.processed_chunks.push(chunkMeta.name);
-                        }
+                        if (responseData.mappings?.variables) updateMapping(responseData.mappings.variables, globalMapping.variables, chunkMeta.name);
+                        if (responseData.mappings?.properties) updateMapping(responseData.mappings.properties, globalMapping.properties, chunkMeta.name);
                         if (responseData.suggestedFilename) chunkMeta.suggestedFilename = responseData.suggestedFilename;
-                        console.log(`    [+] Mapped ${added} symbols in ${file}`);
-                    }
 
-                    // Strict RPM adherence for free tier
-                    await sleep(6500 + Math.random() * 1000);
-                    return;
-                } catch (err) {
-                    console.warn(`    [!] Error ${file} (att ${attempt + 1}): ${err.message}`);
-                    if (attempt < MAX_RETRIES) await sleep(5000 * (attempt + 1));
+                        console.log(`    [+] Mapped identifiers in ${file} (Sub-pass)`);
+
+                        // Reliability delay
+                        const { PROVIDER_CONFIG } = require('./llm_client');
+                        const delay = (PROVIDER_CONFIG && PROVIDER_CONFIG[PROVIDER]?.delay) || 3000;
+                        await sleep(delay + Math.random() * 1000);
+                    } catch (err) {
+                        console.warn(`    [!] Error ${file}: ${err.message}`);
+                    }
                 }
             }
+
+            globalMapping.processed_chunks.push(chunkMeta.name);
+            // Save progress frequently (every chunk)
+            fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
         }));
 
         await Promise.all(tasks);
         fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
-        fs.writeFileSync(graphMapPath, JSON.stringify(graphData, null, 2));
-        console.log(`[*] Stage 1 Complete. Final mapping preserved at ${mappingPath}`);
+        console.log(`[*] Stage 1 Complete. Mapping saved.`);
     }
 
-    // Stage 2: Mapping Application & Renaming (Babel)
-    console.log(`[*] Starting Stage 2: Applying Mapping & Renaming with Babel...`);
-    try {
-        const cmd = `node src/rename_chunks.js "${versionPath}"`;
-        console.log(`[*] Executing: ${cmd}`);
-        execSync(cmd, { stdio: 'inherit' });
-        console.log(`\n[COMPLETE] Deobfuscation finished for ${version}`);
-    } catch (err) {
-        console.error(`[!] Stage 2 failed: ${err.message}`);
+    if (!isDryRun) {
+        console.log(`[*] Starting Stage 2: Applying Mapping & Renaming...`);
+        execSync(`node src/rename_chunks.js "${versionPath}"`, { stdio: 'inherit' });
     }
 }
 

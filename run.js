@@ -3,27 +3,53 @@ const fs = require('fs');
 const path = require('path');
 
 const findPython = () => {
-    const paths = [
-        path.join(__dirname, '.venv/bin/python3'),
-        path.join(__dirname, 'ml/.venv/bin/python3'),
-        path.join(__dirname, 'ml/venv/bin/python3'),
-        path.join(__dirname, '.venv/Scripts/python.exe'),
-        path.join(__dirname, 'ml/venv/Scripts/python.exe'),
-        'python3',
-        'python'
+    const isWin = process.platform === 'win32';
+    const venvPaths = [
+        path.join(__dirname, '.venv'),
+        path.join(__dirname, 'ml/.venv'),
+        path.join(__dirname, 'ml/venv')
     ];
-    for (const p of paths) {
+
+    const binPaths = [];
+    for (const venv of venvPaths) {
+        if (isWin) {
+            binPaths.push(path.join(venv, 'Scripts/python.exe'));
+        } else {
+            binPaths.push(path.join(venv, 'bin/python3'));
+            binPaths.push(path.join(venv, 'bin/python'));
+        }
+    }
+
+    // Add global fallbacks
+    binPaths.push('python3');
+    binPaths.push('python');
+
+    if (isWin) {
+        // Additional Windows common locations or commands
+        binPaths.push('py -3');
+        binPaths.push('py');
+    }
+
+    for (const p of binPaths) {
         try {
-            if (fs.existsSync(p)) return p;
+            if (p.includes(path.sep) && fs.existsSync(p)) {
+                return p;
+            }
+            // For global commands, check if they exist
+            if (!p.includes(path.sep)) {
+                const checkCmd = isWin ? `where ${p}` : `which ${p}`;
+                execSync(checkCmd, { stdio: 'ignore' });
+                return p;
+            }
         } catch (e) { }
     }
-    return 'python3';
+    return isWin ? 'python' : 'python3';
 };
 
 const PYTHON_BIN = findPython();
 
 const command = process.argv[2];
-const args = process.argv.slice(3);
+const args = process.argv.slice(3).map(arg => arg.replace(/[^a-zA-Z0-9.\-_=:/]/g, ''));
 
 const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'train', 'bootstrap', 'clean'];
 
@@ -96,7 +122,8 @@ switch (command) {
     case 'anchor': {
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',
-            shell: true
+            shell: true,
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
         });
         child.on('exit', (code) => {
             process.exit(code);
@@ -134,7 +161,7 @@ switch (command) {
         const bootstrapDir = './ml/bootstrap_data';
 
         console.log(`[*] Initiating Model Training on Gold Standards...`);
-        const child = spawn(PYTHON_BIN, ['ml/train.py', bootstrapDir], {
+        const child = spawn(PYTHON_BIN, ['ml/train.py', bootstrapDir, ...args], {
             stdio: 'inherit',
             shell: true
         });
@@ -147,7 +174,8 @@ switch (command) {
     default: {
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',
-            shell: true
+            shell: true,
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
         });
         child.on('exit', (code) => {
             process.exit(code);
