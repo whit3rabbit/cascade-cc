@@ -117,10 +117,16 @@ def evaluate_model(model, dataloader, device, dataset):
     
     return (correct / total) * 100 if total > 0 else 0
 
-def train_brain(bootstrap_dir, epochs=10, batch_size=32, force=False, lr=0.001, margin=0.3, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="auto"):
+def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.2, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda"):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    elif device_name == "cuda" and not torch.cuda.is_available():
+        print("[!] Warning: CUDA requested but not available. Falling back to CPU.")
+        device = torch.device("cpu")
+    elif device_name == "mps" and not torch.backends.mps.is_available():
+        print("[!] Warning: MPS requested but not available. Falling back to CPU.")
+        device = torch.device("cpu")
     else:
         device = torch.device(device_name)
     
@@ -162,7 +168,7 @@ def train_brain(bootstrap_dir, epochs=10, batch_size=32, force=False, lr=0.001, 
             print(f"[*] Found existing model at {model_path}. Attempting to load...")
             try:
                 checkpoint = torch.load(model_path, map_location=device)
-                checkpoint_vocab_size = checkpoint.get('embedding.weight', torch.zeros(0)).shape[0]
+                checkpoint_vocab_size = checkpoint.get('transformer_encoder.embedding.weight', checkpoint.get('embedding.weight', torch.zeros(0))).shape[0]
                 if checkpoint_vocab_size == current_vocab_size:
                     model.load_state_dict(checkpoint)
                     print("[+] Successfully loaded checkpoint weights.")
@@ -170,9 +176,17 @@ def train_brain(bootstrap_dir, epochs=10, batch_size=32, force=False, lr=0.001, 
                     print("[!] Vocabulary mismatch, but --force used. Partially loading...")
                     state_dict = model.state_dict()
                     for name, param in checkpoint.items():
-                        if name in state_dict and param.shape == state_dict[name].shape:
-                            state_dict[name].copy_(param)
+                        if name in state_dict:
+                            if param.shape == state_dict[name].shape:
+                                state_dict[name].copy_(param)
+                            elif 'embedding.weight' in name:
+                                # Handle partial embedding load if sizes differ
+                                min_size = min(checkpoint_vocab_size, current_vocab_size)
+                                state_dict[name][:min_size].copy_(param[:min_size])
+                                print(f"    [+] Resized {name} (mapped {min_size} types)")
                     model.load_state_dict(state_dict)
+                else:
+                    print(f"[!] Vocabulary mismatch (Checkpoint: {checkpoint_vocab_size}, Current: {current_vocab_size}). Use --force to load.")
             except Exception as e:
                 print(f"[!] Error loading checkpoint: {e}")
 
@@ -274,11 +288,11 @@ def run_sweep(bootstrap_dir, epochs=5):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the Code Fingerprinting Neural Network")
     parser.add_argument("bootstrap_dir", nargs="?", default="./ml/bootstrap_data", help="Directory containing gold ASTs")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
+    parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
-    parser.add_argument("--device", type=str, default="auto", help="Device: cuda, mps, cpu, or auto")
+    parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, mps, cpu, or auto")
     
     args = parser.parse_args()
     

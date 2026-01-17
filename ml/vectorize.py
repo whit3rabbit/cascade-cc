@@ -97,11 +97,18 @@ def flatten_ast(node, sequence, symbols, literals, stats, path="Root"):
         slot = child.get("slot", "child")
         flatten_ast(child, sequence, symbols, literals, stats, f"{path}/{slot}")
 
-def run_vectorization(version_path, force=False, device_name="auto"):
+def run_vectorization(version_path, force=False, device_name="cuda"):
     torch.manual_seed(42)
     
+    # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    elif device_name == "cuda" and not torch.cuda.is_available():
+        print("[!] Warning: CUDA requested but not available. Falling back to CPU.")
+        device = torch.device("cpu")
+    elif device_name == "mps" and not torch.backends.mps.is_available():
+        print("[!] Warning: MPS requested but not available. Falling back to CPU.")
+        device = torch.device("cpu")
     else:
         device = torch.device(device_name)
     
@@ -207,7 +214,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Vectorize simplified ASTs using the brain model")
     parser.add_argument("version_path", help="Path to the version directory (e.g., claude-analysis/v3.5)")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
-    parser.add_argument("--device", type=str, default="auto", help="Device: cuda, mps, cpu, or auto")
+    parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, mps, cpu, or auto")
     
     args = parser.parse_args()
     run_vectorization(args.version_path, force=args.force, device_name=args.device)

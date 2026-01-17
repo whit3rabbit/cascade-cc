@@ -2,7 +2,7 @@
 
 Pre-processor for CASCADE-style analysis of Claude Code bundles. 
 
-Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Fingerprinting + LLM Deobfuscation).
+Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Net Fingerprinting using Transformers + LLM Deobfuscation).
 
 ### Workflow
 
