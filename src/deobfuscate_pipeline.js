@@ -7,6 +7,7 @@ const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 
 const OUTPUT_ROOT = './cascade_graph_analysis';
+const REGISTRY_PATH = path.join(OUTPUT_ROOT, 'logic_registry.json');
 
 // --- KNOWLEDGE BASE ---
 const KB_PATH = './knowledge_base.json';
@@ -38,6 +39,12 @@ function loadReferenceTree(dir, prefix = "") {
 if (fs.existsSync(REFERENCE_ROOT)) {
     console.log(`[*] Loading Reference Structure from ${REFERENCE_ROOT}...`);
     loadReferenceTree(REFERENCE_ROOT);
+}
+
+// --- LOGIC REGISTRY (GOLD REFERENCES) ---
+let LOGIC_REGISTRY = null;
+if (fs.existsSync(REGISTRY_PATH)) {
+    LOGIC_REGISTRY = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
 }
 
 // --- UTILS ---
@@ -257,6 +264,55 @@ function cleanLLMResponse(text) {
     return { cleaned, isTruncated };
 }
 
+function calculateSimilarity(vecA, vecB) {
+    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+    return vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
+}
+
+function findBestRegistryMatch(chunkVector) {
+    if (!LOGIC_REGISTRY || !chunkVector) return { label: null, ref: null, similarity: -1 };
+    let bestMatch = { label: null, ref: null, similarity: -1 };
+    for (const [label, refData] of Object.entries(LOGIC_REGISTRY)) {
+        const sim = calculateSimilarity(chunkVector, refData.vector);
+        if (sim > bestMatch.similarity) {
+            bestMatch = { label, ref: refData, similarity: sim };
+        }
+    }
+    return bestMatch;
+}
+
+function loadGoldSource(match) {
+    if (!match || !match.ref || !match.label) return '';
+    const bootstrapRoot = path.join(OUTPUT_ROOT, 'bootstrap');
+    if (!fs.existsSync(bootstrapRoot)) return '';
+
+    let libName = match.ref.lib || null;
+    let chunkName = match.ref.chunk_name || null;
+
+    if (!libName || !chunkName) {
+        const lastUnderscore = match.label.lastIndexOf('_');
+        if (lastUnderscore !== -1) {
+            libName = match.label.slice(0, lastUnderscore);
+            chunkName = match.label.slice(lastUnderscore + 1);
+        }
+    }
+
+    if (!libName || !chunkName) return '';
+    const chunksDir = path.join(bootstrapRoot, libName, 'chunks');
+    if (!fs.existsSync(chunksDir)) return '';
+
+    const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.endsWith('.js'));
+    const preferred = `${chunkName}.js`;
+    const matchFile = chunkFiles.find(f => f === preferred) ||
+        chunkFiles.find(f => f.startsWith(`${chunkName}_`));
+    if (!matchFile) return '';
+
+    const goldPath = path.join(chunksDir, matchFile);
+    const raw = fs.readFileSync(goldPath, 'utf8');
+    const MAX_GOLD_REF_CHARS = 4000;
+    return raw.length > MAX_GOLD_REF_CHARS ? `${raw.slice(0, MAX_GOLD_REF_CHARS)}\n// ... truncated` : raw;
+}
+
 // --- MAIN STAGES ---
 async function run() {
     let version = process.argv.filter((arg, i, arr) => !arg.startsWith('-') && (i === 0 || arr[i - 1] !== '--limit'))[2];
@@ -321,6 +377,7 @@ async function run() {
     if (fs.existsSync(logicDbPath)) {
         logicDb = JSON.parse(fs.readFileSync(logicDbPath, 'utf8'));
     }
+    const logicDbByName = new Map(logicDb.map(entry => [entry.name, entry]));
 
     let sortedChunks = graphData.slice().sort((a, b) => (b.centrality || 0) - (a.centrality || 0));
     if (limitValue < sortedChunks.length) sortedChunks = sortedChunks.slice(0, limitValue);
@@ -360,16 +417,35 @@ async function run() {
                 return;
             }
 
-            const generatePrompt = (vars, props, codeContent) => `
+            const chunkVector = logicDbByName.get(chunkMeta.name)?.vector;
+            const bestMatch = findBestRegistryMatch(chunkVector);
+            const goldSimilarity = bestMatch.similarity;
+            const goldReferenceCode = goldSimilarity >= 0.95 ? loadGoldSource(bestMatch) : '';
+
+            const generatePrompt = (vars, props, codeContent, goldReferenceCode = '', goldSimilarity = null) => `
 Role: Senior Reverse Engineer
 Task: Semantic Identity Mapping (Unobfuscation)
 
 Analyze the provided JavaScript code chunk.
 Goal: Map obfuscated identifiers to human-readable names.
 
+CRITICAL CONSTRAINTS:
+1. UNIQUE NAMES: Every mangled identifier MUST have a unique descriptive name. Do not reuse generic placeholders like "deleted", "data", or "temp".
+2. PROTECT BUILT-INS: Never suggest names that are standard JavaScript globals (e.g., "Array", "Object", "String", "Promise").
+3. PROTECT API KEYS: Do not rename property keys that belong to standard JS APIs. For example, in Object.defineProperty, the keys "value", "enumerable", and "configurable" must stay exactly as they are.
+4. RUNTIME RECOGNITION: If you recognize esbuild/webpack runtime helpers (like __commonJS, __toESM, __lazyInit), use those standard names.
+
 CHUNK METADATA:
 - Role: ${chunkMeta.role}
 - Neighbors: ${(chunkMeta.outbound || []).join(', ')}
+
+${goldReferenceCode ? `GOLD REFERENCE IDENTIFIED:
+This chunk matches a known library signature (${(goldSimilarity * 100).toFixed(2)}% similarity).
+Use the names from this gold reference when mapping identifiers. Do not invent new semantics.
+\n\`\`\`javascript
+${goldReferenceCode}
+\`\`\`
+` : ''}
 
 ${REFERENCE_TREE ? `REFERENCE STRUCTURE (Version 2.1.9):
 Use this tree to infer logical paths and names:
@@ -417,7 +493,7 @@ RESPONSE FORMAT (JSON ONLY):
 
                     const isFirstBatch = (vOffset === 0 && pOffset === 0);
                     const codeToPass = isFirstBatch ? code : skeletonize(code);
-                    const prompt = generatePrompt(varSub, propSub, codeToPass);
+                    const prompt = generatePrompt(varSub, propSub, codeToPass, goldReferenceCode, goldSimilarity);
                     const PROMPT_RETRIES = 3;
                     let success = false;
 
@@ -430,10 +506,17 @@ RESPONSE FORMAT (JSON ONLY):
                             const { jsonrepair } = require('jsonrepair');
                             const responseData = JSON.parse(jsonrepair(cleanedJson));
 
-                            const updateMapping = (source, target, chunkName) => {
+                            const updateMapping = (source, target, chunkName, usedNamesInThisChunk) => {
                                 for (const [key, mapping] of Object.entries(source)) {
                                     if (!mapping) continue;
-                                    const newEntry = typeof mapping === 'string' ? { name: mapping, confidence: 0.8, source: chunkName } : { ...mapping, source: chunkName };
+                                    const newName = typeof mapping === 'string' ? mapping : mapping.name;
+                                    if (!newName) continue;
+                                    if (usedNamesInThisChunk.has(newName)) continue;
+                                    usedNamesInThisChunk.add(newName);
+
+                                    const newEntry = typeof mapping === 'string'
+                                        ? { name: newName, confidence: 0.8, source: chunkName }
+                                        : { ...mapping, name: newName, source: chunkName };
 
                                     if (target[key]) {
                                         const existing = target[key];
@@ -446,8 +529,14 @@ RESPONSE FORMAT (JSON ONLY):
                                 }
                             };
 
-                            if (responseData.mappings?.variables) updateMapping(responseData.mappings.variables, globalMapping.variables, chunkMeta.name);
-                            if (responseData.mappings?.properties) updateMapping(responseData.mappings.properties, globalMapping.properties, chunkMeta.name);
+                            if (responseData.mappings?.variables) {
+                                const usedNamesInThisChunk = new Set();
+                                updateMapping(responseData.mappings.variables, globalMapping.variables, chunkMeta.name, usedNamesInThisChunk);
+                            }
+                            if (responseData.mappings?.properties) {
+                                const usedNamesInThisChunk = new Set();
+                                updateMapping(responseData.mappings.properties, globalMapping.properties, chunkMeta.name, usedNamesInThisChunk);
+                            }
                             if (responseData.suggestedFilename) chunkMeta.suggestedFilename = responseData.suggestedFilename;
 
                             console.log(`    [+] Mapped identifiers in ${file} (Sub-pass)`);

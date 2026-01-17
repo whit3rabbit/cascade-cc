@@ -17,13 +17,13 @@ def generate_synthetic_obfuscation(ast_node):
     """
     Creates a 'mangled' version of the AST.
     Teaches the NN that names are junk, but structure is signal.
-    Includes structural noise to prevent trivial 100% accuracy.
+    Includes aggressive structural noise to prevent trivial 100% accuracy.
     """
     if isinstance(ast_node, list):
-        # Occasionally reorder children in blocks or arrays where order might be slightly flexible
-        # (Though in JS order usually matters, we can simulate minor shifts)
-        if len(ast_node) > 1 and random.random() < 0.1:
+        # Statement Shuffling: If children don't seem like they have strict order (e.g. declarations)
+        if len(ast_node) > 1 and random.random() < 0.15:
             new_list = ast_node.copy()
+            # Pick two random indices and swap
             i, j = random.sample(range(len(new_list)), 2)
             new_list[i], new_list[j] = new_list[j], new_list[i]
             return [generate_synthetic_obfuscation(n) for n in new_list]
@@ -39,13 +39,51 @@ def generate_synthetic_obfuscation(ast_node):
     if node_type == "Identifier":
         new_node["name"] = random.choice("abcdefghijklmnopqrstuvwxyz") + random.choice("0123456789")
         
-    # 2. Structural Noise: IfStatement Swapping
-    # if (a) {b} else {c}  ==> if (!a) {c} else {b}
+    # 2. Dead Code Injection: Randomly insert if(false){...}
+    if node_type == "BlockStatement" and random.random() < 0.1:
+        dead_node = {
+            "type": "IfStatement",
+            "children": [
+                {"type": "BooleanLiteral", "value": False, "slot": "test"},
+                {"type": "BlockStatement", "children": [], "slot": "consequent"}
+            ]
+        }
+        if "children" in new_node:
+            new_node["children"] = new_node["children"].copy()
+            insert_pos = random.randint(0, len(new_node["children"]))
+            new_node["children"].insert(insert_pos, dead_node)
+
+    # 3. Constant Unfolding: Replace true with !0, etc.
+    if node_type == "BooleanLiteral" and random.random() < 0.2:
+        val = new_node.get("value")
+        # Simulate !0 or !1 structure
+        new_node = {
+            "type": "UnaryExpression",
+            "operator": "!",
+            "children": [
+                {"type": "NumericLiteral", "value": 0 if val else 1, "slot": "argument"}
+            ]
+        }
+        return new_node
+
+    # 4. IIFE Wrapping: Wrap a block or expression in (function(){...})()
+    if node_type in ["BlockStatement", "CallExpression"] and random.random() < 0.05:
+        # Simplified representation of an IIFE in our AST logic
+        new_node = {
+            "type": "CallExpression",
+            "children": [
+                {
+                    "type": "FunctionExpression",
+                    "children": [new_node],
+                    "slot": "callee"
+                }
+            ]
+        }
+
+    # 5. Structural Noise: IfStatement Swapping (Existing)
     if node_type == "IfStatement" and random.random() < 0.2:
         children = new_node.get("children", [])
-        test_idx = -1
-        cons_idx = -1
-        alt_idx = -1
+        test_idx, cons_idx, alt_idx = -1, -1, -1
         for i, c in enumerate(children):
             slot = c.get("slot")
             if slot == "test": test_idx = i
@@ -53,12 +91,8 @@ def generate_synthetic_obfuscation(ast_node):
             elif slot == "alternate": alt_idx = i
         
         if test_idx != -1 and cons_idx != -1 and alt_idx != -1:
-            # Swap consequent and alternate
             new_children = children.copy()
             new_children[cons_idx], new_children[alt_idx] = children[alt_idx], children[cons_idx]
-            # Negate test (simulate by wrapping in UnaryExpression)
-            # Note: We just change the type of the test node to simulate '!' wrapper
-            # In our simplified AST, a more realistic way is to just know it's "different but same logic"
             new_children[test_idx] = {
                 "type": "UnaryExpression",
                 "children": [children[test_idx]],
@@ -66,11 +100,10 @@ def generate_synthetic_obfuscation(ast_node):
             }
             new_node["children"] = new_children
 
-    # 3. Commutative Swapping: BinaryExpression / LogicalExpression
+    # 6. Commutative Swapping: BinaryExpression / LogicalExpression (Existing)
     if node_type in ["BinaryExpression", "LogicalExpression"] and random.random() < 0.2:
         children = new_node.get("children", [])
-        left_idx = -1
-        right_idx = -1
+        left_idx, right_idx = -1, -1
         for i, c in enumerate(children):
             slot = c.get("slot")
             if slot == "left": left_idx = i
@@ -111,6 +144,12 @@ class TripletDataset(Dataset):
         anchor_seq = []
         anchor_lits = []
         flatten_ast(anchor_ast, anchor_seq, [], anchor_lits, {"total_nodes": 0, "unknown_nodes": 0})
+        
+        # --- NUCLEAR OPTION: Node Type Masking (15%) ---
+        for i in range(len(anchor_seq)):
+            if random.random() < 0.15:
+                anchor_seq[i] = 1 # UNKNOWN
+                
         anchor_t = torch.tensor(anchor_seq[:self.max_nodes])
         if anchor_t.size(0) < self.max_nodes:
             anchor_t = F.pad(anchor_t, (0, self.max_nodes - anchor_t.size(0)))
@@ -119,11 +158,38 @@ class TripletDataset(Dataset):
         if anchor_lit_t.size(0) < MAX_LITERALS:
             anchor_lit_t = F.pad(anchor_lit_t, (0, MAX_LITERALS - anchor_lit_t.size(0)), value=-1.0)
             
-        # 2. Positive: Synthetically mangled
+        # --- NUCLEAR OPTION: Literal Dropout (50%) Phase 1: Determine ---
+        dropout_active = random.random() < 0.5
+        if dropout_active:
+            anchor_lit_t = torch.full((MAX_LITERALS,), -1.0)
+
+        # 2. Positive: Synthetically mangled + random junk nodes
         pos_ast = generate_synthetic_obfuscation(anchor_ast)
         pos_seq = []
         pos_lits = []
         flatten_ast(pos_ast, pos_seq, [], pos_lits, {"total_nodes": 0, "unknown_nodes": 0})
+        
+        # --- NUCLEAR OPTION: Node Type Masking (15%) ---
+        for i in range(len(pos_seq)):
+            if random.random() < 0.15:
+                pos_seq[i] = 1 # UNKNOWN
+
+        # Add 20% random "junk" nodes (PAD or UNKNOWN variant)
+        if len(pos_seq) > 0:
+            junk_count = int(len(pos_seq) * 0.2)
+            for _ in range(junk_count):
+                pos_seq.insert(random.randint(0, len(pos_seq)), random.choice([0, 1])) # 0=PAD, 1=UNKNOWN
+
+        # --- NUCLEAR OPTION: Sequence Jittering (Random Cropping/Padding) ---
+        if len(pos_seq) > 10 and random.random() < 0.3:
+            # Crop up to 10% from start or end
+            crop_size = int(len(pos_seq) * 0.1)
+            if random.random() < 0.5:
+                pos_seq = pos_seq[random.randint(0, crop_size):]
+            else:
+                pos_seq = pos_seq[:-random.randint(1, crop_size)]
+
+        # Re-apply padding/truncation AFTER jittering to ensure consistent tensor size
         positive_t = torch.tensor(pos_seq[:self.max_nodes])
         if positive_t.size(0) < self.max_nodes:
             positive_t = F.pad(positive_t, (0, self.max_nodes - positive_t.size(0)))
@@ -131,6 +197,10 @@ class TripletDataset(Dataset):
         pos_lit_t = torch.tensor(pos_lits[:MAX_LITERALS])
         if pos_lit_t.size(0) < MAX_LITERALS:
             pos_lit_t = F.pad(pos_lit_t, (0, MAX_LITERALS - pos_lit_t.size(0)), value=-1.0)
+        
+        # --- NUCLEAR OPTION: Literal Dropout (50%) Phase 2: Align ---
+        if dropout_active: 
+            pos_lit_t = torch.full((MAX_LITERALS,), -1.0)
             
         return anchor_t, anchor_lit_t, positive_t, pos_lit_t, anchor_key
 
@@ -138,6 +208,11 @@ def evaluate_model(model, dataloader, device, dataset):
     model.eval()
     correct = 0
     total = 0
+    
+    total_pos_dist = 0
+    total_neg_dist = 0
+    count = 0
+
     with torch.no_grad():
         for anchors, a_lits, positives, p_lits, anchor_keys in dataloader:
             anchors, a_lits = anchors.to(device), a_lits.to(device)
@@ -146,21 +221,26 @@ def evaluate_model(model, dataloader, device, dataset):
             a_vec = model(anchors, a_lits)
             p_vec = model(positives, p_lits)
             
-            # For each anchor, pick a hard negative from the batch
+            # Vectorized Hard Negative Mining for Evaluation
+            # Calculate similarity matrix (Cosine similarity since vectors are normalized)
+            sims = torch.matmul(a_vec, a_vec.T)
+            
             for i in range(len(anchors)):
-                anchor_struct_hash = dataset.structural_hashes[anchor_keys[i]]
+                anchor_hash = dataset.structural_hashes[anchor_keys[i]]
                 
-                # Simple negative: pick any other non-isomorphic item in batch
-                neg_idx = -1
+                # Mask out self and isomorphs
+                batch_sims = sims[i].clone()
+                batch_sims[i] = -2 # Lower than any possible cosine sim
+                
                 for j in range(len(anchors)):
-                    if i == j: continue
-                    if dataset.structural_hashes[anchor_keys[j]] != anchor_struct_hash:
-                        neg_idx = j
-                        break
+                    if dataset.structural_hashes[anchor_keys[j]] == anchor_hash:
+                        batch_sims[j] = -2
                 
-                if neg_idx == -1: continue # Skip if no suitable negative in batch
+                hardest_idx = torch.argmax(batch_sims)
+                if batch_sims[hardest_idx] == -2:
+                    continue # No valid negative in batch
                 
-                n_vec = model(anchors[neg_idx].unsqueeze(0), a_lits[neg_idx].unsqueeze(0))
+                n_vec = a_vec[hardest_idx]
                 
                 d_pos = torch.norm(a_vec[i] - p_vec[i], p=2)
                 d_neg = torch.norm(a_vec[i] - n_vec, p=2)
@@ -168,10 +248,17 @@ def evaluate_model(model, dataloader, device, dataset):
                 if d_pos < d_neg:
                     correct += 1
                 total += 1
+                
+                total_pos_dist += d_pos.item()
+                total_neg_dist += d_neg.item()
+                count += 1
     
-    return (correct / total) * 100 if total > 0 else 0
+    avg_pos = total_pos_dist / count if count > 0 else 0
+    avg_neg = total_neg_dist / count if count > 0 else 0
+    
+    return (correct / total) * 100 if total > 0 else 0, avg_pos, avg_neg
 
-def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda", max_nodes_override=None):
+def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -196,7 +283,6 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
         print("[!] Error: NODE_TYPES is unexpectedly small; run 'npm run sync-vocab' before training.")
         return 0, None
     current_vocab_size = node_type_count + 5
-    if not is_sweep: print(f"[*] Current Vocabulary: {len(NODE_TYPES)} types (Total with specials: {current_vocab_size})")
 
     if not is_sweep: print(f"[*] Starting 'Brain' Training on Bootstrap Data: {bootstrap_dir}")
     
@@ -206,18 +292,33 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
         return 0, None
 
     patterns = {}
+    libraries = set()
     for f_name in ast_files:
+        lib_name = f_name.replace('_gold_asts.json', '')
+        libraries.add(lib_name)
         with open(os.path.join(bootstrap_dir, f_name), 'r') as f:
             data = json.load(f)
-            lib_prefix = f_name.replace('_gold_asts.json', '')
             for chunk_name, ast in data.items():
-                patterns[f"{lib_prefix}_{chunk_name}"] = ast
+                patterns[f"{lib_name}_{chunk_name}"] = ast
 
-    full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
-    train_size = int(0.8 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
-    
+    # 4. Leave-One-Library-Out Validation
+    if not val_library:
+        val_library = random.choice(list(libraries))
+        if not is_sweep: print(f"[*] Leave-One-Library-Out: Validating on '{val_library}'")
+
+    train_patterns = {k: v for k, v in patterns.items() if not k.startswith(val_library + "_")}
+    val_patterns = {k: v for k, v in patterns.items() if k.startswith(val_library + "_")}
+
+    if not val_patterns:
+        print(f"[!] Warning: Validation library {val_library} has no patterns. Falling back to 80/20 split.")
+        full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
+        train_size = int(0.8 * len(full_dataset))
+        val_size = len(full_dataset) - train_size
+        train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+    else:
+        train_dataset = TripletDataset(train_patterns, max_nodes=effective_max_nodes)
+        val_dataset = TripletDataset(val_patterns, max_nodes=effective_max_nodes)
+
     use_cuda = device.type == 'cuda'
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=use_cuda)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=use_cuda)
@@ -267,6 +368,9 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
     criterion = nn.TripletMarginLoss(margin=margin, p=2)
     
     best_val_acc = 0
+    best_val_margin = -1.0
+    best_state = None
+
     print(f"[*] Starting training loop for {epochs} epochs...")
     for epoch in range(epochs):
         model.train()
@@ -279,27 +383,27 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
             with torch.no_grad():
                 anchor_vecs = model(anchors, a_lits)
             
+            # Vectorized Hard Negative Mining
+            sims = torch.matmul(anchor_vecs, anchor_vecs.T)
             negatives = []
             neg_lits = []
+            
             for i in range(len(anchors)):
-                max_sim = -1.0
-                hardest_neg_idx = -1
-                anchor_struct_hash = full_dataset.structural_hashes[anchor_keys[i]]
+                batch_sims = sims[i].clone()
+                batch_sims[i] = -2  # Mask self
                 
+                anchor_hash = train_dataset.structural_hashes[anchor_keys[i]]
                 for j in range(len(anchors)):
-                    if i == j: continue
-                    if full_dataset.structural_hashes[anchor_keys[j]] == anchor_struct_hash: continue
-                    
-                    sim = torch.dot(anchor_vecs[i], anchor_vecs[j]).item()
-                    if sim > max_sim:
-                        max_sim = sim
-                        hardest_neg_idx = j
+                    if train_dataset.structural_hashes[anchor_keys[j]] == anchor_hash:
+                        batch_sims[j] = -2 # Mask isomorphs
                 
-                if hardest_neg_idx == -1:
-                    hardest_neg_idx = (i + 1) % len(anchors)
+                hardest_idx = torch.argmax(batch_sims)
+                if batch_sims[hardest_idx] == -2:
+                    # Fallback to any other item if no non-isomorph in batch
+                    hardest_idx = (i + 1) % len(anchors)
                     
-                negatives.append(anchors[hardest_neg_idx])
-                neg_lits.append(a_lits[hardest_neg_idx])
+                negatives.append(anchors[hardest_idx])
+                neg_lits.append(a_lits[hardest_idx])
             
             negatives = torch.stack(negatives).to(device)
             neg_lits = torch.stack(neg_lits).to(device)
@@ -317,28 +421,34 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
             if not is_sweep and batch_idx % 10 == 0:
                 print(f"      Batch {batch_idx}/{len(train_loader)} - Loss: {loss.item():.4f}")
 
-        val_acc = evaluate_model(model, val_loader, device, full_dataset)
-        if not is_sweep:
-            print(f"    Epoch {epoch+1}/{epochs} - Loss: {total_loss/len(train_loader):.4f} - Val Acc: {val_acc:.2f}%")
+        val_acc, avg_pos, avg_neg = evaluate_model(model, val_loader, device, val_dataset)
+        val_margin = avg_neg - avg_pos
         
-        if val_acc > best_val_acc:
+        if not is_sweep:
+            print(f"    Epoch {epoch+1}/{epochs} - Loss: {total_loss/len(train_loader):.4f}")
+            print(f"    Validation Match Accuracy: {val_acc:.2f}%")
+            print(f"    Similarity Spread - Pos Dist: {avg_pos:.4f}, Neg Dist: {avg_neg:.4f} (Margin: {val_margin:.4f})")
+        
+        # Optimize for Margin primarily, but keep Accuracy as well
+        if val_margin > best_val_margin:
+            best_val_margin = val_margin
             best_val_acc = val_acc
+            best_state = model.state_dict()
             if not is_sweep:
-                torch.save(model.state_dict(), os.path.join(os.path.dirname(__file__), "model.pth"))
+                torch.save(best_state, os.path.join(os.path.dirname(__file__), "model.pth"))
 
-    return best_val_acc, model.state_dict()
+    return (best_val_margin, best_val_acc), best_state
 
 def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=None):
-    print("[*] Starting Hyperparameter Sweep...")
+    print("[*] Starting Hyperparameter Sweep (Targeting Maximal Margin)...")
     results = []
     
-    # Expanded ranges for Colab/GPU "Super Sweep"
     margins = [0.2, 0.5, 0.8] 
     lrs = [0.001, 0.0005, 0.0001]
-    embed_dims = [32, 64, 128] # Note: embed_dim must be divisible by 8 (nhead)
+    embed_dims = [32, 64, 128]
     hidden_dims = [64, 128]
     
-    best_overall_acc = 0
+    best_overall_margin = -1.0
     best_params = None
     best_state = None
 
@@ -347,14 +457,18 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
             for ed in embed_dims:
                 for hd in hidden_dims:
                     print(f"    - Testing Margin: {m}, LR: {lr}, Embed: {ed}, Hidden: {hd}...")
-                    acc, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed, hidden_dim=hd, device_name=device_name, max_nodes_override=max_nodes_override)
-                    print(f"      Result: {acc:.2f}%")
-                    results.append({"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": acc})
+                    result, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed, hidden_dim=hd, device_name=device_name, max_nodes_override=max_nodes_override)
+                    val_margin, val_acc = result
+                    print(f"      Result: Acc {val_acc:.2f}%, Margin {val_margin:.4f}")
+                    results.append({"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": val_acc, "val_margin": val_margin})
                     
-                    if acc > best_overall_acc:
-                        best_overall_acc = acc
-                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd}
+                    if val_margin > best_overall_margin:
+                        best_overall_margin = val_margin
+                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": val_acc}
                         best_state = state
+
+    print(f"\n[+] Sweep Complete! Best Similarity Margin: {best_overall_margin:.4f} (Acc: {best_params['acc']:.2f}%)")
+    print(f"[+] Best Params: {best_params}")
 
     print(f"\n[+] Sweep Complete! Best Accuracy: {best_overall_acc:.2f}%")
     print(f"[+] Best Params: {best_params}")

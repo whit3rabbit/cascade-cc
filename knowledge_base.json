@@ -14191,6 +14191,11 @@
   ],
   "structural_anchors": [
     {
+      "role": "ESBUILD_RUNTIME",
+      "pattern": "Object.create;Object.getPrototypeOf;Object.defineProperty",
+      "description": "Esbuild runtime helpers (__commonJS/__toESM) and property descriptor wiring."
+    },
+    {
       "role": "STREAMING_ORCHESTRATOR",
       "feature": "AsyncGenerator",
       "description": "Uses async function* to stream LLM events."

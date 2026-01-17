@@ -54,8 +54,9 @@ function calculateSimilarity(vecA, vecB) {
  * 3. Fallback to name-based alignment if necessary.
  * 4. Apply matches to targetMapping, filtering out protected/reserved names.
  */
-function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targetSymbols, refSymbols, sourceLabel) {
+function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targetSymbols, refSymbols, sourceLabel, options = {}) {
     let alignedCount = 0;
+    const { lockConfidence = null } = options;
 
     // Create a map of ref symbols by their structural key and by name
     const refSymbolMap = new Map();
@@ -107,7 +108,9 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
             if (!targetMapping.variables[targetMangled]) {
                 targetMapping.variables[targetMangled] = {
                     name: typeof resolvedVar === 'string' ? resolvedVar : resolvedVar.name,
-                    confidence: match.method === 'key' ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9) : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85),
+                    confidence: lockConfidence ?? (match.method === 'key'
+                        ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9)
+                        : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85)),
                     source: `anchored_${match.method}_${sourceLabel}`
                 };
                 alignedCount++;
@@ -117,7 +120,9 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
             if (!targetMapping.properties[targetMangled]) {
                 targetMapping.properties[targetMangled] = {
                     name: typeof resolvedProp === 'string' ? resolvedProp : resolvedProp.name,
-                    confidence: match.method === 'key' ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9) : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85),
+                    confidence: lockConfidence ?? (match.method === 'key'
+                        ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9)
+                        : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85)),
                     source: `anchored_${match.method}_${sourceLabel}`
                 };
                 alignedCount++;
@@ -175,6 +180,9 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         let totalSimilarity = 0;
         let highSimCount = 0;
 
+        const lockThreshold = parseFloat(process.env.ANCHOR_LOCK_THRESHOLD) || 0.98;
+        const lockConfidence = parseFloat(process.env.ANCHOR_LOCK_CONFIDENCE) || 0.99;
+
         for (const targetChunk of targetLogicDb) {
             let bestMatch = { ref: null, similarity: -1, label: null };
             for (const [label, refData] of Object.entries(registry)) {
@@ -199,7 +207,8 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     bestMatch.ref.resolved_properties,
                     targetChunk.symbols,
                     bestMatch.ref.symbols,
-                    bestMatch.label
+                    bestMatch.label,
+                    bestMatch.similarity >= lockThreshold ? { lockConfidence } : {}
                 );
 
                 // Match anchoring results back to filenames
@@ -281,6 +290,9 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         let totalSimilarity = 0;
         let highSimCount = 0;
 
+        const lockThreshold = parseFloat(process.env.ANCHOR_LOCK_THRESHOLD) || 0.98;
+        const lockConfidence = parseFloat(process.env.ANCHOR_LOCK_CONFIDENCE) || 0.99;
+
         for (const targetChunk of targetLogicDb) {
             let bestMatch = { ref: null, similarity: -1 };
             for (const refChunk of referenceLogicDb) {
@@ -314,7 +326,8 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     refProps,
                     targetChunk.symbols,
                     bestMatch.ref.symbols,
-                    bestMatch.ref.name
+                    bestMatch.ref.name,
+                    bestMatch.similarity >= lockThreshold ? { lockConfidence } : {}
                 );
                 if (!targetMapping.processed_chunks.includes(targetChunk.name)) {
                     targetMapping.processed_chunks.push(targetChunk.name);

@@ -57,16 +57,7 @@ async function updateRegistryFromBootstrap() {
                 if (symbol.length === 2 && symbol.startsWith('_')) continue;
 
                 const blacklistedNames = [
-                    'then', 'catch', 'finally', 'length', 'map', 'forEach', 'filter', 'reduce',
-                    'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'join', 'split',
-                    'includes', 'indexOf', 'lastIndexOf', 'hasOwnProperty', 'toString',
-                    'valueOf', 'prototype', 'constructor', 'apply', 'call', 'bind',
-                    'message', 'stack', 'name', 'code', 'status', 'headers', 'body',
-                    'write', 'end', 'on', 'once', 'emit', 'removeListener', 'removeAllListeners',
-                    'substring', 'substr', 'replace', 'trim', 'toLowerCase', 'toUpperCase', 'charAt',
-                    'match', 'search', 'concat', 'entries', 'keys', 'values', 'from',
-                    'stdout', 'stderr', 'stdin', 'destroyed', 'preInit',
-                    'if', 'for', 'let', 'var', 'const', 'try', 'catch', 'map', 'set',
+                    'if', 'for', 'let', 'var', 'const', 'try', 'catch',
                     'type', 'value', 'key', 'id', 'data', 'data_', 'obj', 'item', 'val', 'args'
                 ];
                 if (blacklistedNames.includes(symbol)) continue;
@@ -90,6 +81,8 @@ async function updateRegistryFromBootstrap() {
             // Group by library and chunk name to avoid collisions
             const registryKey = `${lib}_${chunk.name}`;
             registry[registryKey] = {
+                lib,
+                chunk_name: chunk.name,
                 vector: chunk.vector,
                 symbols: chunk.symbols,
                 resolved_variables: variables,

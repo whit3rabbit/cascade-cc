@@ -16,6 +16,26 @@ const RESERVED_PROPERTIES = new Set([
     'stdout', 'stderr', 'stdin', 'destroyed', 'preInit'
 ]);
 
+const DESCRIPTOR_KEYS = new Set([
+    'value', 'enumerable', 'configurable', 'writable', 'get', 'set'
+]);
+
+const RESERVED_GLOBALS = new Set([
+    'Array', 'Object', 'String', 'Number', 'Boolean', 'Function', 'Symbol', 'BigInt',
+    'Math', 'JSON', 'Date', 'RegExp', 'Error', 'TypeError', 'Promise', 'Map', 'Set',
+    'WeakMap', 'WeakSet', 'Proxy', 'Reflect', 'Intl', 'URL', 'URLSearchParams',
+    'TextEncoder', 'TextDecoder', 'Buffer', 'process', 'console', 'global',
+    'globalThis', 'window', 'document', 'navigator', 'setTimeout', 'setInterval',
+    'clearTimeout', 'clearInterval', 'setImmediate', 'clearImmediate'
+]);
+
+const DISALLOWED_VARIABLE_NAMES = new Set([
+    'setMinutes'
+]);
+
+const isProtectedProperty = (propName) =>
+    RESERVED_PROPERTIES.has(propName) || DESCRIPTOR_KEYS.has(propName);
+
 /**
  * Safely renames identifiers in a piece of code using Babel's scope-aware renaming.
  */
@@ -58,6 +78,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             }
 
                             if (newName) {
+                                if (RESERVED_GLOBALS.has(newName) || DISALLOWED_VARIABLE_NAMES.has(newName)) return;
                                 p.scope.rename(oldName, newName);
                                 renamedBindings.add(oldName);
                             }
@@ -120,7 +141,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                         const isHighConfidence = confidence >= 0.95;
                         const isDescriptive = propName.length > 2;
 
-                        if (RESERVED_PROPERTIES.has(propName)) {
+                        if (isProtectedProperty(propName)) {
                             // SKIP: Never rename reserved properties
                         } else if (isObjectKnown || (isHighConfidence && isDescriptive)) {
                             p.node.property.name = newName;
@@ -170,7 +191,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                         const isHighConfidence = confidence >= 0.95;
                         const isDescriptive = propName.length > 3;
 
-                        if (RESERVED_PROPERTIES.has(propName)) {
+                        if (isProtectedProperty(propName)) {
                             // SKIP
                         } else if (isHighConfidence || isDescriptive) {
                             p.node.key.name = newName;
