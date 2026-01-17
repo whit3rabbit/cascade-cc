@@ -36,7 +36,12 @@ const LIBS = [
     { name: '@aws-sdk/client-s3', version: '3.958.0' },
     { name: '@aws-sdk/client-sts', version: '3.958.0' },
     { name: '@aws-sdk/credential-providers', version: '3.958.0' },
-    { name: '@modelcontextprotocol/sdk', version: '1.25.1' },
+    {
+        name: '@modelcontextprotocol/sdk',
+        version: '1.25.1',
+        peerDeps: ['zod@3.23.8'],
+        imports: ['@modelcontextprotocol/sdk/client', '@modelcontextprotocol/sdk/server', '@modelcontextprotocol/sdk/validation']
+    },
 
     // --- Common Utilities & Data Handling ---
     { name: 'axios', version: '1.13.2' },
@@ -158,15 +163,20 @@ async function bootstrap() {
         try {
             // 1. Isolated Install for this specific version
             console.log(`  [+] Installing ${lib.name}@${lib.version}...`);
-            const installCmd = `npm install ${lib.name}@${lib.version} ${lib.peerDeps ? lib.peerDeps.join(' ') : ''} --no-save --prefix "${libWorkDir}" --legacy-peer-deps`;
+            const installCmd = `npm install ${lib.name}@${lib.version} ${lib.peerDeps ? lib.peerDeps.join(' ') : ''} --no-save --prefix "${libWorkDir}" --legacy-peer-deps --install-links`;
             execSync(installCmd, { stdio: 'ignore' });
 
             // 2. Create Entry Point (mimic bundling)
             const entryFile = path.join(libWorkDir, 'entry.js');
-            fs.writeFileSync(entryFile, `
-                import * as Lib from '${lib.name}';
-                console.log(Lib);
-            `);
+            let importCode = '';
+            if (lib.imports) {
+                lib.imports.forEach((imp, i) => {
+                    importCode += `import * as Lib${i} from '${imp}';\nconsole.log(Lib${i});\n`;
+                });
+            } else {
+                importCode = `import * as Lib from '${lib.name}';\nconsole.log(Lib);\n`;
+            }
+            fs.writeFileSync(entryFile, importCode);
 
             // 3. Bundle with ESBUILD
             const bundlePath = path.join(libWorkDir, 'bundled.js');
@@ -182,7 +192,9 @@ async function bootstrap() {
                 'react',
                 'react/jsx-runtime',
                 'react/jsx-dev-runtime',
-                'ink'
+                'ink',
+                '@opentelemetry/api',
+                '@opentelemetry/sdk-trace-node'
             ];
 
             const getPackageName = (spec) => {
@@ -199,11 +211,11 @@ async function bootstrap() {
                 .filter(ext => ext !== lib.name && !lib.name.startsWith(`${ext}/`));
 
             const externalFlags = externals.map(ext => `--external:${ext}`).join(' ');
-            execSync(`NODE_PATH="${nodePath}" npx -y esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" ${externalFlags}`, { stdio: 'inherit' });
+            execSync(`NODE_PATH="${nodePath}" npx -y esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=cjs --target=node18 --outfile="${bundlePath}" --loader:.node=empty --loader:.png=empty ${externalFlags}`, { stdio: 'inherit' });
 
             // 4. Run Analysis
-            console.log(`  [+] Fingerprinting structural ASTs...`);
-            execSync(`node src/analyze.js "${bundlePath}" --version "bootstrap/${libSafeName}"`, { stdio: 'inherit' });
+            console.log(`  [+] Fingerprinting structural ASTs (Bootstrap Mode)...`);
+            execSync(`node src/analyze.js "${bundlePath}" --version "bootstrap/${libSafeName}" --is-bootstrap`, { stdio: 'inherit' });
 
             // 5. Relocate the simplified_asts.json
             const resultPath = path.join(ANALYSIS_OUTPUT, 'bootstrap', libSafeName, 'metadata', 'simplified_asts.json');

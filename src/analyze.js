@@ -23,6 +23,7 @@ const PACKAGE_NAME = '@anthropic-ai/claude-code';
 const ANALYSIS_DIR = './claude-analysis';
 const OUTPUT_ROOT = './cascade_graph_analysis';
 let OUTPUT_BASE = OUTPUT_ROOT; // Will be updated with version
+const IS_BOOTSTRAP = process.argv.includes('--is-bootstrap');
 const SIGNAL_KEYWORDS = ['anthropic', 'claude', 'mcp', 'agent', 'terminal', 'prompt', 'session', 'protocol', 'codeloop'];
 const NATIVE_PROPS = ['toString', 'hasOwnProperty', 'constructor', 'prototype', 'call', 'apply', 'bind'];
 const GLOBAL_VARS = ['console', 'window', 'document', 'process', 'module', 'require', 'exports', 'global', 'Buffer', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'];
@@ -454,7 +455,7 @@ class CascadeGraph {
             const hints = [];
 
             // --- NEW: ENHANCED KB METADATA ---
-            if (KB) {
+            if (KB && !IS_BOOTSTRAP) {
                 // 1. Check File Anchors
                 if (KB.file_anchors) {
                     for (const anchor of KB.file_anchors) {
@@ -665,7 +666,7 @@ class CascadeGraph {
             try {
                 const ast = parser.parse(nodeData.code, {
                     sourceType: 'module',
-                    plugins: ['jsx']
+                    plugins: ['jsx', 'typescript', 'decorators-legacy', 'classProperties', 'dynamicImport']
                 });
 
                 traverse(ast, {
@@ -1016,8 +1017,8 @@ async function run() {
     }
 
     let ast = parser.parse(code, {
-        sourceType: 'unambiguous',
-        plugins: ['jsx', 'typescript'],
+        sourceType: 'module',
+        plugins: ['jsx', 'typescript', 'decorators-legacy', 'classProperties', 'dynamicImport'],
         errorRecovery: true
     });
 
@@ -1107,22 +1108,26 @@ async function run() {
     graph.saveResults(OUTPUT_BASE);
 
     // Phase 3.5: Integrating Neural Anchoring
-    console.log(`[*] Phase 3.5: Integrating Neural Anchoring...`);
-    const modelPath = path.join(__dirname, '../ml/model.pth');
-    if (!fs.existsSync(modelPath)) {
-        console.warn(`    [!] Neural Network model not found at ${modelPath}`);
-        console.warn(`    [!] Performance will be degraded. Run 'npm run bootstrap && npm run train' first for deep analysis.`);
+    if (IS_BOOTSTRAP) {
+        console.log(`[*] Skipping Phase 3.5 & 4 (Bootstrap Mode: Minimal side effects)`);
     } else {
-        const { anchorLogic } = require('./anchor_logic');
-        try {
-            await anchorLogic(version);
-            console.log(`    [+] Neural Anchoring complete.`);
-        } catch (e) {
-            console.error(`    [!] Neural Anchoring failed: ${e.message}`);
+        console.log(`[*] Phase 3.5: Integrating Neural Anchoring...`);
+        const modelPath = path.join(__dirname, '../ml/model.pth');
+        if (!fs.existsSync(modelPath)) {
+            console.warn(`    [!] Neural Network model not found at ${modelPath}`);
+            console.warn(`    [!] Performance will be degraded. Run 'npm run bootstrap && npm run train' first for deep analysis.`);
+        } else {
+            const { anchorLogic } = require('./anchor_logic');
+            try {
+                await anchorLogic(version);
+                console.log(`    [+] Neural Anchoring complete.`);
+            } catch (e) {
+                console.error(`    [!] Neural Anchoring failed: ${e.message}`);
+            }
         }
-    }
 
-    graph.classify(OUTPUT_BASE);
+        graph.classify(OUTPUT_BASE);
+    }
 
     console.log(`\n[COMPLETE]`);
     console.log(`Analysis saved to: ${OUTPUT_BASE}`);

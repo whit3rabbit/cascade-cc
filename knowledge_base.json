@@ -410,12 +410,11 @@
       "suggested_name": "errorMessagex`",
       "description": "Beautiful error rendering with code snippets",
       "trigger_keywords": [
-        "code",
-        "rendering",
-        "snippets",
-        "error",
-        "with",
-        "Beautiful"
+        "BeautifulError",
+        "ErrorSnippet",
+        "TerminalAppError",
+        "renderingSnippet",
+        "errorMessagex"
       ]
     },
     {
