@@ -8,6 +8,7 @@ import sys
 import random
 import argparse
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from vectorize import CodeFingerprinter, flatten_ast
 from constants import NODE_TYPES, MAX_NODES, MAX_LITERALS
 
@@ -79,20 +80,57 @@ class TripletDataset(Dataset):
             
         return anchor_t, anchor_lit_t, positive_t, pos_lit_t, anchor_key
 
-def train_brain(bootstrap_dir, epochs=10, batch_size=32, force=False):
+def evaluate_model(model, dataloader, device, dataset):
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for anchors, a_lits, positives, p_lits, anchor_keys in dataloader:
+            anchors, a_lits = anchors.to(device), a_lits.to(device)
+            positives, p_lits = positives.to(device), p_lits.to(device)
+            
+            a_vec = model(anchors, a_lits)
+            p_vec = model(positives, p_lits)
+            
+            # For each anchor, pick a hard negative from the batch
+            for i in range(len(anchors)):
+                anchor_struct_hash = dataset.structural_hashes[anchor_keys[i]]
+                
+                # Simple negative: pick any other non-isomorphic item in batch
+                neg_idx = -1
+                for j in range(len(anchors)):
+                    if i == j: continue
+                    if dataset.structural_hashes[anchor_keys[j]] != anchor_struct_hash:
+                        neg_idx = j
+                        break
+                
+                if neg_idx == -1: continue # Skip if no suitable negative in batch
+                
+                n_vec = model(anchors[neg_idx].unsqueeze(0), a_lits[neg_idx].unsqueeze(0))
+                
+                d_pos = torch.norm(a_vec[i] - p_vec[i], p=2)
+                d_neg = torch.norm(a_vec[i] - n_vec, p=2)
+                
+                if d_pos < d_neg:
+                    correct += 1
+                total += 1
+    
+    return (correct / total) * 100 if total > 0 else 0
+
+def train_brain(bootstrap_dir, epochs=10, batch_size=32, force=False, lr=0.001, margin=0.3, embed_dim=32, hidden_dim=64, is_sweep=False):
     # Device discovery (CUDA -> MPS -> CPU)
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-    print(f"[*] Training on device: {device}")
+    if not is_sweep: print(f"[*] Training on device: {device}")
 
     current_vocab_size = len(NODE_TYPES) + 5
-    print(f"[*] Current Vocabulary: {len(NODE_TYPES)} types (Total with specials: {current_vocab_size})")
+    if not is_sweep: print(f"[*] Current Vocabulary: {len(NODE_TYPES)} types (Total with specials: {current_vocab_size})")
 
-    print(f"[*] Starting 'Brain' Training on Bootstrap Data: {bootstrap_dir}")
+    if not is_sweep: print(f"[*] Starting 'Brain' Training on Bootstrap Data: {bootstrap_dir}")
     
     ast_files = [f for f in os.listdir(bootstrap_dir) if f.endswith('_gold_asts.json')]
     if not ast_files:
         print("[!] Error: No gold ASTs found. Run 'npm run bootstrap' first.")
-        return
+        return 0, None
 
     patterns = {}
     for f_name in ast_files:
@@ -102,122 +140,131 @@ def train_brain(bootstrap_dir, epochs=10, batch_size=32, force=False):
             for chunk_name, ast in data.items():
                 patterns[f"{lib_prefix}_{chunk_name}"] = ast
 
-    dataset = TripletDataset(patterns)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    model = CodeFingerprinter(vocab_size=current_vocab_size).to(device)
+    full_dataset = TripletDataset(patterns)
+    train_size = int(0.8 * len(full_dataset))
+    val_size = len(full_dataset) - train_size
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     
-    # Robust Checkpoint Loading
-    model_path = os.path.join(os.path.dirname(__file__), "model.pth")
-    if os.path.exists(model_path):
-        print(f"[*] Found existing model at {model_path}. Attempting to load...")
-        try:
-            checkpoint = torch.load(model_path, map_location=device)
-            checkpoint_vocab_size = checkpoint.get('embedding.weight', torch.zeros(0)).shape[0]
-            print(f"[*] Checkpoint Vocabulary Size: {checkpoint_vocab_size}")
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-            if checkpoint_vocab_size != current_vocab_size:
-                print(f"[!] Warning: Vocabulary size mismatch! Checkpoint: {checkpoint_vocab_size}, Current: {current_vocab_size}")
-                if force:
-                    print("[!] --force used. Partially loading weights...")
+    model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim).to(device)
+    
+    # Robust Checkpoint Loading (Skip if sweep unless specified)
+    if not is_sweep:
+        model_path = os.path.join(os.path.dirname(__file__), "model.pth")
+        if os.path.exists(model_path):
+            print(f"[*] Found existing model at {model_path}. Attempting to load...")
+            try:
+                checkpoint = torch.load(model_path, map_location=device)
+                checkpoint_vocab_size = checkpoint.get('embedding.weight', torch.zeros(0)).shape[0]
+                if checkpoint_vocab_size == current_vocab_size:
+                    model.load_state_dict(checkpoint)
+                    print("[+] Successfully loaded checkpoint weights.")
+                elif force:
+                    print("[!] Vocabulary mismatch, but --force used. Partially loading...")
                     state_dict = model.state_dict()
                     for name, param in checkpoint.items():
-                        if name in state_dict:
-                            if param.shape == state_dict[name].shape:
-                                state_dict[name].copy_(param)
-                            elif name == 'embedding.weight':
-                                min_size = min(checkpoint_vocab_size, current_vocab_size)
-                                state_dict[name][:min_size].copy_(param[:min_size])
-                                print(f"    [+] Resized embedding weights (mapped {min_size} types)")
-                            else:
-                                print(f"    [!] Skipping layer {name} due to shape mismatch: {param.shape} vs {state_dict[name].shape}")
+                        if name in state_dict and param.shape == state_dict[name].shape:
+                            state_dict[name].copy_(param)
                     model.load_state_dict(state_dict)
-                else:
-                    print("[!] Starting with fresh weights. Use --force to load matching layers anyway.")
-            else:
-                model.load_state_dict(checkpoint)
-                print("[+] Successfully loaded checkpoint weights.")
-        except Exception as e:
-            print(f"[!] Error loading checkpoint: {e}")
-            print("[*] Continuing with fresh weights.")
+            except Exception as e:
+                print(f"[!] Error loading checkpoint: {e}")
 
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    criterion = nn.TripletMarginLoss(margin=0.3, p=2)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    criterion = nn.TripletMarginLoss(margin=margin, p=2)
     
-    model.train()
+    best_val_acc = 0
+    
     for epoch in range(epochs):
+        model.train()
         total_loss = 0
         
-        for anchors, a_lits, positives, p_lits, anchor_keys in dataloader:
+        for anchors, a_lits, positives, p_lits, anchor_keys in train_loader:
             anchors, a_lits = anchors.to(device), a_lits.to(device)
             positives, p_lits = positives.to(device), p_lits.to(device)
 
-            # 1. Get initial embeddings for mining
             with torch.no_grad():
                 anchor_vecs = model(anchors, a_lits)
             
-            # 2. Hard Negative Mining (Batch-level) with Isomorphism Check
             negatives = []
             neg_lits = []
             for i in range(len(anchors)):
                 max_sim = -1.0
                 hardest_neg_idx = -1
-                
-                anchor_struct_hash = dataset.structural_hashes[anchor_keys[i]]
-                anchor_len = (anchors[i] != 0).sum().item()
+                anchor_struct_hash = full_dataset.structural_hashes[anchor_keys[i]]
                 
                 for j in range(len(anchors)):
                     if i == j: continue
-                    
-                    # Structural Isomorphism Check
-                    neg_struct_hash = dataset.structural_hashes[anchor_keys[j]]
-                    if anchor_struct_hash == neg_struct_hash:
-                        continue # Skip identical structures
-                    
-                    neg_len = (anchors[j] != 0).sum().item()
-                    len_diff = abs(anchor_len - neg_len)
+                    if full_dataset.structural_hashes[anchor_keys[j]] == anchor_struct_hash: continue
                     
                     sim = torch.dot(anchor_vecs[i], anchor_vecs[j]).item()
-                    
-                    # Score = similarity - (length difference penalty)
-                    # We want high similarity (hard negative) but small length difference
-                    score = sim - (len_diff * 0.01)
-                    
-                    if score > max_sim:
-                        max_sim = score
+                    if sim > max_sim:
+                        max_sim = sim
                         hardest_neg_idx = j
+                
                 if hardest_neg_idx == -1:
-                    # Fallback if no non-isomorphic negative found in batch
                     hardest_neg_idx = (i + 1) % len(anchors)
                     
                 negatives.append(anchors[hardest_neg_idx])
                 neg_lits.append(a_lits[hardest_neg_idx])
             
-            negatives = torch.stack(negatives)
-            neg_lits = torch.stack(neg_lits)
+            negatives = torch.stack(negatives).to(device)
+            neg_lits = torch.stack(neg_lits).to(device)
 
-            # 3. Model Forward Pass
             a_vec = model(anchors, a_lits)
             p_vec = model(positives, p_lits)
             n_vec = model(negatives, neg_lits)
 
-            # 4. Loss and Optimization
             loss = criterion(a_vec, p_vec, n_vec)
-            
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
 
-        avg_loss = total_loss / len(dataloader)
-        print(f"    Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
+        val_acc = evaluate_model(model, val_loader, device, full_dataset)
+        if not is_sweep:
+            print(f"    Epoch {epoch+1}/{epochs} - Loss: {total_loss/len(train_loader):.4f} - Val Acc: {val_acc:.2f}%")
         
-    print("[*] Training complete.")
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            if not is_sweep:
+                torch.save(model.state_dict(), os.path.join(os.path.dirname(__file__), "model.pth"))
 
-    # Save the trained brain
-    model_path = os.path.join(os.path.dirname(__file__), "model.pth")
-    torch.save(model.state_dict(), model_path)
-    print(f"[+] Brain successfully trained and saved to {model_path}")
+    return best_val_acc, model.state_dict()
+
+def run_sweep(bootstrap_dir, epochs=5):
+    print("[*] Starting Hyperparameter Sweep...")
+    results = []
+    
+    margins = [0.2, 0.3, 0.5]
+    lrs = [0.001, 0.0005]
+    embed_dims = [32, 64]
+    
+    best_overall_acc = 0
+    best_params = None
+    best_state = None
+
+    for m in margins:
+        for lr in lrs:
+            for ed in embed_dims:
+                print(f"    - Testing Margin: {m}, LR: {lr}, Embed: {ed}...")
+                acc, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed)
+                print(f"      Result: {acc:.2f}%")
+                results.append({"margin": m, "lr": lr, "embed": ed, "acc": acc})
+                
+                if acc > best_overall_acc:
+                    best_overall_acc = acc
+                    best_params = {"margin": m, "lr": lr, "embed": ed}
+                    best_state = state
+
+    print(f"\n[+] Sweep Complete! Best Accuracy: {best_overall_acc:.2f}%")
+    print(f"[+] Best Params: {best_params}")
+    
+    if best_state:
+        model_path = os.path.join(os.path.dirname(__file__), "model.pth")
+        torch.save(best_state, model_path)
+        print(f"[*] Best model saved to {model_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the Code Fingerprinting Neural Network")
@@ -225,7 +272,11 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
+    parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
     
     args = parser.parse_args()
     
-    train_brain(args.bootstrap_dir, epochs=args.epochs, batch_size=args.batch_size, force=args.force)
+    if args.sweep:
+        run_sweep(args.bootstrap_dir, epochs=args.epochs)
+    else:
+        train_brain(args.bootstrap_dir, epochs=args.epochs, batch_size=args.batch_size, force=args.force)
