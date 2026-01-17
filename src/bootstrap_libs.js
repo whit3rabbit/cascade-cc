@@ -18,12 +18,12 @@ const LIBS = [
     { name: 'zod', version: '3.23.8' },
     { name: 'react', version: '19.2.3' },
     { name: 'react', version: '18.3.1' },
-    { name: 'ink', version: '6.6.0' },
-    { name: '@inkjs/ui', version: '2.0.0' },
-    { name: 'ink-text-input', version: '6.0.0' },
-    { name: 'ink-select-input', version: '6.2.0' },
-    { name: 'ink-link', version: '5.0.0' },
-    { name: 'ink-spinner', version: '5.0.0' },
+    { name: 'ink', version: '6.6.0', peerDeps: ['react@18.3.1'] },
+    { name: '@inkjs/ui', version: '2.0.0', peerDeps: ['react@18.3.1', 'ink@6.6.0'] },
+    { name: 'ink-text-input', version: '6.0.0', peerDeps: ['react@18.3.1', 'ink@6.6.0'] },
+    { name: 'ink-select-input', version: '6.2.0', peerDeps: ['react@18.3.1', 'ink@6.6.0'] },
+    { name: 'ink-link', version: '5.0.0', peerDeps: ['react@18.3.1', 'ink@6.6.0'] },
+    { name: 'ink-spinner', version: '5.0.0', peerDeps: ['react@18.3.1', 'ink@6.6.0'] },
 
     // --- Primary SDKs (Anthropic, AWS, GCP, MCP) ---
     { name: '@anthropic-ai/sdk', version: '0.71.2' },
@@ -138,7 +138,8 @@ async function bootstrap() {
         try {
             // 1. Isolated Install for this specific version
             console.log(`  [+] Installing ${lib.name}@${lib.version}...`);
-            execSync(`npm install ${lib.name}@${lib.version} --no-save --prefix "${libWorkDir}" --legacy-peer-deps`, { stdio: 'ignore' });
+            const installCmd = `npm install ${lib.name}@${lib.version} ${lib.peerDeps ? lib.peerDeps.join(' ') : ''} --no-save --prefix "${libWorkDir}" --legacy-peer-deps`;
+            execSync(installCmd, { stdio: 'ignore' });
 
             // 2. Create Entry Point (mimic bundling)
             const entryFile = path.join(libWorkDir, 'entry.js');
@@ -152,7 +153,13 @@ async function bootstrap() {
             console.log(`  [+] Bundling with esbuild...`);
 
             const nodePath = path.join(libWorkDir, 'node_modules');
-            execSync(`NODE_PATH="${nodePath}" npx esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" --external:sharp --external:tree-sitter --external:tree-sitter-typescript --external:react-devtools-core --external:fsevents`, { stdio: 'inherit' });
+            const externals = [
+                'sharp', 'tree-sitter', 'tree-sitter-typescript',
+                'react-devtools-core', 'fsevents', 'react', 'react/jsx-runtime', 'ink'
+            ].filter(ext => ext !== lib.name && !lib.name.startsWith(ext + '/'));
+
+            const externalFlags = externals.map(ext => `--external:${ext}`).join(' ');
+            execSync(`NODE_PATH="${nodePath}" npx esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" ${externalFlags}`, { stdio: 'inherit' });
 
             // 4. Run Analysis
             console.log(`  [+] Fingerprinting structural ASTs...`);
