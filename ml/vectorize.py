@@ -24,7 +24,7 @@ def get_auto_max_nodes(device):
 from encoder import TransformerCodeEncoder
 
 class CodeFingerprinter(nn.Module):
-    def __init__(self, vocab_size=100, embed_dim=128, hidden_dim=64, max_nodes=MAX_NODES):
+    def __init__(self, vocab_size=100, embed_dim=32, hidden_dim=64, max_nodes=MAX_NODES):
         super().__init__()
         self.transformer_encoder = TransformerCodeEncoder(vocab_size, embed_dim=embed_dim, max_nodes=max_nodes)
         

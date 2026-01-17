@@ -13,6 +13,9 @@ Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Ne
 5. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
 6. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
 
+> [!TIP]
+> **Pro-Tip**: Use the `--device auto` flag with `npm run train` or `npm run anchor` to let the system choose between CUDA, MPS (Metal), or CPU automatically.
+
 ---
 
 ## TL;DR
@@ -57,36 +60,38 @@ npm run assemble -- <version>
 npm run refine -- <version>
 ```
 
-## Training a NN (Transformer Encoder) model
+## Training the "Brain" (Transformer Encoder)
 
 If you have just cloned this repo, you can skip and use the pre-trained model in `ml/model.pth`. 
 
 Here are instructions for building your own model if you don't want to use the pre-trained model.
 
-### GPU Acceleration (NEW)
+### Hardware-Aware Auto-Scaling (New)
 
-The ML pipeline now supports explicit device selection and uses a **Transformer Encoder** architecture, which thrives on GPU parallelization.
+The ML pipeline is now hardware-aware. It dynamically adjusts the **Context Window** (`MAX_NODES`) based on your detected VRAM to prevent Out-of-Memory (OOM) errors while maximizing performance on high-end hardware.
 
-| Device | Platform | Recommendation |
-| :--- | :--- | :--- |
-| `mps` | Apple Silicon (M1/M2/M3) | **Best for Mac users.** |
-| `cuda` | NVIDIA GPU | **Best for Linux/Windows servers.** |
-| `cpu` | Any | Fallback (slower). |
-| `auto` | Any | Automatically detect best available. |
+| Environment | Detected Hardware | Default Window | Recommendation |
+| :--- | :--- | :--- | :--- |
+| **Google Colab** | A100 / H100 (>15GB VRAM) | **2048 nodes** | Best for large-scale training. |
+| **Standard GPU** | RTX 3080 / T4 (>7GB VRAM) | **1024 nodes** | Balanced performance. |
+| **Mac (MPS)** | Apple Silicon (M1/M2/M3) | **256 nodes** | Optimized for unified memory. |
+| **CPU Only** | Any | **512 nodes** | Safe fallback. |
 
-#### Memory Considerations (OOM Troubleshooting)
-The new Transformer architecture has $O(N^2)$ memory complexity relative to the sequence length (`MAX_NODES`).
-- **Default (2048):** Stable on most systems with `batch_size=8`.
-- **Large Context (4096):** May require `batch_size=1` or `2` on MPS (Mac) or CUDA (8GB VRAM).
+#### Manual Overrides
+You can manually override the auto-scaling using the `--max_nodes` flag:
+```bash
+# Force a massive window on a high-end server
+npm run train -- --max_nodes 4096 --device cuda
 
-**How to fix OOM on Mac (MPS):**
-1. Reduce batch size: `npm run train -- --batch_size 2`
-2. Set high watermark ratio (allows more system memory):
-   ```bash
-   export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
-   npm run train -- --batch_size 4
-   ```
-3. Revert to CPU: `npm run train -- --device cpu`
+# Force a tiny window for quick local testing
+npm run train -- --max_nodes 128 --device cpu
+```
+
+### Realistic Logic Topology (Structural Noise)
+The training process uses **Synthetic Mangling** with structural noise to ensure the model learns *logic* rather than just *syntax*.
+- **IfStatement Swapping**: Negates and swaps `if/else` branches.
+- **Commutative Swapping**: Reorders operands in `a + b` or `a && b`.
+- **List Shuffling**: Reorders non-dependent statements in blocks.
 
 ### Step 1: Bootstrap Library DNA
 
@@ -100,16 +105,17 @@ npm run bootstrap
 
 This teaches the model to recognize the DNA of those libraries even when they are mangled/minified. This is optional and I have included a pre-trained model in the repository.
 
+#### Basic Training
 ```bash
-# Default (auto-detect)
-npm run train
-
-# Force Apple Metal (MPS)
-npm run train -- --device mps --batch_size 8
-
-# Force CUDA with custom batch size
-npm run train -- --device cuda --batch_size 16
+npm run train -- --epochs 5 --device auto
 ```
+
+#### Hyperparameter Sweeps
+If you want to find the absolute best settings for your hardware:
+```bash
+npm run train -- --sweep --epochs 3
+```
+*This will test multiple combinations of margin/learning-rate/embedding-dims and save the best model.*
 *Output: `ml/model.pth`. Your analyzer is now "primed" to recognize standard code.*
 
 
@@ -168,9 +174,8 @@ npm run visualize
 - `src/`: JavaScript core (Babel renaming, Chunking, Orchestration).
 - `ml/`: Python ML core (Triplet Loss training, Vectorization).
 - `cascade_graph_analysis/`: Project metadata, Logic DB, and mappings.
-- `claude-analysis/`: Source bundles.
-- `claude-analysis/`: Source bundles.
-- `docs/`: [Detailed Architecture](docs/ARCHITECTURE.md), [NN Internals](docs/NN.md), [Schema Definitions](docs/SCHEMA.md), and [Environment Configuration](docs/ENVIRONMENT.md).
+- `claude_analysis/`: Source bundles.
+- `docs/`: [Architecture](docs/ARCHITECTURE.md), [NN Internals](docs/NN.md), [Schema](docs/SCHEMA.md), and [Environment](docs/ENVIRONMENT.md).
 
 ---
 

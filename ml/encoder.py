@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from constants import NODE_TYPES, TYPE_TO_ID, VOCAB_SIZE, MAX_NODES
 
 class TransformerCodeEncoder(nn.Module):
-    def __init__(self, vocab_size=VOCAB_SIZE, embed_dim=128, nhead=8, num_layers=3, max_nodes=MAX_NODES):
+    def __init__(self, vocab_size=VOCAB_SIZE, embed_dim=32, nhead=8, num_layers=3, max_nodes=MAX_NODES):
         super().__init__()
         self.max_nodes = max_nodes
         self.embedding = nn.Embedding(vocab_size, embed_dim)

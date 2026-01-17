@@ -184,7 +184,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 }
             }
 
-            if (bestMatch.similarity > (parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.9)) { // Lowered for cold start reliability
+            if (bestMatch.similarity > (parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.9)) {
                 const isNewChunk = !targetMapping.processed_chunks.includes(targetChunk.name);
                 const logPrefix = isNewChunk ? '[ANCHOR/REGISTRY] NEW MATCH' : '[ANCHOR/REGISTRY] EXISTING';
 
