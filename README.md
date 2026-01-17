@@ -72,8 +72,19 @@ The ML pipeline now supports explicit device selection and uses a **Transformer 
 | `cpu` | Any | Fallback (slower). |
 | `auto` | Any | Automatically detect best available. |
 
-#### Memory Considerations
-With the new Transformer architecture and a `MAX_NODES` context window of 4096, attention matrices can grow large ($N^2$ complexity). If you hit **Out of Memory (OOM)** errors on MPS or CUDA, use a smaller `--batch_size` (e.g., 4 or 8) or revert to `--device cpu`.
+#### Memory Considerations (OOM Troubleshooting)
+The new Transformer architecture has $O(N^2)$ memory complexity relative to the sequence length (`MAX_NODES`).
+- **Default (2048):** Stable on most systems with `batch_size=8`.
+- **Large Context (4096):** May require `batch_size=1` or `2` on MPS (Mac) or CUDA (8GB VRAM).
+
+**How to fix OOM on Mac (MPS):**
+1. Reduce batch size: `npm run train -- --batch_size 2`
+2. Set high watermark ratio (allows more system memory):
+   ```bash
+   export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
+   npm run train -- --batch_size 4
+   ```
+3. Revert to CPU: `npm run train -- --device cpu`
 
 ### Step 1: Bootstrap Library DNA
 
