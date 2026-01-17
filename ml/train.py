@@ -9,8 +9,9 @@ import random
 import argparse
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import Dataset, DataLoader, random_split
-from vectorize import CodeFingerprinter, flatten_ast
+from vectorize import CodeFingerprinter, flatten_ast, get_auto_max_nodes
 from constants import NODE_TYPES, MAX_NODES, MAX_LITERALS
+# removed get_auto_max_nodes definition (imported from vectorize)
 
 def generate_synthetic_obfuscation(ast_node):
     """
@@ -85,10 +86,10 @@ def generate_synthetic_obfuscation(ast_node):
     return new_node
 
 class TripletDataset(Dataset):
-    def __init__(self, patterns):
+    def __init__(self, patterns, max_nodes=MAX_NODES):
         self.keys = list(patterns.keys())
         self.patterns = patterns
-        self.max_nodes = MAX_NODES
+        self.max_nodes = max_nodes
         
         # Pre-calculate structural hashes for isomorphism check
         self.structural_hashes = {}
@@ -170,7 +171,7 @@ def evaluate_model(model, dataloader, device, dataset):
     
     return (correct / total) * 100 if total > 0 else 0
 
-def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda"):
+def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda", max_nodes_override=None):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -184,6 +185,11 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
         device = torch.device(device_name)
     
     if not is_sweep: print(f"[*] Training on device: {device}")
+
+    effective_max_nodes = max_nodes_override if max_nodes_override else get_auto_max_nodes(device)
+    if not is_sweep:
+        source = "Manual override" if max_nodes_override else f"Auto-detected for {device.type}"
+        print(f"[*] Context Window: {effective_max_nodes} nodes ({source})")
 
     node_type_count = len(NODE_TYPES)
     if node_type_count < 2:
@@ -207,7 +213,7 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
             for chunk_name, ast in data.items():
                 patterns[f"{lib_prefix}_{chunk_name}"] = ast
 
-    full_dataset = TripletDataset(patterns)
+    full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
     train_size = int(0.8 * len(full_dataset))
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
@@ -216,7 +222,7 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=use_cuda)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=use_cuda)
 
-    model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim).to(device)
+    model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, max_nodes=effective_max_nodes).to(device)
     
     # Robust Checkpoint Loading (Skip if sweep unless specified)
     if not is_sweep:
@@ -250,6 +256,11 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
                                     min_size = min(checkpoint_vocab_size, current_vocab_size)
                                     state_dict[name][:min_size].copy_(param[:min_size])
                                     print(f"    [+] Resized {name} (mapped {min_size} types)")
+                                elif 'pos_encoder' in name:
+                                    # Handle partial positional encoding load if sequence lengths differ
+                                    min_seq = min(param.shape[1], state_dict[name].shape[1])
+                                    state_dict[name][:, :min_seq, :].copy_(param[:, :min_seq, :])
+                                    print(f"    [+] Resized {name} (mapped {min_seq} nodes)")
                         model.load_state_dict(state_dict)
                     else:
                         print(f"[!] Vocabulary mismatch (Checkpoint: {checkpoint_vocab_size}, Current: {current_vocab_size}). Use --force to load.")
@@ -361,11 +372,15 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
+    parser.add_argument("--max_nodes", type=int, default=0, help="Override context window size (0 for auto)")
     parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, mps, cpu, or auto")
     
     args = parser.parse_args()
     
+    # Handle max_nodes override
+    m_nodes = args.max_nodes if args.max_nodes > 0 else None
+
     if args.sweep:
         run_sweep(args.bootstrap_dir, epochs=args.epochs)
     else:
-        train_brain(args.bootstrap_dir, epochs=args.epochs, batch_size=args.batch_size, force=args.force, device_name=args.device)
+        train_brain(args.bootstrap_dir, epochs=args.epochs, batch_size=args.batch_size, force=args.force, device_name=args.device, max_nodes_override=m_nodes)

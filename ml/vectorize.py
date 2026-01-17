@@ -7,6 +7,20 @@ import hashlib
 import argparse
 from constants import NODE_TYPES, TYPE_TO_ID, MAX_NODES, MAX_LITERALS
 
+def get_auto_max_nodes(device):
+    """Infers optimal context window based on device memory."""
+    if device.type == "cuda":
+        try:
+            total_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            if total_vram > 15: return 2048 # A100 / H100 / 3090+
+            if total_vram > 7: return 1024  # T4 / 3080 / 4070
+            return 512
+        except:
+            return 512
+    elif device.type == "mps":
+        return 256 # Conservative for shared memory architectures
+    return 512 # Safe default for CPU
+
 from encoder import TransformerCodeEncoder
 
 class CodeFingerprinter(nn.Module):
@@ -97,7 +111,7 @@ def flatten_ast(node, sequence, symbols, literals, stats, path="Root"):
         slot = child.get("slot", "child")
         flatten_ast(child, sequence, symbols, literals, stats, f"{path}/{slot}")
 
-def run_vectorization(version_path, force=False, device_name="cuda"):
+def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_override=None):
     torch.manual_seed(42)
     
     # Device discovery (CUDA -> MPS -> CPU)
@@ -112,12 +126,17 @@ def run_vectorization(version_path, force=False, device_name="cuda"):
     else:
         device = torch.device(device_name)
     
+    # Dynamic Context Window Adjustment
+    effective_max_nodes = max_nodes_override if max_nodes_override else get_auto_max_nodes(device)
+    source = "Manual override" if max_nodes_override else f"Auto-detected for {device.type}"
+    print(f"[*] Context Window: {effective_max_nodes} nodes ({source})")
+
     node_type_count = len(NODE_TYPES)
     if node_type_count < 2:
         print("[!] Error: NODE_TYPES is unexpectedly small; run 'npm run sync-vocab' before vectorizing.")
         sys.exit(1)
     current_vocab_size = node_type_count + 5
-    model = CodeFingerprinter(vocab_size=current_vocab_size).to(device)
+    model = CodeFingerprinter(vocab_size=current_vocab_size, max_nodes=effective_max_nodes).to(device)
     model_path = os.path.join(os.path.dirname(__file__), "model.pth")
     
     if os.path.exists(model_path):
@@ -133,31 +152,30 @@ def run_vectorization(version_path, force=False, device_name="cuda"):
                 sys.exit(1)
             checkpoint_vocab_size = checkpoint[embedding_key].shape[0]
             
-            if checkpoint_vocab_size != current_vocab_size:
-                print(f"[!] Warning: Vocabulary mismatch! Checkpoint: {checkpoint_vocab_size}, Current: {current_vocab_size}")
-                if force:
-                    print("[!] --force used. Partially loading weights...")
-                    state_dict = model.state_dict()
-                    for name, param in checkpoint.items():
-                        if name in state_dict:
-                            if param.shape == state_dict[name].shape:
-                                state_dict[name].copy_(param)
-                            elif name == 'embedding.weight':
-                                min_size = min(checkpoint_vocab_size, current_vocab_size)
-                                state_dict[name][:min_size].copy_(param[:min_size])
-                                print(f"    [+] Resized embedding weights (mapped {min_size} types)")
-                            else:
-                                print(f"    [!] Skipping layer {name} due to shape mismatch: {param.shape} vs {state_dict[name].shape}")
-                    model.load_state_dict(state_dict)
-                else:
-                    print("[!] Error: Model vocabulary mismatch. Use --force to load matching layers anyway.")
-                    sys.exit(1)
-            else:
-                model.load_state_dict(checkpoint)
-                print("[+] Successfully loaded weights.")
+            # Robust loading: Check shapes for all parameters
+            state_dict = model.state_dict()
+            loaded_count = 0
+            resized_count = 0
+            
+            for name, param in checkpoint.items():
+                if name in state_dict:
+                    if param.shape == state_dict[name].shape:
+                        state_dict[name].copy_(param)
+                        loaded_count += 1
+                    elif 'embedding.weight' in name:
+                        min_size = min(param.shape[0], state_dict[name].shape[0])
+                        state_dict[name][:min_size].copy_(param[:min_size])
+                        resized_count += 1
+                    elif 'pos_encoder' in name:
+                        min_seq = min(param.shape[1], state_dict[name].shape[1])
+                        state_dict[name][:, :min_seq, :].copy_(param[:, :min_seq, :])
+                        resized_count += 1
+            
+            model.load_state_dict(state_dict)
+            print(f"[+] Loaded weights: {loaded_count} exact, {resized_count} resized.")
         except Exception as e:
             print(f"[!] Error loading weights: {e}")
-            sys.exit(1)
+            if not force: sys.exit(1)
     else:
         print("[!] Warning: No pre-trained weights found. Using seeded random weights.")
     
@@ -225,7 +243,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Vectorize simplified ASTs using the brain model")
     parser.add_argument("version_path", help="Path to the version directory (e.g., claude-analysis/v3.5)")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
+    parser.add_argument("--max_nodes", type=int, default=0, help="Override context window size (0 for auto)")
     parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, mps, cpu, or auto")
-    
     args = parser.parse_args()
-    run_vectorization(args.version_path, force=args.force, device_name=args.device)
+
+    m_nodes = args.max_nodes if args.max_nodes > 0 else None
+    run_vectorization(args.version_path, force=args.force, device_name=args.device, max_nodes_override=m_nodes)
