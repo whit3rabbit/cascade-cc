@@ -8,6 +8,7 @@ const traverse = require('@babel/traverse').default;
 
 const OUTPUT_ROOT = './cascade_graph_analysis';
 const REGISTRY_PATH = path.join(OUTPUT_ROOT, 'logic_registry.json');
+const BOOTSTRAP_SOURCE_ROOT = './ml/bootstrap_data';
 
 // --- KNOWLEDGE BASE ---
 const KB_PATH = './knowledge_base.json';
@@ -313,6 +314,31 @@ function loadGoldSource(match) {
     return raw.length > MAX_GOLD_REF_CHARS ? `${raw.slice(0, MAX_GOLD_REF_CHARS)}\n// ... truncated` : raw;
 }
 
+function loadGoldSourceFromBootstrapData(label, libName = null) {
+    if (!label && !libName) return '';
+    if (label) {
+        const directPath = path.join(BOOTSTRAP_SOURCE_ROOT, `${label}_source.js`);
+        if (fs.existsSync(directPath)) {
+            return fs.readFileSync(directPath, 'utf8');
+        }
+    }
+
+    if (libName) {
+        const bundledPath = path.join(BOOTSTRAP_SOURCE_ROOT, libName, 'bundled.js');
+        if (fs.existsSync(bundledPath)) {
+            return fs.readFileSync(bundledPath, 'utf8');
+        }
+    }
+
+    return '';
+}
+
+function truncateReference(code) {
+    const MAX_GOLD_REF_CHARS = 4000;
+    if (!code) return '';
+    return code.length > MAX_GOLD_REF_CHARS ? `${code.slice(0, MAX_GOLD_REF_CHARS)}\n// ... truncated` : code;
+}
+
 // --- MAIN STAGES ---
 async function run() {
     let version = process.argv.filter((arg, i, arr) => !arg.startsWith('-') && (i === 0 || arr[i - 1] !== '--limit'))[2];
@@ -417,10 +443,28 @@ async function run() {
                 return;
             }
 
-            const chunkVector = logicDbByName.get(chunkMeta.name)?.vector;
-            const bestMatch = findBestRegistryMatch(chunkVector);
-            const goldSimilarity = bestMatch.similarity;
-            const goldReferenceCode = goldSimilarity >= 0.95 ? loadGoldSource(bestMatch) : '';
+            const logicMatch = logicDbByName.get(chunkMeta.name);
+            const logicLabel = logicMatch?.bestMatchLabel || logicMatch?.label || null;
+            const logicSimilarity = logicMatch?.bestMatchSimilarity || logicMatch?.similarity || null;
+            const chunkVector = logicMatch?.vector;
+            const registryMatch = findBestRegistryMatch(chunkVector);
+            const effectiveMatch = logicLabel
+                ? {
+                    label: logicLabel,
+                    ref: registryMatch.ref,
+                    similarity: typeof logicSimilarity === 'number' ? logicSimilarity : registryMatch.similarity
+                }
+                : registryMatch;
+
+            const goldSimilarity = effectiveMatch.similarity;
+            let goldReferenceCode = '';
+            if (goldSimilarity >= 0.95) {
+                goldReferenceCode = loadGoldSourceFromBootstrapData(effectiveMatch.label, effectiveMatch.ref?.lib);
+                if (!goldReferenceCode) {
+                    goldReferenceCode = loadGoldSource(effectiveMatch);
+                }
+                goldReferenceCode = truncateReference(goldReferenceCode);
+            }
 
             const generatePrompt = (vars, props, codeContent, goldReferenceCode = '', goldSimilarity = null) => `
 Role: Senior Reverse Engineer
