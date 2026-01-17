@@ -143,7 +143,11 @@ switch (command) {
             return spawnSync(PYTHON_BIN, [scriptPath, ...args], { stdio: 'inherit', shell: true });
         };
 
-        spawnSync('node', ['src/bootstrap_libs.js', ...args], { stdio: 'inherit' });
+        const bootstrapArgs = [...args];
+        if (process.env.CI === 'true' && !bootstrapArgs.includes('--yes')) {
+            bootstrapArgs.push('--yes');
+        }
+        spawnSync('node', ['src/bootstrap_libs.js', ...bootstrapArgs], { stdio: 'inherit' });
 
         console.log(`[*] Vectorizing Bootstrap Data...`);
         const bootstrapDir = './cascade_graph_analysis/bootstrap';

@@ -1,6 +1,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 
 /**
  * Updated Library Manifest (2026 Stable Versions)
@@ -124,6 +125,25 @@ const BOOTSTRAP_DIR = path.resolve('./ml/bootstrap_data');
 const ANALYSIS_OUTPUT = path.resolve('./cascade_graph_analysis');
 
 async function bootstrap() {
+    const isCI = process.env.CI === 'true' || process.argv.includes('--yes');
+
+    if (!isCI) {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        const answer = await new Promise(resolve => {
+            rl.question('[?] This will download and analyze multiple libraries. Proceed? (y/N) ', resolve);
+        });
+
+        rl.close();
+        if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+            console.log('[!] Bootstrap aborted.');
+            process.exit(0);
+        }
+    }
+
     console.log(`[*] STARTING ISOLATED VERSION DRIFT BOOTSTRAP`);
 
     if (!fs.existsSync(BOOTSTRAP_DIR)) fs.mkdirSync(BOOTSTRAP_DIR, { recursive: true });
@@ -153,13 +173,33 @@ async function bootstrap() {
             console.log(`  [+] Bundling with esbuild...`);
 
             const nodePath = path.join(libWorkDir, 'node_modules');
-            const externals = [
-                'sharp', 'tree-sitter', 'tree-sitter-typescript',
-                'react-devtools-core', 'fsevents', 'react', 'react/jsx-runtime', 'ink'
-            ].filter(ext => ext !== lib.name && !lib.name.startsWith(ext + '/'));
+            const baseExternals = [
+                'sharp',
+                'tree-sitter',
+                'tree-sitter-typescript',
+                'react-devtools-core',
+                'fsevents',
+                'react',
+                'react/jsx-runtime',
+                'react/jsx-dev-runtime',
+                'ink'
+            ];
+
+            const getPackageName = (spec) => {
+                if (!spec) return spec;
+                if (spec.startsWith('@')) {
+                    const parts = spec.split('@');
+                    return parts.length >= 3 ? `@${parts[1]}` : spec;
+                }
+                return spec.split('@')[0];
+            };
+
+            const peerDeps = (lib.peerDeps || []).map(getPackageName);
+            const externals = [...new Set([...baseExternals, ...peerDeps])]
+                .filter(ext => ext !== lib.name && !lib.name.startsWith(`${ext}/`));
 
             const externalFlags = externals.map(ext => `--external:${ext}`).join(' ');
-            execSync(`NODE_PATH="${nodePath}" npx esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" ${externalFlags}`, { stdio: 'inherit' });
+            execSync(`NODE_PATH="${nodePath}" npx -y esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" ${externalFlags}`, { stdio: 'inherit' });
 
             // 4. Run Analysis
             console.log(`  [+] Fingerprinting structural ASTs...`);
