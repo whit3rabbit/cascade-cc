@@ -239,31 +239,27 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
                     print("[!] Error: Checkpoint missing embedding weights; skipping load.")
                     embedding_key = None
 
-                if embedding_key is not None:
-                    checkpoint_vocab_size = checkpoint[embedding_key].shape[0]
-                    if checkpoint_vocab_size == current_vocab_size:
-                        model.load_state_dict(checkpoint)
-                        print("[+] Successfully loaded checkpoint weights.")
-                    elif force:
-                        print("[!] Vocabulary mismatch, but --force used. Partially loading...")
-                        state_dict = model.state_dict()
-                        for name, param in checkpoint.items():
-                            if name in state_dict:
-                                if param.shape == state_dict[name].shape:
-                                    state_dict[name].copy_(param)
-                                elif 'embedding.weight' in name:
-                                    # Handle partial embedding load if sizes differ
-                                    min_size = min(checkpoint_vocab_size, current_vocab_size)
-                                    state_dict[name][:min_size].copy_(param[:min_size])
-                                    print(f"    [+] Resized {name} (mapped {min_size} types)")
-                                elif 'pos_encoder' in name:
-                                    # Handle partial positional encoding load if sequence lengths differ
-                                    min_seq = min(param.shape[1], state_dict[name].shape[1])
-                                    state_dict[name][:, :min_seq, :].copy_(param[:, :min_seq, :])
-                                    print(f"    [+] Resized {name} (mapped {min_seq} nodes)")
-                        model.load_state_dict(state_dict)
-                    else:
-                        print(f"[!] Vocabulary mismatch (Checkpoint: {checkpoint_vocab_size}, Current: {current_vocab_size}). Use --force to load.")
+                # Robust loading: Check shapes for all parameters (Vocab and Max Nodes)
+                state_dict = model.state_dict()
+                loaded_count = 0
+                resized_count = 0
+                
+                for name, param in checkpoint.items():
+                    if name in state_dict:
+                        if param.shape == state_dict[name].shape:
+                            state_dict[name].copy_(param)
+                            loaded_count += 1
+                        elif 'embedding.weight' in name:
+                            min_size = min(param.shape[0], state_dict[name].shape[0])
+                            state_dict[name][:min_size].copy_(param[:min_size])
+                            resized_count += 1
+                        elif 'pos_encoder' in name:
+                            min_seq = min(param.shape[1], state_dict[name].shape[1])
+                            state_dict[name][:, :min_seq, :].copy_(param[:, :min_seq, :])
+                            resized_count += 1
+                
+                model.load_state_dict(state_dict)
+                print(f"[+] Loaded weights: {loaded_count} exact, {resized_count} resized.")
             except Exception as e:
                 print(f"[!] Error loading checkpoint: {e}")
 
