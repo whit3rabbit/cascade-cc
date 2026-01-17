@@ -332,11 +332,12 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
 
     return best_val_acc, model.state_dict()
 
-def run_sweep(bootstrap_dir, epochs=5):
+def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=None):
     print("[*] Starting Hyperparameter Sweep...")
     results = []
     
-    margins = [0.5, 0.8, 1.0]
+    # Updated ranges to account for Structural Noise and Transformer architecture
+    margins = [0.2, 0.5, 0.8] 
     lrs = [0.001, 0.0005]
     embed_dims = [32, 64]
     
@@ -348,7 +349,7 @@ def run_sweep(bootstrap_dir, epochs=5):
         for lr in lrs:
             for ed in embed_dims:
                 print(f"    - Testing Margin: {m}, LR: {lr}, Embed: {ed}...")
-                acc, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed, device_name="auto")
+                acc, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed, device_name=device_name, max_nodes_override=max_nodes_override)
                 print(f"      Result: {acc:.2f}%")
                 results.append({"margin": m, "lr": lr, "embed": ed, "acc": acc})
                 
@@ -381,6 +382,6 @@ if __name__ == "__main__":
     m_nodes = args.max_nodes if args.max_nodes > 0 else None
 
     if args.sweep:
-        run_sweep(args.bootstrap_dir, epochs=args.epochs)
+        run_sweep(args.bootstrap_dir, epochs=args.epochs, device_name=args.device, max_nodes_override=m_nodes)
     else:
         train_brain(args.bootstrap_dir, epochs=args.epochs, batch_size=args.batch_size, force=args.force, device_name=args.device, max_nodes_override=m_nodes)
