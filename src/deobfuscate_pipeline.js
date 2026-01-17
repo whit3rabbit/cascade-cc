@@ -417,6 +417,7 @@ RESPONSE FORMAT (JSON ONLY):
 
                     const isFirstBatch = (vOffset === 0 && pOffset === 0);
                     const codeToPass = isFirstBatch ? code : skeletonize(code);
+                    const prompt = generatePrompt(varSub, propSub, codeToPass);
                     const PROMPT_RETRIES = 3;
                     let success = false;
 
