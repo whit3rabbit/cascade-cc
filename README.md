@@ -11,8 +11,7 @@ Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Ne
 3. Deobfuscate (LLM Phase) - Process the proprietary "Founder" logic using the LLM. ```npm run deobfuscate -- <version>```
 4. Assemble Final Codebase - Organize deobfuscated chunks into a coherent file structure based on inferred roles. ```npm run assemble -- <version>```
 5. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
-6. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
-7. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
+6. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
 
 ---
 
@@ -20,42 +19,45 @@ Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Ne
 
 Install prerequisites below. Then run the following commands:
 
-```bash
-1.  `npm run sync-vocab` # Sync the vocabulary
-2.  `npm run bootstrap` # Download the libraries Claude depends on (Zod, React, etc.) and extract their structural fingerprints. Mangles and minifies the libraries to simulate real-world obfuscation. We train the neural network on this data.
-3.  `node src/update_registry_from_bootstrap.js` # Update the logic registry with the bootstrap data
-4.  `npm run train` # Optional, if you want to retrain the model
-5.  `npm run analyze` # Analyze the Claude bundle
-6.  `npm run anchor -- <version>` # Identify the libraries using the "Brain"
-7.  `npm run deobfuscate -- <version> --skip-vendor` # Deobfuscate the proprietary "Founder" logic using the LLM
-8.  `npm run assemble -- <version>` # Split the deobfuscated chunks into a coherent file structure based on inferred roles
-9.  `npm run refine -- <version>` # Final LLM pass over the assembled codebase for a more readable output
-10. `npm run visualize` # View the dependency graph and Markov centrality scores
-```
-
-## 1. Installation & Setup
-
-### Requirements
-- **Node.js** (v18+)
-- **Python** (v3.10+)
-- **OpenRouter/Gemini API Key** (for LLM deobfuscation)
+### One Time Set Up
 
 ```bash
-# 1. Install Node dependencies
 npm install
-
-# 2. Configure Environment
-cp .env.example .env # Add your API keys
-
-# 3. Setup ML Environment
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env 
+# You must fill in LLM API Key in .env to either OpenRouter or Gemini if you want to run deobfuscation
 ```
 
----
+Setting up bootstrap data
 
-## 2. Getting Started (Cold Start Workflow)
+```bash
+npm run sync-vocab
+npm run bootstrap
+node src/update_registry_from_bootstrap.js
+```
+
+### Typical Analysis Workflow
+
+```bash
+# 1. Fetch and chunk the latest Claude bundle
+npm run analyze 
+
+# 2. Identify libraries using the pre-trained Brain (Replace <version> with output from step 1)
+npm run anchor -- <version> 
+
+# 6. Use LLM to name proprietary logic (Requires API Key in .env)
+npm run deobfuscate -- <version> --skip-vendor
+
+# 7. Assemble chunks into a final file structure
+npm run assemble -- <version>
+
+# 8. (Recommended) Restore original logic flow and readability via LLM
+npm run refine -- <version>
+```
+
+## Training a NN (Transformer Encoder) model
 
 If you have just cloned this repo, you can skip and use the pre-trained model in `ml/model.pth`. 
 

@@ -16,17 +16,70 @@ def generate_synthetic_obfuscation(ast_node):
     """
     Creates a 'mangled' version of the AST.
     Teaches the NN that names are junk, but structure is signal.
+    Includes structural noise to prevent trivial 100% accuracy.
     """
     if isinstance(ast_node, list):
+        # Occasionally reorder children in blocks or arrays where order might be slightly flexible
+        # (Though in JS order usually matters, we can simulate minor shifts)
+        if len(ast_node) > 1 and random.random() < 0.1:
+            new_list = ast_node.copy()
+            i, j = random.sample(range(len(new_list)), 2)
+            new_list[i], new_list[j] = new_list[j], new_list[i]
+            return [generate_synthetic_obfuscation(n) for n in new_list]
         return [generate_synthetic_obfuscation(n) for n in ast_node]
+        
     if not isinstance(ast_node, dict):
         return ast_node
         
     new_node = ast_node.copy()
-    if new_node.get("type") == "Identifier":
-        # Simulate minification: rename variables to 1-2 random chars
+    node_type = new_node.get("type")
+
+    # 1. Rename Identifiers (Minification)
+    if node_type == "Identifier":
         new_node["name"] = random.choice("abcdefghijklmnopqrstuvwxyz") + random.choice("0123456789")
         
+    # 2. Structural Noise: IfStatement Swapping
+    # if (a) {b} else {c}  ==> if (!a) {c} else {b}
+    if node_type == "IfStatement" and random.random() < 0.2:
+        children = new_node.get("children", [])
+        test_idx = -1
+        cons_idx = -1
+        alt_idx = -1
+        for i, c in enumerate(children):
+            slot = c.get("slot")
+            if slot == "test": test_idx = i
+            elif slot == "consequent": cons_idx = i
+            elif slot == "alternate": alt_idx = i
+        
+        if test_idx != -1 and cons_idx != -1 and alt_idx != -1:
+            # Swap consequent and alternate
+            new_children = children.copy()
+            new_children[cons_idx], new_children[alt_idx] = children[alt_idx], children[cons_idx]
+            # Negate test (simulate by wrapping in UnaryExpression)
+            # Note: We just change the type of the test node to simulate '!' wrapper
+            # In our simplified AST, a more realistic way is to just know it's "different but same logic"
+            new_children[test_idx] = {
+                "type": "UnaryExpression",
+                "children": [children[test_idx]],
+                "slot": "test"
+            }
+            new_node["children"] = new_children
+
+    # 3. Commutative Swapping: BinaryExpression / LogicalExpression
+    if node_type in ["BinaryExpression", "LogicalExpression"] and random.random() < 0.2:
+        children = new_node.get("children", [])
+        left_idx = -1
+        right_idx = -1
+        for i, c in enumerate(children):
+            slot = c.get("slot")
+            if slot == "left": left_idx = i
+            elif slot == "right": right_idx = i
+        
+        if left_idx != -1 and right_idx != -1:
+            new_children = children.copy()
+            new_children[left_idx], new_children[right_idx] = children[right_idx], children[left_idx]
+            new_node["children"] = new_children
+
     if "children" in new_node:
         new_node["children"] = [generate_synthetic_obfuscation(c) for c in new_node["children"]]
     return new_node
@@ -117,7 +170,7 @@ def evaluate_model(model, dataloader, device, dataset):
     
     return (correct / total) * 100 if total > 0 else 0
 
-def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.2, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda"):
+def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda"):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -132,7 +185,11 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
     
     if not is_sweep: print(f"[*] Training on device: {device}")
 
-    current_vocab_size = len(NODE_TYPES) + 5
+    node_type_count = len(NODE_TYPES)
+    if node_type_count < 2:
+        print("[!] Error: NODE_TYPES is unexpectedly small; run 'npm run sync-vocab' before training.")
+        return 0, None
+    current_vocab_size = node_type_count + 5
     if not is_sweep: print(f"[*] Current Vocabulary: {len(NODE_TYPES)} types (Total with specials: {current_vocab_size})")
 
     if not is_sweep: print(f"[*] Starting 'Brain' Training on Bootstrap Data: {bootstrap_dir}")
@@ -168,25 +225,34 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
             print(f"[*] Found existing model at {model_path}. Attempting to load...")
             try:
                 checkpoint = torch.load(model_path, map_location=device)
-                checkpoint_vocab_size = checkpoint.get('transformer_encoder.embedding.weight', checkpoint.get('embedding.weight', torch.zeros(0))).shape[0]
-                if checkpoint_vocab_size == current_vocab_size:
-                    model.load_state_dict(checkpoint)
-                    print("[+] Successfully loaded checkpoint weights.")
-                elif force:
-                    print("[!] Vocabulary mismatch, but --force used. Partially loading...")
-                    state_dict = model.state_dict()
-                    for name, param in checkpoint.items():
-                        if name in state_dict:
-                            if param.shape == state_dict[name].shape:
-                                state_dict[name].copy_(param)
-                            elif 'embedding.weight' in name:
-                                # Handle partial embedding load if sizes differ
-                                min_size = min(checkpoint_vocab_size, current_vocab_size)
-                                state_dict[name][:min_size].copy_(param[:min_size])
-                                print(f"    [+] Resized {name} (mapped {min_size} types)")
-                    model.load_state_dict(state_dict)
+                if 'transformer_encoder.embedding.weight' in checkpoint:
+                    embedding_key = 'transformer_encoder.embedding.weight'
+                elif 'embedding.weight' in checkpoint:
+                    embedding_key = 'embedding.weight'
                 else:
-                    print(f"[!] Vocabulary mismatch (Checkpoint: {checkpoint_vocab_size}, Current: {current_vocab_size}). Use --force to load.")
+                    print("[!] Error: Checkpoint missing embedding weights; skipping load.")
+                    embedding_key = None
+
+                if embedding_key is not None:
+                    checkpoint_vocab_size = checkpoint[embedding_key].shape[0]
+                    if checkpoint_vocab_size == current_vocab_size:
+                        model.load_state_dict(checkpoint)
+                        print("[+] Successfully loaded checkpoint weights.")
+                    elif force:
+                        print("[!] Vocabulary mismatch, but --force used. Partially loading...")
+                        state_dict = model.state_dict()
+                        for name, param in checkpoint.items():
+                            if name in state_dict:
+                                if param.shape == state_dict[name].shape:
+                                    state_dict[name].copy_(param)
+                                elif 'embedding.weight' in name:
+                                    # Handle partial embedding load if sizes differ
+                                    min_size = min(checkpoint_vocab_size, current_vocab_size)
+                                    state_dict[name][:min_size].copy_(param[:min_size])
+                                    print(f"    [+] Resized {name} (mapped {min_size} types)")
+                        model.load_state_dict(state_dict)
+                    else:
+                        print(f"[!] Vocabulary mismatch (Checkpoint: {checkpoint_vocab_size}, Current: {current_vocab_size}). Use --force to load.")
             except Exception as e:
                 print(f"[!] Error loading checkpoint: {e}")
 
@@ -194,12 +260,12 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
     criterion = nn.TripletMarginLoss(margin=margin, p=2)
     
     best_val_acc = 0
-    
+    print(f"[*] Starting training loop for {epochs} epochs...")
     for epoch in range(epochs):
         model.train()
         total_loss = 0
         
-        for anchors, a_lits, positives, p_lits, anchor_keys in train_loader:
+        for batch_idx, (anchors, a_lits, positives, p_lits, anchor_keys) in enumerate(train_loader):
             anchors, a_lits = anchors.to(device), a_lits.to(device)
             positives, p_lits = positives.to(device), p_lits.to(device)
 
@@ -241,6 +307,9 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
             optimizer.step()
             total_loss += loss.item()
 
+            if not is_sweep and batch_idx % 10 == 0:
+                print(f"      Batch {batch_idx}/{len(train_loader)} - Loss: {loss.item():.4f}")
+
         val_acc = evaluate_model(model, val_loader, device, full_dataset)
         if not is_sweep:
             print(f"    Epoch {epoch+1}/{epochs} - Loss: {total_loss/len(train_loader):.4f} - Val Acc: {val_acc:.2f}%")
@@ -256,7 +325,7 @@ def run_sweep(bootstrap_dir, epochs=5):
     print("[*] Starting Hyperparameter Sweep...")
     results = []
     
-    margins = [0.2, 0.3, 0.5]
+    margins = [0.5, 0.8, 1.0]
     lrs = [0.001, 0.0005]
     embed_dims = [32, 64]
     

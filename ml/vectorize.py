@@ -10,9 +10,9 @@ from constants import NODE_TYPES, TYPE_TO_ID, MAX_NODES, MAX_LITERALS
 from encoder import TransformerCodeEncoder
 
 class CodeFingerprinter(nn.Module):
-    def __init__(self, vocab_size=100, embed_dim=128, hidden_dim=64):
+    def __init__(self, vocab_size=100, embed_dim=128, hidden_dim=64, max_nodes=MAX_NODES):
         super().__init__()
-        self.transformer_encoder = TransformerCodeEncoder(vocab_size, embed_dim=embed_dim)
+        self.transformer_encoder = TransformerCodeEncoder(vocab_size, embed_dim=embed_dim, max_nodes=max_nodes)
         
         # Permutation-invariant literal channel: Process each hash independently then pool
         self.literal_fc = nn.Linear(1, 16) 
@@ -112,7 +112,11 @@ def run_vectorization(version_path, force=False, device_name="cuda"):
     else:
         device = torch.device(device_name)
     
-    current_vocab_size = len(NODE_TYPES) + 5
+    node_type_count = len(NODE_TYPES)
+    if node_type_count < 2:
+        print("[!] Error: NODE_TYPES is unexpectedly small; run 'npm run sync-vocab' before vectorizing.")
+        sys.exit(1)
+    current_vocab_size = node_type_count + 5
     model = CodeFingerprinter(vocab_size=current_vocab_size).to(device)
     model_path = os.path.join(os.path.dirname(__file__), "model.pth")
     
@@ -120,7 +124,14 @@ def run_vectorization(version_path, force=False, device_name="cuda"):
         print(f"[*] Loading pre-trained weights from {model_path} onto {device}")
         try:
             checkpoint = torch.load(model_path, map_location=device)
-            checkpoint_vocab_size = checkpoint.get('embedding.weight', torch.zeros(0)).shape[0]
+            if 'transformer_encoder.embedding.weight' in checkpoint:
+                embedding_key = 'transformer_encoder.embedding.weight'
+            elif 'embedding.weight' in checkpoint:
+                embedding_key = 'embedding.weight'
+            else:
+                print("[!] Error: Checkpoint missing embedding weights. Re-train or re-export model.pth.")
+                sys.exit(1)
+            checkpoint_vocab_size = checkpoint[embedding_key].shape[0]
             
             if checkpoint_vocab_size != current_vocab_size:
                 print(f"[!] Warning: Vocabulary mismatch! Checkpoint: {checkpoint_vocab_size}, Current: {current_vocab_size}")

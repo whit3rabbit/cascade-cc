@@ -47,3 +47,4 @@ ml/bootstrap_data
 *.py[cod]
 *$py.class
 .ipynb_checkpoints/
+*.bak
