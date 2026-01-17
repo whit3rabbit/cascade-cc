@@ -336,10 +336,11 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
     print("[*] Starting Hyperparameter Sweep...")
     results = []
     
-    # Updated ranges to account for Structural Noise and Transformer architecture
+    # Expanded ranges for Colab/GPU "Super Sweep"
     margins = [0.2, 0.5, 0.8] 
-    lrs = [0.001, 0.0005]
-    embed_dims = [32, 64]
+    lrs = [0.001, 0.0005, 0.0001]
+    embed_dims = [32, 64, 128] # Note: embed_dim must be divisible by 8 (nhead)
+    hidden_dims = [64, 128]
     
     best_overall_acc = 0
     best_params = None
@@ -348,15 +349,16 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
     for m in margins:
         for lr in lrs:
             for ed in embed_dims:
-                print(f"    - Testing Margin: {m}, LR: {lr}, Embed: {ed}...")
-                acc, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed, device_name=device_name, max_nodes_override=max_nodes_override)
-                print(f"      Result: {acc:.2f}%")
-                results.append({"margin": m, "lr": lr, "embed": ed, "acc": acc})
-                
-                if acc > best_overall_acc:
-                    best_overall_acc = acc
-                    best_params = {"margin": m, "lr": lr, "embed": ed}
-                    best_state = state
+                for hd in hidden_dims:
+                    print(f"    - Testing Margin: {m}, LR: {lr}, Embed: {ed}, Hidden: {hd}...")
+                    acc, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed, hidden_dim=hd, device_name=device_name, max_nodes_override=max_nodes_override)
+                    print(f"      Result: {acc:.2f}%")
+                    results.append({"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": acc})
+                    
+                    if acc > best_overall_acc:
+                        best_overall_acc = acc
+                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd}
+                        best_state = state
 
     print(f"\n[+] Sweep Complete! Best Accuracy: {best_overall_acc:.2f}%")
     print(f"[+] Best Params: {best_params}")
