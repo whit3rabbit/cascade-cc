@@ -211,7 +211,7 @@ async function bootstrap() {
                 .filter(ext => ext !== lib.name && !lib.name.startsWith(`${ext}/`));
 
             const externalFlags = externals.map(ext => `--external:${ext}`).join(' ');
-            execSync(`NODE_PATH="${nodePath}" npx -y esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=cjs --target=node18 --outfile="${bundlePath}" --loader:.node=empty --loader:.png=empty ${externalFlags}`, { stdio: 'inherit' });
+            execSync(`NODE_PATH="${nodePath}" npx -y esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" --loader:.node=empty --loader:.png=empty ${externalFlags}`, { stdio: 'inherit' });
 
             // 4. Run Analysis
             console.log(`  [+] Fingerprinting structural ASTs (Bootstrap Mode)...`);

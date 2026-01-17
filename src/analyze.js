@@ -666,7 +666,7 @@ class CascadeGraph {
             try {
                 const ast = parser.parse(nodeData.code, {
                     sourceType: 'module',
-                    plugins: ['jsx', 'typescript', 'decorators-legacy', 'classProperties', 'dynamicImport']
+                    plugins: ['jsx', 'typescript', 'decorators-legacy', 'classProperties', 'dynamicImport', 'topLevelAwait']
                 });
 
                 traverse(ast, {
@@ -1018,7 +1018,7 @@ async function run() {
 
     let ast = parser.parse(code, {
         sourceType: 'module',
-        plugins: ['jsx', 'typescript', 'decorators-legacy', 'classProperties', 'dynamicImport'],
+        plugins: ['jsx', 'typescript', 'decorators-legacy', 'classProperties', 'dynamicImport', 'topLevelAwait'],
         errorRecovery: true
     });
 

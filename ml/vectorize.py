@@ -7,28 +7,23 @@ import hashlib
 import argparse
 from constants import NODE_TYPES, TYPE_TO_ID, MAX_NODES, MAX_LITERALS
 
+from encoder import TransformerCodeEncoder
+
 class CodeFingerprinter(nn.Module):
-    def __init__(self, vocab_size=100, embed_dim=32, hidden_dim=64):
+    def __init__(self, vocab_size=100, embed_dim=128, hidden_dim=64):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.transformer_encoder = TransformerCodeEncoder(vocab_size, embed_dim=embed_dim)
+        
         # Permutation-invariant literal channel: Process each hash independently then pool
         self.literal_fc = nn.Linear(1, 16) 
-        self.lstm = nn.LSTM(embed_dim, hidden_dim, batch_first=True, bidirectional=True)
-        self.fc = nn.Linear(hidden_dim * 2 + 16, 64) 
+        
+        # Combined projection: Transformer out (64) + Literal out (16)
+        self.fc = nn.Linear(64 + 16, 64) 
 
     def forward(self, x, literal_vectors=None):
-        lengths = (x != 0).sum(dim=1).cpu()
-        embeds = self.embedding(x)
-        
-        packed_embeds = nn.utils.rnn.pack_padded_sequence(embeds, lengths, batch_first=True, enforce_sorted=False)
-        packed_out, (hn, cn) = self.lstm(packed_embeds)
-        lstm_out, _ = nn.utils.rnn.pad_packed_sequence(packed_out, batch_first=True, total_length=x.size(1))
-        
-        mask = (x != 0).float().unsqueeze(-1)
-        masked_out = lstm_out * mask
-        sum_out = torch.sum(masked_out, dim=1)
-        count = torch.clamp(torch.sum(mask, dim=1), min=1e-9)
-        avg_pool = sum_out / count
+        # x: (batch, seq_len)
+        # Transformer output is already normalized and 64-dim from TransformerCodeEncoder
+        struct_feat = self.transformer_encoder(x)
         
         # Literal Channel: Order-independent Pooling
         if literal_vectors is not None:
@@ -40,10 +35,10 @@ class CodeFingerprinter(nn.Module):
             # Average pool over literals
             masked_lits = lit_embeds * lit_mask
             lit_feat = torch.sum(masked_lits, dim=1) / torch.clamp(torch.sum(lit_mask, dim=1), min=1e-9)
-            combined = torch.cat([avg_pool, lit_feat], dim=1)
+            combined = torch.cat([struct_feat, lit_feat], dim=1)
         else:
             lit_feat = torch.zeros(x.size(0), 16).to(x.device)
-            combined = torch.cat([avg_pool, lit_feat], dim=1)
+            combined = torch.cat([struct_feat, lit_feat], dim=1)
             
         return torch.nn.functional.normalize(self.fc(combined), p=2, dim=1)
 
@@ -102,16 +97,22 @@ def flatten_ast(node, sequence, symbols, literals, stats, path="Root"):
         slot = child.get("slot", "child")
         flatten_ast(child, sequence, symbols, literals, stats, f"{path}/{slot}")
 
-def run_vectorization(version_path, force=False):
+def run_vectorization(version_path, force=False, device_name="auto"):
     torch.manual_seed(42)
+    
+    if device_name == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    else:
+        device = torch.device(device_name)
+    
     current_vocab_size = len(NODE_TYPES) + 5
-    model = CodeFingerprinter(vocab_size=current_vocab_size)
+    model = CodeFingerprinter(vocab_size=current_vocab_size).to(device)
     model_path = os.path.join(os.path.dirname(__file__), "model.pth")
     
     if os.path.exists(model_path):
-        print(f"[*] Loading pre-trained weights from {model_path}")
+        print(f"[*] Loading pre-trained weights from {model_path} onto {device}")
         try:
-            checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
+            checkpoint = torch.load(model_path, map_location=device)
             checkpoint_vocab_size = checkpoint.get('embedding.weight', torch.zeros(0)).shape[0]
             
             if checkpoint_vocab_size != current_vocab_size:
@@ -175,6 +176,9 @@ def run_vectorization(version_path, force=False):
                 lit_tensor = torch.nn.functional.pad(lit_tensor, (0, MAX_LITERALS - lit_tensor.size(1)), value=-1.0)
             
             try:
+                # Move tensors to device
+                seq_tensor = seq_tensor.to(device)
+                lit_tensor = lit_tensor.to(device)
                 fingerprint = model(seq_tensor, lit_tensor).squeeze().tolist()
             except Exception as e:
                 print(f"[!] Warning: Model execution failed for {chunk_name}: {e}")
@@ -203,6 +207,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Vectorize simplified ASTs using the brain model")
     parser.add_argument("version_path", help="Path to the version directory (e.g., claude-analysis/v3.5)")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
+    parser.add_argument("--device", type=str, default="auto", help="Device: cuda, mps, cpu, or auto")
     
     args = parser.parse_args()
-    run_vectorization(args.version_path, force=args.force)
+    run_vectorization(args.version_path, force=args.force, device_name=args.device)

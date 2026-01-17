@@ -117,9 +117,13 @@ def evaluate_model(model, dataloader, device, dataset):
     
     return (correct / total) * 100 if total > 0 else 0
 
-def train_brain(bootstrap_dir, epochs=10, batch_size=32, force=False, lr=0.001, margin=0.3, embed_dim=32, hidden_dim=64, is_sweep=False):
+def train_brain(bootstrap_dir, epochs=10, batch_size=32, force=False, lr=0.001, margin=0.3, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="auto"):
     # Device discovery (CUDA -> MPS -> CPU)
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    if device_name == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    else:
+        device = torch.device(device_name)
+    
     if not is_sweep: print(f"[*] Training on device: {device}")
 
     current_vocab_size = len(NODE_TYPES) + 5
@@ -145,8 +149,9 @@ def train_brain(bootstrap_dir, epochs=10, batch_size=32, force=False, lr=0.001, 
     val_size = len(full_dataset) - train_size
     train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    use_cuda = device.type == 'cuda'
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=use_cuda)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=use_cuda)
 
     model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim).to(device)
     
@@ -249,7 +254,7 @@ def run_sweep(bootstrap_dir, epochs=5):
         for lr in lrs:
             for ed in embed_dims:
                 print(f"    - Testing Margin: {m}, LR: {lr}, Embed: {ed}...")
-                acc, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed)
+                acc, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed, device_name="auto")
                 print(f"      Result: {acc:.2f}%")
                 results.append({"margin": m, "lr": lr, "embed": ed, "acc": acc})
                 
@@ -273,10 +278,11 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
+    parser.add_argument("--device", type=str, default="auto", help="Device: cuda, mps, cpu, or auto")
     
     args = parser.parse_args()
     
     if args.sweep:
         run_sweep(args.bootstrap_dir, epochs=args.epochs)
     else:
-        train_brain(args.bootstrap_dir, epochs=args.epochs, batch_size=args.batch_size, force=args.force)
+        train_brain(args.bootstrap_dir, epochs=args.epochs, batch_size=args.batch_size, force=args.force, device_name=args.device)

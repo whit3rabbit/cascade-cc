@@ -322,5 +322,5 @@ TYPE_TO_ID = {t: i for i, t in enumerate(NODE_TYPES)}
 VOCAB_SIZE = len(NODE_TYPES)
 
 # Model configuration
-MAX_NODES = 2048
+MAX_NODES = 4096
 MAX_LITERALS = 32

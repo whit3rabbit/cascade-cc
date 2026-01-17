@@ -4,44 +4,27 @@ import torch.nn.functional as F
 
 from constants import NODE_TYPES, TYPE_TO_ID, VOCAB_SIZE, MAX_NODES
 
-class CodeStructureEncoder(nn.Module):
-    def __init__(self, vocab_size=VOCAB_SIZE, embedding_dim=64, hidden_dim=128):
-        super(CodeStructureEncoder, self).__init__()
-        # vocab_size is the number of unique AST Node types
-        self.nodes_embedding = nn.Embedding(vocab_size, embedding_dim)
+class TransformerCodeEncoder(nn.Module):
+    def __init__(self, vocab_size=VOCAB_SIZE, embed_dim=128, nhead=8, num_layers=3):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        # Positional Encoding is required for Transformers to know order
+        # MAX_NODES + 1 for safety
+        self.pos_encoder = nn.Parameter(torch.zeros(1, MAX_NODES + 1, embed_dim)) 
         
-        # LSTM to process structural sequences
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, bidirectional=True)
-        
-        # Final projection to a fixed-size fingerprint
-        # Concatenate avg_pool (hidden_dim * 2) + final_hidden (hidden_dim * 2)
-        self.fc = nn.Linear(hidden_dim * 4, hidden_dim)
+        encoder_layers = nn.TransformerEncoderLayer(embed_dim, nhead, dim_feedforward=512, batch_first=True)
+        self.transformer = nn.TransformerEncoder(encoder_layers, num_layers)
+        self.fc = nn.Linear(embed_dim, 64)
 
     def forward(self, x):
-        # x shape: (batch_size, sequence_length)
-        embedded = self.nodes_embedding(x)
+        # x: (batch, seq_len)
+        x = self.embedding(x) + self.pos_encoder[:, :x.size(1), :]
+        x = self.transformer(x)
         
-        # Process structural sequence
-        lstm_out, (hn, cn) = self.lstm(embedded) # lstm_out: (batch_size, seq_len, hidden_dim * 2)
-        
-        # Capture final hidden state (bidirectional)
-        # hn shape: (num_layers * num_directions, batch_size, hidden_dim)
-        # For bidirectional: [forward_layer_1, backward_layer_1, ...]
-        final_hidden = torch.cat([hn[-2], hn[-1]], dim=1) # (batch_size, hidden_dim * 2)
-        
-        # Global Average Pooling over the sequence dimension
-        # We mask out the padding (0) to get a true average
-        mask = (x != 0).float().unsqueeze(-1) # (batch_size, seq_len, 1)
-        masked_out = lstm_out * mask
-        sum_out = torch.sum(masked_out, dim=1)
-        count = torch.clamp(torch.sum(mask, dim=1), min=1e-9)
-        avg_pool = sum_out / count
-        
-        # Combine average pool and final hidden state
-        combined = torch.cat([avg_pool, final_hidden], dim=1)
-        
-        # Final projection and normalization
-        return F.normalize(self.fc(combined), p=2, dim=1)
+        # Global average pooling (masking out PAD/0 nodes if necessary, 
+        # but simple average over seq dimension is often sufficient for code structure)
+        x = x.mean(dim=1)
+        return F.normalize(self.fc(x), p=2, dim=1)
 
 class ASTPreprocessor:
     def __init__(self):

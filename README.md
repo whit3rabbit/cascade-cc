@@ -24,7 +24,7 @@ Install prerequisites below. Then run the following commands:
 1.  `npm run sync-vocab` # Sync the vocabulary
 2.  `npm run bootstrap` # Download the libraries Claude depends on (Zod, React, etc.) and extract their structural fingerprints. Mangles and minifies the libraries to simulate real-world obfuscation. We train the neural network on this data.
 3.  `node src/update_registry_from_bootstrap.js` # Update the logic registry with the bootstrap data
-4.  `npm run train -- --force` # Optional, if you want to retrain the model
+4.  `npm run train` # Optional, if you want to retrain the model
 5.  `npm run analyze` # Analyze the Claude bundle
 6.  `npm run anchor -- <version>` # Identify the libraries using the "Brain"
 7.  `npm run deobfuscate -- <version> --skip-vendor` # Deobfuscate the proprietary "Founder" logic using the LLM
@@ -61,6 +61,20 @@ If you have just cloned this repo, you can skip and use the pre-trained model in
 
 Here are instructions for building your own model if you don't want to use the pre-trained model.
 
+### GPU Acceleration (NEW)
+
+The ML pipeline now supports explicit device selection and uses a **Transformer Encoder** architecture, which thrives on GPU parallelization.
+
+| Device | Platform | Recommendation |
+| :--- | :--- | :--- |
+| `mps` | Apple Silicon (M1/M2/M3) | **Best for Mac users.** |
+| `cuda` | NVIDIA GPU | **Best for Linux/Windows servers.** |
+| `cpu` | Any | Fallback (slower). |
+| `auto` | Any | Automatically detect best available. |
+
+#### Memory Considerations
+With the new Transformer architecture and a `MAX_NODES` context window of 4096, attention matrices can grow large ($N^2$ complexity). If you hit **Out of Memory (OOM)** errors on MPS or CUDA, use a smaller `--batch_size` (e.g., 4 or 8) or revert to `--device cpu`.
+
 ### Step 1: Bootstrap Library DNA
 
 This downloads the libraries Claude depends on (Zod, React, etc.) and extracts their structural fingerprints. It loads libraries into `ml/bootstrap_data` and creates a logic registry in `cascade_graph_analysis/bootstrap`.
@@ -74,7 +88,14 @@ npm run bootstrap
 This teaches the model to recognize the DNA of those libraries even when they are mangled/minified. This is optional and I have included a pre-trained model in the repository.
 
 ```bash
+# Default (auto-detect)
 npm run train
+
+# Force Apple Metal (MPS)
+npm run train -- --device mps --batch_size 8
+
+# Force CUDA with custom batch size
+npm run train -- --device cuda --batch_size 16
 ```
 *Output: `ml/model.pth`. Your analyzer is now "primed" to recognize standard code.*
 
@@ -91,7 +112,7 @@ npm run analyze
 # 2. Anchor (Python/NN Phase)
 # Runs the Neural Network (ml/vectorize.py) to identify libraries using the "Brain".
 # (Replace '2.1.7' with the version reported by the analyze step)
-npm run anchor -- 2.1.7
+npm run anchor -- 2.1.7 --device auto
 
 # 3. Deobfuscate (LLM Phase)
 # Processes the proprietary "Founder" logic using the LLM.
