@@ -19,12 +19,15 @@ class TransformerCodeEncoder(nn.Module):
 
     def forward(self, x):
         # x: (batch, seq_len)
+        pad_mask = x == 0
         x = self.embedding(x) + self.pos_encoder[:, :x.size(1), :]
-        x = self.transformer(x)
+        x = self.transformer(x, src_key_padding_mask=pad_mask)
         
         # Global average pooling (masking out PAD/0 nodes if necessary, 
         # but simple average over seq dimension is often sufficient for code structure)
-        x = x.mean(dim=1)
+        keep_mask = (~pad_mask).unsqueeze(-1)
+        denom = keep_mask.sum(dim=1).clamp(min=1)
+        x = (x * keep_mask).sum(dim=1) / denom
         return F.normalize(self.fc(x), p=2, dim=1)
 
 class ASTPreprocessor:

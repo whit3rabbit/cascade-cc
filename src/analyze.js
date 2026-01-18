@@ -959,7 +959,14 @@ class CascadeGraph {
         const metadata = [];
         const fileRanges = []; // Keep fileRanges for graph_map.js, but not for graph_map.json
         for (const [name, node] of this.nodes) {
-            const fileName = node.suggestedFilename ? node.suggestedFilename : `${name}.js`;
+            let fileName = node.suggestedFilename ? node.suggestedFilename : `${name}.js`;
+
+            // SANITIZATION: Remove paths, slashes, and ensure proper extension
+            fileName = path.basename(fileName);
+            if (!fileName.endsWith('.js') && !fileName.endsWith('.ts') && !fileName.endsWith('.tsx')) {
+                fileName += '.js';
+            }
+
             fs.writeFileSync(path.join(chunksDir, fileName), node.code);
 
             const metaEntry = {
@@ -1116,11 +1123,13 @@ async function run() {
 
     graph.saveResults(OUTPUT_BASE);
 
-    graph.saveResults(OUTPUT_BASE);
-
     console.log(`\n[COMPLETE] Static Analysis Phase Done.`);
     console.log(`Phase 1-3 results saved to: ${OUTPUT_BASE}`);
     return { version, path: OUTPUT_BASE };
 }
 
-run().catch(console.error);
+run().catch(err => {
+    console.error(`\n[!] FATAL ERROR during analysis:`);
+    console.error(err);
+    process.exit(1);
+});

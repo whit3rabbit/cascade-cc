@@ -399,8 +399,32 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
                 
                 hardest_idx = torch.argmax(batch_sims)
                 if batch_sims[hardest_idx] == -2:
-                    # Fallback to any other item if no non-isomorph in batch
-                    hardest_idx = (i + 1) % len(anchors)
+                    # Fallback: prefer a different library, then any other item.
+                    anchor_lib = anchor_keys[i].split("_", 1)[0]
+                    fallback_idx = None
+                    for j in range(len(anchors)):
+                        if j == i:
+                            continue
+                        candidate_key = anchor_keys[j]
+                        candidate_lib = candidate_key.split("_", 1)[0]
+                        if candidate_lib == anchor_lib:
+                            continue
+                        if train_dataset.structural_hashes[candidate_key] == anchor_hash:
+                            continue
+                        fallback_idx = j
+                        break
+                    if fallback_idx is None:
+                        for j in range(len(anchors)):
+                            if j == i:
+                                continue
+                            candidate_key = anchor_keys[j]
+                            candidate_lib = candidate_key.split("_", 1)[0]
+                            if candidate_lib != anchor_lib:
+                                fallback_idx = j
+                                break
+                    if fallback_idx is None:
+                        fallback_idx = (i + 1) % len(anchors)
+                    hardest_idx = fallback_idx
                     
                 negatives.append(anchors[hardest_idx])
                 neg_lits.append(a_lits[hardest_idx])
@@ -447,7 +471,20 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
     lrs = [0.001, 0.0005, 0.0001]
     embed_dims = [32, 64, 128]
     hidden_dims = [64, 128]
+    sweep_batch_size = 64
     
+    ast_files = [f for f in os.listdir(bootstrap_dir) if f.endswith("_gold_asts.json")]
+    if not ast_files:
+        print("[!] Error: No gold ASTs found. Run 'npm run bootstrap' first.")
+        return
+    libraries = [f.replace("_gold_asts.json", "") for f in ast_files]
+    val_lib_count = min(3, len(libraries))
+    fixed_val_libs = random.sample(libraries, val_lib_count) if libraries else []
+    if fixed_val_libs:
+        joined_libs = ", ".join(fixed_val_libs)
+        print(f"[*] Sweep averaging validation across: {joined_libs}")
+
+    best_overall_score = -1.0
     best_overall_margin = -1.0
     best_params = None
     best_state = None
@@ -457,26 +494,55 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
             for ed in embed_dims:
                 for hd in hidden_dims:
                     print(f"    - Testing Margin: {m}, LR: {lr}, Embed: {ed}, Hidden: {hd}...")
-                    result, state = train_brain(bootstrap_dir, epochs=epochs, is_sweep=True, margin=m, lr=lr, embed_dim=ed, hidden_dim=hd, device_name=device_name, max_nodes_override=max_nodes_override)
-                    val_margin, val_acc = result
-                    print(f"      Result: Acc {val_acc:.2f}%, Margin {val_margin:.4f}")
-                    results.append({"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": val_acc, "val_margin": val_margin})
+                    total_acc = 0.0
+                    total_margin = 0.0
+                    best_state_for_params = None
+                    best_score_for_params = -1.0
+                    eval_libs = fixed_val_libs if fixed_val_libs else [None]
+                    for val_lib in eval_libs:
+                        result, state = train_brain(
+                            bootstrap_dir,
+                            epochs=epochs,
+                            batch_size=sweep_batch_size,
+                            is_sweep=True,
+                            margin=m,
+                            lr=lr,
+                            embed_dim=ed,
+                            hidden_dim=hd,
+                            device_name=device_name,
+                            max_nodes_override=max_nodes_override,
+                            val_library=val_lib,
+                        )
+                        val_margin, val_acc = result
+                        total_acc += val_acc
+                        total_margin += val_margin
+                        score = (val_acc * 0.7) + (min(val_margin, 1.0) * 0.3)
+                        if score > best_score_for_params:
+                            best_score_for_params = score
+                            best_state_for_params = state
+
+                    avg_acc = total_acc / len(eval_libs)
+                    avg_margin = total_margin / len(eval_libs)
+                    print(f"      Result: Acc {avg_acc:.2f}%, Margin {avg_margin:.4f}")
+                    results.append({"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": avg_acc, "val_margin": avg_margin})
                     
-                    if val_margin > best_overall_margin:
-                        best_overall_margin = val_margin
-                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": val_acc}
-                        best_state = state
+                    score = (avg_acc * 0.7) + (min(avg_margin, 1.0) * 0.3)
+                    if score > best_overall_score:
+                        best_overall_score = score
+                        best_overall_margin = avg_margin
+                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": avg_acc}
+                        best_state = best_state_for_params
 
-    print(f"\n[+] Sweep Complete! Best Similarity Margin: {best_overall_margin:.4f} (Acc: {best_params['acc']:.2f}%)")
-    print(f"[+] Best Params: {best_params}")
-
-    print(f"\n[+] Sweep Complete! Best Accuracy: {best_overall_acc:.2f}%")
-    print(f"[+] Best Params: {best_params}")
-    
-    if best_state:
-        model_path = os.path.join(os.path.dirname(__file__), "model.pth")
-        torch.save(best_state, model_path)
-        print(f"[*] Best model saved to {model_path}")
+    print(f"\n[+] Sweep Complete!")
+    if best_params:
+        print(f"[+] Best Similarity Margin: {best_overall_margin:.4f} (Acc: {best_params['acc']:.2f}%)")
+        print(f"[+] Best Params: {best_params}")
+        if best_state:
+            model_path = os.path.join(os.path.dirname(__file__), "model.pth")
+            torch.save(best_state, model_path)
+            print(f"[*] Best model saved to {model_path}")
+    else:
+        print("[!] Sweep failed to find a valid model.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the Code Fingerprinting Neural Network")
