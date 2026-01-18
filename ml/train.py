@@ -40,7 +40,7 @@ def generate_synthetic_obfuscation(ast_node):
         new_node["name"] = random.choice("abcdefghijklmnopqrstuvwxyz") + random.choice("0123456789")
         
     # 2. Dead Code Injection: Randomly insert if(false){...}
-    if node_type == "BlockStatement" and random.random() < 0.1:
+    if node_type == "BlockStatement" and random.random() < 0.15:
         dead_node = {
             "type": "IfStatement",
             "children": [
@@ -258,7 +258,7 @@ def evaluate_model(model, dataloader, device, dataset):
     
     return (correct / total) * 100 if total > 0 else 0, avg_pos, avg_neg
 
-def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None):
+def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.2, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
