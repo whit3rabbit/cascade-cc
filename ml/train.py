@@ -8,8 +8,7 @@ import sys
 import random
 import argparse
 import warnings
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, Subset, random_split
 from vectorize import CodeFingerprinter, flatten_ast, get_auto_max_nodes
 from constants import NODE_TYPES, MAX_NODES, MAX_LITERALS
 # removed get_auto_max_nodes definition (imported from vectorize)
@@ -332,7 +331,7 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
         avg_lib_mrr,
     )
 
-def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.2, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None):
+def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_max_chunks=None):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -395,12 +394,21 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
     train_patterns = {k: v for k, v in patterns.items() if not k.startswith(val_prefixes)}
     val_patterns = {k: v for k, v in patterns.items() if k.startswith(val_prefixes)}
 
+    if val_max_chunks and len(val_patterns) > val_max_chunks:
+        rng = random.Random(42)
+        val_keys = rng.sample(list(val_patterns.keys()), val_max_chunks)
+        val_patterns = {k: val_patterns[k] for k in val_keys}
+
     if not val_patterns:
         print(f"[!] Warning: Validation libraries {val_libraries} have no patterns. Falling back to 80/20 split.")
         full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
         train_size = int(0.8 * len(full_dataset))
         val_size = len(full_dataset) - train_size
         train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+        if val_max_chunks and val_size > val_max_chunks:
+            rng = random.Random(42)
+            val_indices = rng.sample(range(val_size), val_max_chunks)
+            val_dataset = Subset(val_dataset, val_indices)
     else:
         train_dataset = TripletDataset(train_patterns, max_nodes=effective_max_nodes)
         val_dataset = TripletDataset(val_patterns, max_nodes=effective_max_nodes)
@@ -590,11 +598,12 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
     results = []
     
     # Loss margins to explore; higher margins demand larger separations.
-    margins = [0.2, 0.5, 0.8, 1.0]
-    lrs = [0.001, 0.0005, 0.0001]
+    margins = [0.5, 0.8, 1.0]
+    lrs = [0.001, 0.0005]
     embed_dims = [32, 64, 128]
     hidden_dims = [64, 128]
     sweep_batch_size = 64
+    val_max_chunks = 100
     
     ast_files = [f for f in os.listdir(bootstrap_dir) if f.endswith("_gold_asts.json")]
     if not ast_files:
@@ -630,6 +639,7 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
                         device_name=device_name,
                         max_nodes_override=max_nodes_override,
                         val_library=fixed_val_libs if fixed_val_libs else None,
+                        val_max_chunks=val_max_chunks,
                     )
                     val_margin, val_acc, val_mrr, min_lib_margin, min_lib_mrr, avg_lib_mrr = result
                     if min_lib_mrr > 0:
@@ -659,7 +669,14 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
                     if score > best_overall_score:
                         best_overall_score = score
                         best_overall_margin = val_margin
-                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd, "mrr": min_lib_mrr}
+                        best_params = {
+                            "margin": m,
+                            "lr": lr,
+                            "embed": ed,
+                            "hidden": hd,
+                            "mrr": min_lib_mrr,
+                            "acc": val_acc,
+                        }
                         best_state = state
 
     print(f"\n[+] Sweep Complete!")
@@ -676,8 +693,8 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the Code Fingerprinting Neural Network")
     parser.add_argument("bootstrap_dir", nargs="?", default="./ml/bootstrap_data", help="Directory containing gold ASTs")
-    parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=64, help="Batch size for training")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
     parser.add_argument("--max_nodes", type=int, default=0, help="Override context window size (0 for auto)")

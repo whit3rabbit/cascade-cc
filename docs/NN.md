@@ -52,8 +52,8 @@ Recent sweeps prioritize cross-library generalization and robust ranking metrics
 | Argument | Default | Description |
 | :--- | :--- | :--- |
 | `bootstrap_dir` | `./ml/bootstrap_data` | Directory containing the gold ASTs. |
-| `--epochs` | `5` | Number of training iterations. |
-| `--batch_size` | `16` | Number of triplets per optimization step. |
+| `--epochs` | `50` | Number of training iterations. |
+| `--batch_size` | `64` | Number of triplets per optimization step. |
 | `--force` | `False` | Force loading a model even if the vocabulary size mismatches. |
 
 ---
@@ -69,10 +69,10 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
 | `MAX_NODES` | `512` | Maximum length of the AST sequence. Optimized for Transformers. |
 | `MAX_LITERALS` | `32` | Maximum number of hashed literals captured per chunk. |
 | `Embedding Dim` | `32` | Dimension of the AST Node Type embeddings (default). |
-| `Hidden Dim` | `64` | Dimension of the Transformer hidden state (default). |
+| `Hidden Dim` | `128` | Dimension of the Transformer hidden state (default). |
 | `Fingerprint Dim`| `128` | Final L2-normalized output vector size. |
 | `Learning Rate` | `0.001` | Default learning rate. |
-| `Margin` | `0.2` | Default triplet loss margin. |
+| `Margin` | `0.5` | Default triplet loss margin. |
 
 ### Architecture Detail
 
@@ -86,6 +86,7 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
 
 *   **Hard negatives**: Training masks isomorphic and same-library candidates, forcing cross-library discrimination.
 *   **Positive mixing**: A small percentage of positives are pulled from the same library to encourage library-family clustering.
+*   **Sweep batch size**: Sweeps use a fixed batch size of `64` inside `ml/train.py` regardless of CLI defaults.
 *   **Early stopping**: Training stops after several stagnant epochs on margin improvement.
 *   **Evaluation metrics**: Margin and MRR are tracked; sweeps select on minimum library MRR.
 
