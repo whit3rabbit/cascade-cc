@@ -7,11 +7,14 @@ import os
 import sys
 import random
 import argparse
+import warnings
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import Dataset, DataLoader, random_split
 from vectorize import CodeFingerprinter, flatten_ast, get_auto_max_nodes
 from constants import NODE_TYPES, MAX_NODES, MAX_LITERALS
 # removed get_auto_max_nodes definition (imported from vectorize)
+
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.modules.transformer")
 
 def generate_synthetic_obfuscation(ast_node):
     """
@@ -204,7 +207,7 @@ class TripletDataset(Dataset):
             
         return anchor_t, anchor_lit_t, positive_t, pos_lit_t, anchor_key
 
-def evaluate_model(model, dataloader, device, dataset):
+def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
     model.eval()
     correct = 0
     total = 0
@@ -227,13 +230,18 @@ def evaluate_model(model, dataloader, device, dataset):
             
             for i in range(len(anchors)):
                 anchor_hash = dataset.structural_hashes[anchor_keys[i]]
+                anchor_lib = anchor_keys[i].split("_", 1)[0] if mask_same_library else None
                 
                 # Mask out self and isomorphs
                 batch_sims = sims[i].clone()
                 batch_sims[i] = -2 # Lower than any possible cosine sim
                 
                 for j in range(len(anchors)):
-                    if dataset.structural_hashes[anchor_keys[j]] == anchor_hash:
+                    candidate_key = anchor_keys[j]
+                    candidate_lib = candidate_key.split("_", 1)[0] if mask_same_library else None
+                    if dataset.structural_hashes[candidate_key] == anchor_hash:
+                        batch_sims[j] = -2
+                    elif mask_same_library and candidate_lib == anchor_lib:
                         batch_sims[j] = -2
                 
                 hardest_idx = torch.argmax(batch_sims)
@@ -301,16 +309,27 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
             for chunk_name, ast in data.items():
                 patterns[f"{lib_name}_{chunk_name}"] = ast
 
-    # 4. Leave-One-Library-Out Validation
-    if not val_library:
-        val_library = random.choice(list(libraries))
-        if not is_sweep: print(f"[*] Leave-One-Library-Out: Validating on '{val_library}'")
+    # 4. Leave-Library-Out Validation (single or multiple libraries)
+    if val_library:
+        if isinstance(val_library, (list, tuple, set)):
+            val_libraries = list(dict.fromkeys(val_library))
+        else:
+            val_libraries = [val_library]
+    else:
+        val_libraries = [random.choice(list(libraries))]
+        if not is_sweep:
+            print(f"[*] Leave-One-Library-Out: Validating on '{val_libraries[0]}'")
 
-    train_patterns = {k: v for k, v in patterns.items() if not k.startswith(val_library + "_")}
-    val_patterns = {k: v for k, v in patterns.items() if k.startswith(val_library + "_")}
+    if not is_sweep and len(val_libraries) > 1:
+        joined_libs = ", ".join(val_libraries)
+        print(f"[*] Leave-Multi-Library-Out: Validating on [{joined_libs}]")
+
+    val_prefixes = tuple(f"{lib}_" for lib in val_libraries)
+    train_patterns = {k: v for k, v in patterns.items() if not k.startswith(val_prefixes)}
+    val_patterns = {k: v for k, v in patterns.items() if k.startswith(val_prefixes)}
 
     if not val_patterns:
-        print(f"[!] Warning: Validation library {val_library} has no patterns. Falling back to 80/20 split.")
+        print(f"[!] Warning: Validation libraries {val_libraries} have no patterns. Falling back to 80/20 split.")
         full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
         train_size = int(0.8 * len(full_dataset))
         val_size = len(full_dataset) - train_size
@@ -370,6 +389,9 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
     best_val_acc = 0
     best_val_margin = -1.0
     best_state = None
+    early_stop_patience = 3
+    early_stop_min_delta = 0.01
+    early_stop_bad_epochs = 0
 
     print(f"[*] Starting training loop for {epochs} epochs...")
     for epoch in range(epochs):
@@ -393,8 +415,11 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
                 batch_sims[i] = -2  # Mask self
                 
                 anchor_hash = train_dataset.structural_hashes[anchor_keys[i]]
+                anchor_lib = anchor_keys[i].split("_", 1)[0]
                 for j in range(len(anchors)):
-                    if train_dataset.structural_hashes[anchor_keys[j]] == anchor_hash:
+                    candidate_key = anchor_keys[j]
+                    candidate_lib = candidate_key.split("_", 1)[0]
+                    if train_dataset.structural_hashes[candidate_key] == anchor_hash or candidate_lib == anchor_lib:
                         batch_sims[j] = -2 # Mask isomorphs
                 
                 hardest_idx = torch.argmax(batch_sims)
@@ -445,7 +470,8 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
             if not is_sweep and batch_idx % 10 == 0:
                 print(f"      Batch {batch_idx}/{len(train_loader)} - Loss: {loss.item():.4f}")
 
-        val_acc, avg_pos, avg_neg = evaluate_model(model, val_loader, device, val_dataset)
+        mask_same_library = len(val_libraries) > 1
+        val_acc, avg_pos, avg_neg = evaluate_model(model, val_loader, device, val_dataset, mask_same_library=mask_same_library)
         val_margin = avg_neg - avg_pos
         
         if not is_sweep:
@@ -460,6 +486,14 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
             best_state = model.state_dict()
             if not is_sweep:
                 torch.save(best_state, os.path.join(os.path.dirname(__file__), "model.pth"))
+            early_stop_bad_epochs = 0
+        elif val_margin <= best_val_margin + early_stop_min_delta:
+            early_stop_bad_epochs += 1
+
+        if early_stop_bad_epochs >= early_stop_patience:
+            if not is_sweep:
+                print(f"    Early stopping after {early_stop_bad_epochs} stagnant epochs.")
+            break
 
     return (best_val_margin, best_val_acc), best_state
 
@@ -482,7 +516,7 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
     fixed_val_libs = random.sample(libraries, val_lib_count) if libraries else []
     if fixed_val_libs:
         joined_libs = ", ".join(fixed_val_libs)
-        print(f"[*] Sweep averaging validation across: {joined_libs}")
+        print(f"[*] Sweep validating across: {joined_libs}")
 
     best_overall_score = -1.0
     best_overall_margin = -1.0
@@ -494,44 +528,29 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
             for ed in embed_dims:
                 for hd in hidden_dims:
                     print(f"    - Testing Margin: {m}, LR: {lr}, Embed: {ed}, Hidden: {hd}...")
-                    total_acc = 0.0
-                    total_margin = 0.0
-                    best_state_for_params = None
-                    best_score_for_params = -1.0
-                    eval_libs = fixed_val_libs if fixed_val_libs else [None]
-                    for val_lib in eval_libs:
-                        result, state = train_brain(
-                            bootstrap_dir,
-                            epochs=epochs,
-                            batch_size=sweep_batch_size,
-                            is_sweep=True,
-                            margin=m,
-                            lr=lr,
-                            embed_dim=ed,
-                            hidden_dim=hd,
-                            device_name=device_name,
-                            max_nodes_override=max_nodes_override,
-                            val_library=val_lib,
-                        )
-                        val_margin, val_acc = result
-                        total_acc += val_acc
-                        total_margin += val_margin
-                        score = (val_acc * 0.7) + (min(val_margin, 1.0) * 0.3)
-                        if score > best_score_for_params:
-                            best_score_for_params = score
-                            best_state_for_params = state
-
-                    avg_acc = total_acc / len(eval_libs)
-                    avg_margin = total_margin / len(eval_libs)
-                    print(f"      Result: Acc {avg_acc:.2f}%, Margin {avg_margin:.4f}")
-                    results.append({"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": avg_acc, "val_margin": avg_margin})
+                    result, state = train_brain(
+                        bootstrap_dir,
+                        epochs=epochs,
+                        batch_size=sweep_batch_size,
+                        is_sweep=True,
+                        margin=m,
+                        lr=lr,
+                        embed_dim=ed,
+                        hidden_dim=hd,
+                        device_name=device_name,
+                        max_nodes_override=max_nodes_override,
+                        val_library=fixed_val_libs if fixed_val_libs else None,
+                    )
+                    val_margin, val_acc = result
+                    print(f"      Result: Acc {val_acc:.2f}%, Margin {val_margin:.4f}")
+                    results.append({"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": val_acc, "val_margin": val_margin})
                     
-                    score = (avg_acc * 0.7) + (min(avg_margin, 1.0) * 0.3)
+                    score = (val_acc * 0.7) + (min(val_margin, 1.0) * 0.3)
                     if score > best_overall_score:
                         best_overall_score = score
-                        best_overall_margin = avg_margin
-                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": avg_acc}
-                        best_state = best_state_for_params
+                        best_overall_margin = val_margin
+                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": val_acc}
+                        best_state = state
 
     print(f"\n[+] Sweep Complete!")
     if best_params:

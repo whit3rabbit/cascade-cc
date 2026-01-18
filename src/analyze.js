@@ -601,8 +601,8 @@ class CascadeGraph {
             });
 
             if (suggestedName) {
-                const sanitized = suggestedName.replace(/[^a-zA-Z0-9]/g, '_').replace(/^_+|_+$/g, '');
-                if (sanitized.length > 3) {
+                const sanitized = suggestedName.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+                if (sanitized.length > 1) {
                     const nodeData = this.nodes.get(chunkName);
                     nodeData.displayName = sanitized;
                 }
@@ -959,12 +959,9 @@ class CascadeGraph {
         const metadata = [];
         const fileRanges = []; // Keep fileRanges for graph_map.js, but not for graph_map.json
         for (const [name, node] of this.nodes) {
-            let fileName = node.suggestedFilename ? node.suggestedFilename : `${name}.js`;
-
-            // SANITIZATION: Remove paths, slashes, and ensure proper extension
-            fileName = path.basename(fileName);
-            if (!fileName.endsWith('.js') && !fileName.endsWith('.ts') && !fileName.endsWith('.tsx')) {
-                fileName += '.js';
+            let fileName = `${name}.js`;
+            if (node.displayName) {
+                fileName = `${name}_${node.displayName}.js`;
             }
 
             fs.writeFileSync(path.join(chunksDir, fileName), node.code);

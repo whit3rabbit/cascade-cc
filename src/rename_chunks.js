@@ -342,4 +342,8 @@ async function main() {
     if (failCount > 0) console.warn(`    - Failed to transform ${failCount} chunks (used original code).`);
 }
 
-main().catch(console.error);
+module.exports = { renameIdentifiers, main };
+
+if (require.main === module) {
+    main().catch(console.error);
+}

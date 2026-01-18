@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { callLLM, validateKey, PROVIDER, MODEL } = require('./llm_client');
+const { renameIdentifiers: liveRenamer } = require('./rename_chunks');
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 
@@ -405,8 +406,26 @@ async function run() {
     }
     const logicDbByName = new Map(logicDb.map(entry => [entry.name, entry]));
 
-    let sortedChunks = graphData.slice().sort((a, b) => (b.centrality || 0) - (a.centrality || 0));
+    const CORE_LIBS = ['zod', 'react', 'react-dom', 'next', 'lucide', 'framer-motion', 'clsx', 'tailwind', 'radix-ui'];
+
+    let sortedChunks = graphData.slice().sort((a, b) => {
+        // 1. Prioritize Core Libraries
+        const aIsCore = CORE_LIBS.some(lib => a.displayName?.toLowerCase().includes(lib) || a.proposedPath?.toLowerCase().includes(lib));
+        const bIsCore = CORE_LIBS.some(lib => b.displayName?.toLowerCase().includes(lib) || b.proposedPath?.toLowerCase().includes(lib));
+        if (aIsCore && !bIsCore) return -1;
+        if (!aIsCore && bIsCore) return 1;
+
+        // 2. Prioritize Centrality (Business Logic Hubs)
+        return (b.centrality || 0) - (a.centrality || 0);
+    });
+
     if (limitValue < sortedChunks.length) sortedChunks = sortedChunks.slice(0, limitValue);
+
+    let newMappingsCount = 0;
+    let correctionCount = 0;
+    let skipProcessedCount = 0;
+    let skipNoUnknownCount = 0;
+    let skipVendorCount = 0;
 
     console.log(`[*] Starting Deobfuscation Pipeline [Provider: ${PROVIDER}, Model: ${MODEL}]`);
     if (isDryRun) console.log(`[!] DRY RUN MODE: No LLM calls will be made.`);
@@ -420,28 +439,63 @@ async function run() {
         const pLimit = require('p-limit');
         const limit = pLimit(PROVIDER === 'gemini' ? 1 : 3);
 
-        const tasks = sortedChunks.map((chunkMeta) => limit(async () => {
+        const coreChunks = sortedChunks.filter(c => CORE_LIBS.some(lib => c.displayName?.toLowerCase().includes(lib) || c.proposedPath?.toLowerCase().includes(lib)));
+        const otherChunks = sortedChunks.filter(c => !coreChunks.includes(c));
+
+        const runChunk = (chunkMeta) => limit(async () => {
             const file = path.basename(chunkMeta.file);
             const chunkPath = path.join(chunksDir, file);
             if (!fs.existsSync(chunkPath)) return;
 
             if (skipVendor && chunkMeta.category === 'vendor') {
-                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) globalMapping.processed_chunks.push(chunkMeta.name);
+                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
+                    console.log(`    [-] Skipping ${file} (vendor)`);
+                    globalMapping.processed_chunks.push(chunkMeta.name);
+                }
+                skipVendorCount++;
                 return;
             }
 
-            if (globalMapping.processed_chunks.includes(chunkMeta.name) && !isForce) return;
+            if (globalMapping.processed_chunks.includes(chunkMeta.name) && !isForce) {
+                skipProcessedCount++;
+                return;
+            }
 
-            const code = fs.readFileSync(chunkPath, 'utf8');
+            let code = fs.readFileSync(chunkPath, 'utf8');
             const { variables, properties } = extractIdentifiers(code);
 
-            const unknownVariables = variables.filter(v => !globalMapping.variables[v] || (globalMapping.variables[v].confidence || 0) < 0.9);
-            const unknownProperties = properties.filter(p => !globalMapping.properties[p] || (globalMapping.properties[p].confidence || 0) < 0.9);
+            // OPTIMIZATION: Apply current mappings to the code before sending it to the LLM
+            // This makes the code much more 'human-readable' for the engine.
+            const neighbors = [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])];
+            try {
+                const partiallyRenamedCode = liveRenamer(code, globalMapping, {
+                    sourceFile: chunkMeta.name,
+                    neighbors,
+                    displayName: chunkMeta.displayName,
+                    suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path
+                });
+                if (partiallyRenamedCode) {
+                    code = partiallyRenamedCode;
+                }
+            } catch (err) {
+                console.warn(`    [!] Pre-renaming failed for ${file}: ${err.message}. Sending original code.`);
+            }
+
+            const { variables: remainingVars, properties: remainingProps } = extractIdentifiers(code);
+
+            const unknownVariables = remainingVars.filter(v => !globalMapping.variables[v] || (globalMapping.variables[v].confidence || 0) < 0.9);
+            const unknownProperties = remainingProps.filter(p => !globalMapping.properties[p] || (globalMapping.properties[p].confidence || 0) < 0.9);
 
             if (unknownVariables.length === 0 && unknownProperties.length === 0 && !isForce) {
-                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) globalMapping.processed_chunks.push(chunkMeta.name);
+                if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
+                    console.log(`    [-] Skipping ${file} (no unknown identifiers)`);
+                    globalMapping.processed_chunks.push(chunkMeta.name);
+                }
+                skipNoUnknownCount++;
                 return;
             }
+
+            console.log(`    [WORKING] ${file} (${unknownVariables.length} vars, ${unknownProperties.length} props unknown)`);
 
             const logicMatch = logicDbByName.get(chunkMeta.name);
             const logicLabel = logicMatch?.bestMatchLabel || logicMatch?.label || null;
@@ -481,32 +535,32 @@ ${(chunkMeta.outbound || []).map(n => {
                 return `- ${neighborMeta?.displayName || neighborMeta?.name || n}`;
             }).join('\n')}
 
-AUTOMATED IDENTITIES (Ground Truth from Neural DNA Matching):
-The following symbols were identified via high-confidence structural matching. DO NOT change these names:
+MAPPING KNOWLEDGE (High Confidence or Established Guesses):
+The following symbols have already been identified. Use these names in your reasoning.
 ${[...variables, ...properties].filter(id => {
                 const m = globalMapping.variables[id] || globalMapping.properties[id];
-                return m && (m.confidence >= 0.95 || m.source.includes('bootstrap'));
+                return m && (m.confidence >= 0.8 || m.source.includes('bootstrap'));
             }).map(id => {
                 const m = globalMapping.variables[id] || globalMapping.properties[id];
-                return `- ${id} is ${m.name}`;
+                return `- ${id} is ${m.name} (Source: ${m.source}, Confidence: ${m.confidence})`;
             }).join('\n') || 'None'}
 
 ${goldReferenceCode ? `GOLD REFERENCE MATCH:
-This chunk matches a library signature (${(goldSimilarity * 100).toFixed(2)}% similarity).
+This chunk matches a library signature (${(goldSimilarity * 100).toFixed(2)}% similarity). Use this to resolve ambiguous names.
 \n\`\`\`javascript
 ${goldReferenceCode}
 \`\`\`
 ` : ''}
 
-SOURCE CODE (Pre-Deobfuscated):
+SOURCE CODE:
 \`\`\`javascript
 ${codeContent}
 \`\`\`
 
 INSTRUCTIONS:
-1. Identify the 'Proprietary' business logic that is unique to Claude and not part of the libraries.
-2. Rename the remaining mangled variables (single letters/short names) based on their semantic usage.
-3. Suggest a final descriptive filename if the current one is generic.
+1. Examine the code for logical consistency. If an existing mapping (listed above) results in nonsensical code (e.g. \`Date.filter()\`), suggest a corrected name in the "corrections" block.
+2. Identify the 'Proprietary' business logic that is unique to Claude.
+3. Rename the remaining mangled variables (single letters/short names) based on their semantic usage.
 4. Output valid JSON only.
 
 RESPONSE FORMAT (JSON ONLY):
@@ -514,6 +568,9 @@ RESPONSE FORMAT (JSON ONLY):
   "mappings": {
     "variables": { "mangled": { "name": "clean"${skipRationale ? '' : ', "rationale": "..."'}, "confidence": 0.9 } },
     "properties": { "mangled": { "name": "clean"${skipRationale ? '' : ', "rationale": "..."'}, "confidence": 0.9 } }
+  },
+  "corrections": {
+    "mangled": { "name": "new_correct_name", "rationale": "Why the previous automated mapping was wrong (e.g. results in Date.filter which is not a function)" }
   },
   "suggestedFilename": "descriptive_name"
 }
@@ -564,10 +621,12 @@ RESPONSE FORMAT (JSON ONLY):
                                     if (target[key]) {
                                         const existing = target[key];
                                         if (newEntry.confidence > (existing.confidence || 0)) {
+                                            if (existing.name !== newEntry.name) newMappingsCount++;
                                             target[key] = newEntry;
                                         }
                                     } else {
                                         target[key] = newEntry;
+                                        newMappingsCount++;
                                     }
                                 }
                             };
@@ -579,6 +638,26 @@ RESPONSE FORMAT (JSON ONLY):
                             if (responseData.mappings?.properties) {
                                 const usedNamesInThisChunk = new Set();
                                 updateMapping(responseData.mappings.properties, globalMapping.properties, chunkMeta.name, usedNamesInThisChunk);
+                            }
+
+                            // HANDLE CORRECTIONS (Override even high-confidence errors)
+                            if (responseData.corrections) {
+                                for (const [mangled, correction] of Object.entries(responseData.corrections)) {
+                                    const newName = typeof correction === 'string' ? correction : correction.name;
+                                    const rationale = correction.rationale || "LLM semantic correction";
+                                    console.log(`    [*] Corrected mapping for ${mangled}: -> ${newName} (${rationale})`);
+
+                                    const targetColl = globalMapping.variables[mangled] ? globalMapping.variables : (globalMapping.properties[mangled] ? globalMapping.properties : null);
+                                    if (targetColl) {
+                                        targetColl[mangled] = {
+                                            name: newName,
+                                            confidence: 0.98, // High confidence for manual/LLM overrides
+                                            source: `${chunkMeta.name}_correction`,
+                                            rationale
+                                        };
+                                        correctionCount++;
+                                    }
+                                }
                             }
                             if (responseData.suggestedFilename) chunkMeta.suggestedFilename = responseData.suggestedFilename;
 
@@ -609,10 +688,13 @@ RESPONSE FORMAT (JSON ONLY):
             globalMapping.processed_chunks.push(chunkMeta.name);
             // Save progress frequently (every chunk)
             fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
-        }));
+        });
 
-        await Promise.all(tasks);
-        fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
+        console.log(`[*] Processing Core Batch (${coreChunks.length} chunks)...`);
+        await Promise.all(coreChunks.map(runChunk));
+
+        console.log(`[*] Processing Remaining Batch (${otherChunks.length} chunks)...`);
+        await Promise.all(otherChunks.map(runChunk));
 
         // Persist updated metadata back to graph_map.json
         console.log(`[*] Persisting updated metadata (suggested filenames) to graph_map.json...`);
@@ -624,7 +706,13 @@ RESPONSE FORMAT (JSON ONLY):
             fs.writeFileSync(graphMapPath, JSON.stringify(originalMetadata, null, 2));
         }
 
-        console.log(`[*] Stage 1 Complete. Mapping saved.`);
+        console.log(`\n[*] Stage 1 Complete.`);
+        console.log(`    - New Mappings: ${newMappingsCount}`);
+        console.log(`    - Corrections:  ${correctionCount}`);
+        console.log(`    - Skipped (Prev. Processed): ${skipProcessedCount}`);
+        console.log(`    - Skipped (No Unknown Idents): ${skipNoUnknownCount}`);
+        console.log(`    - Skipped (Vendor): ${skipVendorCount}`);
+        console.log(`    - Mapping file updated: ${path.basename(mappingPath)}`);
     }
 
     // Ensure metadata is synchronized if we're in a state where it might be stale
