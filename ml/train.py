@@ -14,6 +14,7 @@ from vectorize import CodeFingerprinter, flatten_ast, get_auto_max_nodes
 from constants import NODE_TYPES, MAX_NODES, MAX_LITERALS
 # removed get_auto_max_nodes definition (imported from vectorize)
 
+# Suppress transformer nested tensor prototype warnings for cleaner sweep logs.
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.modules.transformer")
 
 def generate_synthetic_obfuscation(ast_node):
@@ -126,12 +127,15 @@ class TripletDataset(Dataset):
         self.keys = list(patterns.keys())
         self.patterns = patterns
         self.max_nodes = max_nodes
+        self.lib_to_keys = {}
         
         # Pre-calculate structural hashes for isomorphism check
         self.structural_hashes = {}
         print(f"[*] Pre-calculating structural hashes for {len(self.keys)} chunks...")
         for i, k in enumerate(self.keys):
             if i % 100 == 0: print(f"    - {i}/{len(self.keys)} hashed...")
+            lib_key = k.split("_", 1)[0]
+            self.lib_to_keys.setdefault(lib_key, []).append(k)
             seq = []
             flatten_ast(self.patterns[k], seq, [], [], {"total_nodes": 0, "unknown_nodes": 0})
             self.structural_hashes[k] = hash(tuple(seq))
@@ -166,8 +170,18 @@ class TripletDataset(Dataset):
         if dropout_active:
             anchor_lit_t = torch.full((MAX_LITERALS,), -1.0)
 
-        # 2. Positive: Synthetically mangled + random junk nodes
-        pos_ast = generate_synthetic_obfuscation(anchor_ast)
+        # 2. Positive: usually a synthetic obfuscation of the anchor,
+        # but occasionally (10%) a different chunk from the same library
+        # to encourage clustering by vendor/library "family."
+        pos_ast = None
+        if random.random() < 0.10:
+            anchor_lib = anchor_key.split("_", 1)[0]
+            lib_keys = [k for k in self.lib_to_keys.get(anchor_lib, []) if k != anchor_key]
+            if lib_keys:
+                pos_key = random.choice(lib_keys)
+                pos_ast = self.patterns[pos_key]
+        if pos_ast is None:
+            pos_ast = generate_synthetic_obfuscation(anchor_ast)
         pos_seq = []
         pos_lits = []
         flatten_ast(pos_ast, pos_seq, [], pos_lits, {"total_nodes": 0, "unknown_nodes": 0})
@@ -215,6 +229,9 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
     total_pos_dist = 0
     total_neg_dist = 0
     count = 0
+    total_rr = 0.0
+    rr_count = 0
+    per_lib_stats = {}
 
     with torch.no_grad():
         for anchors, a_lits, positives, p_lits, anchor_keys in dataloader:
@@ -224,15 +241,17 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
             a_vec = model(anchors, a_lits)
             p_vec = model(positives, p_lits)
             
-            # Vectorized Hard Negative Mining for Evaluation
-            # Calculate similarity matrix (Cosine similarity since vectors are normalized)
+            # Vectorized hard-negative selection for evaluation.
+            # Similarity matrix uses cosine similarity because embeddings are L2-normalized.
             sims = torch.matmul(a_vec, a_vec.T)
             
             for i in range(len(anchors)):
                 anchor_hash = dataset.structural_hashes[anchor_keys[i]]
                 anchor_lib = anchor_keys[i].split("_", 1)[0] if mask_same_library else None
+                positive_lib = anchor_lib
                 
-                # Mask out self and isomorphs
+                # Mask out self and isomorphs; optionally mask same-library candidates
+                # when evaluating across multiple libraries.
                 batch_sims = sims[i].clone()
                 batch_sims[i] = -2 # Lower than any possible cosine sim
                 
@@ -260,11 +279,58 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
                 total_pos_dist += d_pos.item()
                 total_neg_dist += d_neg.item()
                 count += 1
+
+                # Mean Reciprocal Rank (MRR): how high the correct match ranks.
+                pos_dists = torch.norm(a_vec[i].unsqueeze(0) - p_vec, p=2, dim=1)
+                if mask_same_library:
+                    for j in range(len(anchor_keys)):
+                        if j == i:
+                            continue
+                        candidate_lib = anchor_keys[j].split("_", 1)[0]
+                        if candidate_lib == positive_lib:
+                            pos_dists[j] = float("inf")
+                rank = int(torch.argsort(pos_dists).tolist().index(i)) + 1
+                total_rr += 1.0 / rank
+                rr_count += 1
+
+                lib_key = anchor_keys[i].split("_", 1)[0]
+                lib_stats = per_lib_stats.setdefault(
+                    lib_key,
+                    {"pos_sum": 0.0, "neg_sum": 0.0, "count": 0, "rr_sum": 0.0, "rr_count": 0},
+                )
+                lib_stats["pos_sum"] += d_pos.item()
+                lib_stats["neg_sum"] += d_neg.item()
+                lib_stats["count"] += 1
+                lib_stats["rr_sum"] += 1.0 / rank
+                lib_stats["rr_count"] += 1
     
     avg_pos = total_pos_dist / count if count > 0 else 0
     avg_neg = total_neg_dist / count if count > 0 else 0
+    mrr = total_rr / rr_count if rr_count > 0 else 0
+    per_lib_margins = {}
+    per_lib_mrr = {}
+    for lib, stats in per_lib_stats.items():
+        if stats["count"] > 0:
+            avg_pos_lib = stats["pos_sum"] / stats["count"]
+            avg_neg_lib = stats["neg_sum"] / stats["count"]
+            per_lib_margins[lib] = avg_neg_lib - avg_pos_lib
+        if stats["rr_count"] > 0:
+            per_lib_mrr[lib] = stats["rr_sum"] / stats["rr_count"]
     
-    return (correct / total) * 100 if total > 0 else 0, avg_pos, avg_neg
+    # Worst-case (min) and average MRR across libraries to measure generalization.
+    min_lib_mrr = min(per_lib_mrr.values()) if per_lib_mrr else 0
+    avg_lib_mrr = sum(per_lib_mrr.values()) / len(per_lib_mrr) if per_lib_mrr else 0
+    
+    return (
+        (correct / total) * 100 if total > 0 else 0,
+        avg_pos,
+        avg_neg,
+        mrr,
+        per_lib_margins,
+        per_lib_mrr,
+        min_lib_mrr,
+        avg_lib_mrr,
+    )
 
 def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, margin=0.2, embed_dim=32, hidden_dim=64, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None):
     # Device discovery (CUDA -> MPS -> CPU)
@@ -289,7 +355,7 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
     node_type_count = len(NODE_TYPES)
     if node_type_count < 2:
         print("[!] Error: NODE_TYPES is unexpectedly small; run 'npm run sync-vocab' before training.")
-        return 0, None
+        return (0, 0, 0, 0), None
     current_vocab_size = node_type_count + 5
 
     if not is_sweep: print(f"[*] Starting 'Brain' Training on Bootstrap Data: {bootstrap_dir}")
@@ -297,7 +363,7 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
     ast_files = [f for f in os.listdir(bootstrap_dir) if f.endswith('_gold_asts.json')]
     if not ast_files:
         print("[!] Error: No gold ASTs found. Run 'npm run bootstrap' first.")
-        return 0, None
+        return (0, 0, 0, 0), None
 
     patterns = {}
     libraries = set()
@@ -309,7 +375,8 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
             for chunk_name, ast in data.items():
                 patterns[f"{lib_name}_{chunk_name}"] = ast
 
-    # 4. Leave-Library-Out Validation (single or multiple libraries)
+    # 4. Leave-Library-Out Validation (single or multiple libraries).
+    # Multiple validation libraries allow same-library masking during eval.
     if val_library:
         if isinstance(val_library, (list, tuple, set)):
             val_libraries = list(dict.fromkeys(val_library))
@@ -388,6 +455,10 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
     
     best_val_acc = 0
     best_val_margin = -1.0
+    best_val_mrr = 0.0
+    best_val_min_lib_margin = 0.0
+    best_val_min_lib_mrr = 0.0
+    best_val_avg_lib_mrr = 0.0
     best_state = None
     early_stop_patience = 3
     early_stop_min_delta = 0.01
@@ -471,18 +542,35 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
                 print(f"      Batch {batch_idx}/{len(train_loader)} - Loss: {loss.item():.4f}")
 
         mask_same_library = len(val_libraries) > 1
-        val_acc, avg_pos, avg_neg = evaluate_model(model, val_loader, device, val_dataset, mask_same_library=mask_same_library)
+        val_acc, avg_pos, avg_neg, val_mrr, per_lib_margins, per_lib_mrr, min_lib_mrr, avg_lib_mrr = evaluate_model(
+            model,
+            val_loader,
+            device,
+            val_dataset,
+            mask_same_library=mask_same_library,
+        )
         val_margin = avg_neg - avg_pos
+        min_lib_margin = min(per_lib_margins.values()) if per_lib_margins else 0.0
         
         if not is_sweep:
             print(f"    Epoch {epoch+1}/{epochs} - Loss: {total_loss/len(train_loader):.4f}")
             print(f"    Validation Match Accuracy: {val_acc:.2f}%")
             print(f"    Similarity Spread - Pos Dist: {avg_pos:.4f}, Neg Dist: {avg_neg:.4f} (Margin: {val_margin:.4f})")
+            print(f"    Validation MRR: {val_mrr:.4f}")
+            if mask_same_library and per_lib_margins:
+                print(f"    Validation Min-Library Margin: {min_lib_margin:.4f}")
+            if mask_same_library and per_lib_mrr:
+                print(f"    Validation Min-Library MRR: {min_lib_mrr:.4f}")
+                print(f"    Validation Avg-Library MRR: {avg_lib_mrr:.4f}")
         
-        # Optimize for Margin primarily, but keep Accuracy as well
+        # Optimize for margin during training; sweep scoring happens in run_sweep.
         if val_margin > best_val_margin:
             best_val_margin = val_margin
             best_val_acc = val_acc
+            best_val_mrr = val_mrr
+            best_val_min_lib_margin = min_lib_margin
+            best_val_min_lib_mrr = min_lib_mrr
+            best_val_avg_lib_mrr = avg_lib_mrr
             best_state = model.state_dict()
             if not is_sweep:
                 torch.save(best_state, os.path.join(os.path.dirname(__file__), "model.pth"))
@@ -495,13 +583,14 @@ def train_brain(bootstrap_dir, epochs=5, batch_size=16, force=False, lr=0.001, m
                 print(f"    Early stopping after {early_stop_bad_epochs} stagnant epochs.")
             break
 
-    return (best_val_margin, best_val_acc), best_state
+    return (best_val_margin, best_val_acc, best_val_mrr, best_val_min_lib_margin, best_val_min_lib_mrr, best_val_avg_lib_mrr), best_state
 
 def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=None):
     print("[*] Starting Hyperparameter Sweep (Targeting Maximal Margin)...")
     results = []
     
-    margins = [0.2, 0.5, 0.8] 
+    # Loss margins to explore; higher margins demand larger separations.
+    margins = [0.2, 0.5, 0.8, 1.0]
     lrs = [0.001, 0.0005, 0.0001]
     embed_dims = [32, 64, 128]
     hidden_dims = [64, 128]
@@ -512,6 +601,7 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
         print("[!] Error: No gold ASTs found. Run 'npm run bootstrap' first.")
         return
     libraries = [f.replace("_gold_asts.json", "") for f in ast_files]
+    # Use up to 3 validation libraries to stress generalization.
     val_lib_count = min(3, len(libraries))
     fixed_val_libs = random.sample(libraries, val_lib_count) if libraries else []
     if fixed_val_libs:
@@ -541,15 +631,35 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
                         max_nodes_override=max_nodes_override,
                         val_library=fixed_val_libs if fixed_val_libs else None,
                     )
-                    val_margin, val_acc = result
-                    print(f"      Result: Acc {val_acc:.2f}%, Margin {val_margin:.4f}")
-                    results.append({"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": val_acc, "val_margin": val_margin})
+                    val_margin, val_acc, val_mrr, min_lib_margin, min_lib_mrr, avg_lib_mrr = result
+                    if min_lib_mrr > 0:
+                        print(f"      Result: MinLib MRR {min_lib_mrr:.4f}, AvgLib MRR {avg_lib_mrr:.4f}, Margin {val_margin:.4f}")
+                    elif min_lib_margin > 0:
+                        print(f"      Result: Acc {val_acc:.2f}%, Margin {val_margin:.4f}, MRR {val_mrr:.4f}, MinLib {min_lib_margin:.4f}")
+                    else:
+                        print(f"      Result: Acc {val_acc:.2f}%, Margin {val_margin:.4f}, MRR {val_mrr:.4f}")
+                    results.append({
+                        "margin": m,
+                        "lr": lr,
+                        "embed": ed,
+                        "hidden": hd,
+                        "acc": val_acc,
+                        "val_margin": val_margin,
+                        "mrr": val_mrr,
+                        "min_lib_margin": min_lib_margin,
+                        "min_lib_mrr": min_lib_mrr,
+                        "avg_lib_mrr": avg_lib_mrr,
+                    })
                     
-                    score = (val_acc * 0.7) + (min(val_margin, 1.0) * 0.3)
+                    # Selection score favors worst-case (min) library MRR,
+                    # then average MRR, with margin as a mild confidence tie-breaker.
+                    score = (min_lib_mrr * 0.7) + (avg_lib_mrr * 0.2) + (min(val_margin, 1.0) * 0.1)
+                    if val_acc <= 0 or min_lib_mrr <= 0:
+                        continue
                     if score > best_overall_score:
                         best_overall_score = score
                         best_overall_margin = val_margin
-                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd, "acc": val_acc}
+                        best_params = {"margin": m, "lr": lr, "embed": ed, "hidden": hd, "mrr": min_lib_mrr}
                         best_state = state
 
     print(f"\n[+] Sweep Complete!")
