@@ -1,0 +1,761 @@
+[
+    {
+        "name": "zod",
+        "version": "4.3.5",
+        "fixed": true
+    },
+    {
+        "name": "zod",
+        "version": "4.2.1",
+        "fixed": true
+    },
+    {
+        "name": "zod",
+        "version": "3.23.8",
+        "fixed": true
+    },
+    {
+        "name": "zod",
+        "version": "latest"
+    },
+    {
+        "name": "react",
+        "version": "19.2.3",
+        "fixed": true
+    },
+    {
+        "name": "react",
+        "version": "18.3.1",
+        "fixed": true
+    },
+    {
+        "name": "react",
+        "version": "latest"
+    },
+    {
+        "name": "ink",
+        "version": "6.6.0",
+        "peerDeps": [
+            "react@18.3.1"
+        ],
+        "fixed": true
+    },
+    {
+        "name": "ink",
+        "version": "latest"
+    },
+    {
+        "name": "@inkjs/ui",
+        "version": "2.0.0",
+        "peerDeps": [
+            "react@18.3.1",
+            "ink@6.6.0"
+        ],
+        "fixed": true
+    },
+    {
+        "name": "@inkjs/ui",
+        "version": "latest"
+    },
+    {
+        "name": "ink-text-input",
+        "version": "6.0.0",
+        "peerDeps": [
+            "react@18.3.1",
+            "ink@6.6.0"
+        ],
+        "fixed": true
+    },
+    {
+        "name": "ink-text-input",
+        "version": "latest"
+    },
+    {
+        "name": "ink-select-input",
+        "version": "6.2.0",
+        "peerDeps": [
+            "react@18.3.1",
+            "ink@6.6.0"
+        ],
+        "fixed": true
+    },
+    {
+        "name": "ink-select-input",
+        "version": "latest"
+    },
+    {
+        "name": "ink-link",
+        "version": "5.0.0",
+        "peerDeps": [
+            "react@18.3.1",
+            "ink@6.6.0"
+        ],
+        "fixed": true
+    },
+    {
+        "name": "ink-link",
+        "version": "latest"
+    },
+    {
+        "name": "ink-spinner",
+        "version": "5.0.0",
+        "peerDeps": [
+            "react@18.3.1",
+            "ink@6.6.0"
+        ],
+        "fixed": true
+    },
+    {
+        "name": "ink-spinner",
+        "version": "latest"
+    },
+    {
+        "name": "@anthropic-ai/sdk",
+        "version": "0.71.2",
+        "fixed": true
+    },
+    {
+        "name": "@anthropic-ai/sdk",
+        "version": "0.40.0",
+        "fixed": true
+    },
+    {
+        "name": "@anthropic-ai/sdk",
+        "version": "latest"
+    },
+    {
+        "name": "@anthropic-ai/bedrock-sdk",
+        "version": "0.26.0",
+        "fixed": true
+    },
+    {
+        "name": "@anthropic-ai/bedrock-sdk",
+        "version": "latest"
+    },
+    {
+        "name": "@anthropic-ai/vertex-sdk",
+        "version": "0.14.0",
+        "fixed": true
+    },
+    {
+        "name": "@anthropic-ai/vertex-sdk",
+        "version": "latest"
+    },
+    {
+        "name": "@aws-sdk/client-bedrock",
+        "version": "3.962.0",
+        "fixed": true
+    },
+    {
+        "name": "@aws-sdk/client-bedrock",
+        "version": "latest"
+    },
+    {
+        "name": "@aws-sdk/client-bedrock-runtime",
+        "version": "3.962.0",
+        "fixed": true
+    },
+    {
+        "name": "@aws-sdk/client-bedrock-runtime",
+        "version": "latest"
+    },
+    {
+        "name": "@aws-sdk/client-s3",
+        "version": "3.958.0",
+        "fixed": true
+    },
+    {
+        "name": "@aws-sdk/client-s3",
+        "version": "latest"
+    },
+    {
+        "name": "@aws-sdk/client-sts",
+        "version": "3.958.0",
+        "fixed": true
+    },
+    {
+        "name": "@aws-sdk/client-sts",
+        "version": "latest"
+    },
+    {
+        "name": "@aws-sdk/credential-providers",
+        "version": "3.958.0",
+        "fixed": true
+    },
+    {
+        "name": "@aws-sdk/credential-providers",
+        "version": "latest"
+    },
+    {
+        "name": "@modelcontextprotocol/sdk",
+        "version": "1.25.1",
+        "peerDeps": [
+            "zod@3.23.8"
+        ],
+        "imports": [
+            "@modelcontextprotocol/sdk/client",
+            "@modelcontextprotocol/sdk/server",
+            "@modelcontextprotocol/sdk/validation"
+        ],
+        "fixed": true
+    },
+    {
+        "name": "@modelcontextprotocol/sdk",
+        "version": "latest"
+    },
+    {
+        "name": "axios",
+        "version": "1.13.2",
+        "fixed": true
+    },
+    {
+        "name": "axios",
+        "version": "1.7.9",
+        "fixed": true
+    },
+    {
+        "name": "axios",
+        "version": "0.27.2",
+        "fixed": true
+    },
+    {
+        "name": "axios",
+        "version": "latest"
+    },
+    {
+        "name": "lodash-es",
+        "version": "4.17.22",
+        "fixed": true
+    },
+    {
+        "name": "lodash-es",
+        "version": "4.17.21",
+        "fixed": true
+    },
+    {
+        "name": "lodash-es",
+        "version": "latest"
+    },
+    {
+        "name": "ajv",
+        "version": "8.17.1",
+        "fixed": true
+    },
+    {
+        "name": "ajv",
+        "version": "latest"
+    },
+    {
+        "name": "date-fns",
+        "version": "3.6.0",
+        "fixed": true
+    },
+    {
+        "name": "date-fns",
+        "version": "latest"
+    },
+    {
+        "name": "js-yaml",
+        "version": "4.1.1",
+        "fixed": true
+    },
+    {
+        "name": "js-yaml",
+        "version": "latest"
+    },
+    {
+        "name": "dotenv",
+        "version": "17.2.3",
+        "fixed": true
+    },
+    {
+        "name": "dotenv",
+        "version": "latest"
+    },
+    {
+        "name": "uuid",
+        "version": "9.0.0",
+        "fixed": true
+    },
+    {
+        "name": "uuid",
+        "version": "latest"
+    },
+    {
+        "name": "semver",
+        "version": "7.7.3",
+        "fixed": true
+    },
+    {
+        "name": "semver",
+        "version": "latest"
+    },
+    {
+        "name": "lru-cache",
+        "version": "11.2.4",
+        "fixed": true
+    },
+    {
+        "name": "lru-cache",
+        "version": "latest"
+    },
+    {
+        "name": "memoize",
+        "version": "10.2.0",
+        "fixed": true
+    },
+    {
+        "name": "memoize",
+        "version": "latest"
+    },
+    {
+        "name": "micromatch",
+        "version": "4.0.8",
+        "fixed": true
+    },
+    {
+        "name": "micromatch",
+        "version": "latest"
+    },
+    {
+        "name": "mime-types",
+        "version": "3.0.2",
+        "fixed": true
+    },
+    {
+        "name": "mime-types",
+        "version": "latest"
+    },
+    {
+        "name": "execa",
+        "version": "9.6.1",
+        "fixed": true
+    },
+    {
+        "name": "execa",
+        "version": "latest"
+    },
+    {
+        "name": "chalk",
+        "version": "5.6.2",
+        "fixed": true
+    },
+    {
+        "name": "chalk",
+        "version": "latest"
+    },
+    {
+        "name": "commander",
+        "version": "14.0.2",
+        "fixed": true
+    },
+    {
+        "name": "commander",
+        "version": "latest"
+    },
+    {
+        "name": "ansi-escapes",
+        "version": "7.2.0",
+        "fixed": true
+    },
+    {
+        "name": "ansi-escapes",
+        "version": "latest"
+    },
+    {
+        "name": "ansi-styles",
+        "version": "6.2.3",
+        "fixed": true
+    },
+    {
+        "name": "ansi-styles",
+        "version": "latest"
+    },
+    {
+        "name": "cli-highlight",
+        "version": "2.1.11",
+        "fixed": true
+    },
+    {
+        "name": "cli-highlight",
+        "version": "latest"
+    },
+    {
+        "name": "cli-table3",
+        "version": "0.6.5",
+        "fixed": true
+    },
+    {
+        "name": "cli-table3",
+        "version": "latest"
+    },
+    {
+        "name": "figures",
+        "version": "6.1.0",
+        "fixed": true
+    },
+    {
+        "name": "figures",
+        "version": "latest"
+    },
+    {
+        "name": "is-unicode-supported",
+        "version": "2.1.0",
+        "fixed": true
+    },
+    {
+        "name": "is-unicode-supported",
+        "version": "latest"
+    },
+    {
+        "name": "string-width",
+        "version": "8.1.0",
+        "fixed": true
+    },
+    {
+        "name": "string-width",
+        "version": "latest"
+    },
+    {
+        "name": "wrap-ansi",
+        "version": "9.0.2",
+        "fixed": true
+    },
+    {
+        "name": "wrap-ansi",
+        "version": "latest"
+    },
+    {
+        "name": "supports-hyperlinks",
+        "version": "4.4.0",
+        "fixed": true
+    },
+    {
+        "name": "supports-hyperlinks",
+        "version": "latest"
+    },
+    {
+        "name": "wcwidth",
+        "version": "1.0.1",
+        "fixed": true
+    },
+    {
+        "name": "wcwidth",
+        "version": "latest"
+    },
+    {
+        "name": "@opentelemetry/api",
+        "version": "1.9.0",
+        "fixed": true
+    },
+    {
+        "name": "@opentelemetry/api",
+        "version": "latest"
+    },
+    {
+        "name": "@opentelemetry/core",
+        "version": "2.2.0",
+        "fixed": true
+    },
+    {
+        "name": "@opentelemetry/core",
+        "version": "latest"
+    },
+    {
+        "name": "@opentelemetry/sdk-trace-node",
+        "version": "2.2.0",
+        "fixed": true
+    },
+    {
+        "name": "@opentelemetry/sdk-trace-node",
+        "version": "latest"
+    },
+    {
+        "name": "@segment/analytics-node",
+        "version": "latest"
+    },
+    {
+        "name": "@sentry/node",
+        "version": "10.32.1",
+        "fixed": true
+    },
+    {
+        "name": "@sentry/node",
+        "version": "latest"
+    },
+    {
+        "name": "statsig-js",
+        "version": "5.1.0",
+        "fixed": true
+    },
+    {
+        "name": "statsig-js",
+        "version": "latest"
+    },
+    {
+        "name": "tree-sitter",
+        "version": "0.21.0",
+        "fixed": true
+    },
+    {
+        "name": "tree-sitter",
+        "version": "latest"
+    },
+    {
+        "name": "tree-sitter-typescript",
+        "version": "0.23.2",
+        "fixed": true
+    },
+    {
+        "name": "tree-sitter-typescript",
+        "version": "latest"
+    },
+    {
+        "name": "web-tree-sitter",
+        "version": "0.26.3",
+        "fixed": true
+    },
+    {
+        "name": "web-tree-sitter",
+        "version": "latest"
+    },
+    {
+        "name": "jsdom",
+        "version": "27.4.0",
+        "fixed": true
+    },
+    {
+        "name": "jsdom",
+        "version": "latest"
+    },
+    {
+        "name": "parse5",
+        "version": "latest"
+    },
+    {
+        "name": "domino",
+        "version": "latest"
+    },
+    {
+        "name": "turndown",
+        "version": "7.2.2",
+        "fixed": true
+    },
+    {
+        "name": "turndown",
+        "version": "latest"
+    },
+    {
+        "name": "marked",
+        "version": "17.0.1",
+        "fixed": true
+    },
+    {
+        "name": "marked",
+        "version": "latest"
+    },
+    {
+        "name": "gray-matter",
+        "version": "4.0.3",
+        "fixed": true
+    },
+    {
+        "name": "gray-matter",
+        "version": "latest"
+    },
+    {
+        "name": "sharp",
+        "version": "0.34.5",
+        "fixed": true
+    },
+    {
+        "name": "sharp",
+        "version": "latest"
+    },
+    {
+        "name": "@resvg/resvg-js",
+        "version": "2.6.2",
+        "fixed": true
+    },
+    {
+        "name": "@resvg/resvg-js",
+        "version": "latest"
+    },
+    {
+        "name": "pdf-parse",
+        "version": "2.4.5",
+        "fixed": true
+    },
+    {
+        "name": "pdf-parse",
+        "version": "latest"
+    },
+    {
+        "name": "chokidar",
+        "version": "5.0.0",
+        "fixed": true
+    },
+    {
+        "name": "chokidar",
+        "version": "latest"
+    },
+    {
+        "name": "proper-lockfile",
+        "version": "4.1.2",
+        "fixed": true
+    },
+    {
+        "name": "proper-lockfile",
+        "version": "latest"
+    },
+    {
+        "name": "open",
+        "version": "11.0.0",
+        "fixed": true
+    },
+    {
+        "name": "open",
+        "version": "latest"
+    },
+    {
+        "name": "ws",
+        "version": "8.18.3",
+        "fixed": true
+    },
+    {
+        "name": "ws",
+        "version": "latest"
+    },
+    {
+        "name": "https-proxy-agent",
+        "version": "7.0.6",
+        "fixed": true
+    },
+    {
+        "name": "https-proxy-agent",
+        "version": "latest"
+    },
+    {
+        "name": "abort-controller",
+        "version": "3.0.0",
+        "fixed": true
+    },
+    {
+        "name": "abort-controller",
+        "version": "latest"
+    },
+    {
+        "name": "diff",
+        "version": "8.0.2",
+        "fixed": true
+    },
+    {
+        "name": "diff",
+        "version": "latest"
+    },
+    {
+        "name": "fflate",
+        "version": "latest"
+    },
+    {
+        "name": "fuse.js",
+        "version": "7.1.0",
+        "fixed": true
+    },
+    {
+        "name": "fuse.js",
+        "version": "latest"
+    },
+    {
+        "name": "grapheme-splitter",
+        "version": "1.0.4",
+        "fixed": true
+    },
+    {
+        "name": "grapheme-splitter",
+        "version": "latest"
+    },
+    {
+        "name": "highlight.js",
+        "version": "11.11.1",
+        "fixed": true
+    },
+    {
+        "name": "highlight.js",
+        "version": "latest"
+    },
+    {
+        "name": "html-entities",
+        "version": "latest"
+    },
+    {
+        "name": "localforage",
+        "version": "latest"
+    },
+    {
+        "name": "ordered-map",
+        "version": "0.1.0",
+        "fixed": true
+    },
+    {
+        "name": "ordered-map",
+        "version": "latest"
+    },
+    {
+        "name": "plist",
+        "version": "3.1.0",
+        "fixed": true
+    },
+    {
+        "name": "plist",
+        "version": "latest"
+    },
+    {
+        "name": "shell-quote",
+        "version": "1.8.3",
+        "fixed": true
+    },
+    {
+        "name": "shell-quote",
+        "version": "latest"
+    },
+    {
+        "name": "tslib",
+        "version": "latest"
+    },
+    {
+        "name": "uri-js",
+        "version": "latest"
+    },
+    {
+        "name": "word-wrap",
+        "version": "1.2.5",
+        "fixed": true
+    },
+    {
+        "name": "word-wrap",
+        "version": "latest"
+    },
+    {
+        "name": "xmlbuilder2",
+        "version": "3.1.1",
+        "fixed": true
+    },
+    {
+        "name": "xmlbuilder2",
+        "version": "latest"
+    },
+    {
+        "name": "xss",
+        "version": "latest"
+    },
+    {
+        "name": "yoga-layout-prebuilt",
+        "version": "1.10.0",
+        "fixed": true
+    },
+    {
+        "name": "yoga-layout-prebuilt",
+        "version": "latest"
+    }
+]
