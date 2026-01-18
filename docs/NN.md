@@ -41,19 +41,19 @@ Training uses a Transformer Encoder architecture to learn an embedding space whe
     - **Triplet Loss**: Optimizes the model using (Anchor, Positive, Negative) triplets with Hard Negative Mining.
 
 ### Hyperparameter Sweep Analysis
-Based on extensive sweeps, the model has been tuned for the following "Brain" configuration:
+Recent sweeps prioritize cross-library generalization and robust ranking metrics:
 
-*   **Efficiency > Complexity**: The smallest architecture (`Embed: 32`, `Hidden: 64`) achieves **100% accuracy** on synthetic structural DNA.
-*   **Robustness**: The Transformer architecture effectively ignores "noise" (mangled names, dead code) and focuses on AST topology.
-*   **Convergence**: A learning rate of **0.001** provides the fastest stable convergence.
+*   **Multi-library validation**: Validation splits can include multiple libraries to stress generalization.
+*   **Same-library masking during eval**: When validating across multiple libraries, same-library negatives are masked to simulate real-world anchoring.
+*   **MRR-first selection**: The sweep scores candidates by worst-case (min-library) MRR, with average MRR and margin as tie-breakers.
 
 ### Arguments
 
 | Argument | Default | Description |
 | :--- | :--- | :--- |
 | `bootstrap_dir` | `./ml/bootstrap_data` | Directory containing the gold ASTs. |
-| `--epochs` | `10` | Number of training iterations. |
-| `--batch_size` | `32` | Number of triplets per optimization step. |
+| `--epochs` | `5` | Number of training iterations. |
+| `--batch_size` | `16` | Number of triplets per optimization step. |
 | `--force` | `False` | Force loading a model even if the vocabulary size mismatches. |
 
 ---
@@ -68,11 +68,11 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
 | :--- | :--- | :--- |
 | `MAX_NODES` | `512` | Maximum length of the AST sequence. Optimized for Transformers. |
 | `MAX_LITERALS` | `32` | Maximum number of hashed literals captured per chunk. |
-| `Embedding Dim` | `32` | Dimension of the AST Node Type embeddings (Optimized). |
-| `Hidden Dim` | `64` | Dimension of the Transformer hidden state. |
+| `Embedding Dim` | `32` | Dimension of the AST Node Type embeddings (default). |
+| `Hidden Dim` | `64` | Dimension of the Transformer hidden state (default). |
 | `Fingerprint Dim`| `128` | Final L2-normalized output vector size. |
-| `Learning Rate` | `0.001` | Optimal learning rate for fast convergence. |
-| `Margin` | `0.2` | Optimal triplet loss margin. |
+| `Learning Rate` | `0.001` | Default learning rate. |
+| `Margin` | `0.2` | Default triplet loss margin. |
 
 ### Architecture Detail
 
@@ -80,6 +80,14 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
     - Inputs: `(Batch, 512)` token IDs.
     - Logic: Uses Multi-Head Attention to capture global structural dependencies.
     - Normalization: Applies **L2 Normalization** to the final embedding.
+    - Padding: PAD tokens are masked during attention and pooling.
+
+### Training Notes
+
+*   **Hard negatives**: Training masks isomorphic and same-library candidates, forcing cross-library discrimination.
+*   **Positive mixing**: A small percentage of positives are pulled from the same library to encourage library-family clustering.
+*   **Early stopping**: Training stops after several stagnant epochs on margin improvement.
+*   **Evaluation metrics**: Margin and MRR are tracked; sweeps select on minimum library MRR.
 
 ---
 
@@ -132,7 +140,7 @@ During the analysis phase, the model is used to generate 64-dimensional vectors 
 | Path | Description |
 | :--- | :--- |
 | `ml/constants.py` | Central registry of AST Node Types and model hyperparameters. |
-| `ml/encoder.py` | PyTorch model definition (LSTM + Linear layers). |
+| `ml/encoder.py` | PyTorch model definition (Transformer encoder + projection). |
 | `ml/model.pth` | The trained weights. This is the "Brain" of the deobfuscator. |
 | `ml/bootstrap_data/` | Ground truth data extracted from NPM libraries. |
 | `src/sync_vocab.js` | Script to sync Babel types with `ml/constants.py`. |
