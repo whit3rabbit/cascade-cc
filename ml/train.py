@@ -331,7 +331,7 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
         avg_lib_mrr,
     )
 
-def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_max_chunks=None):
+def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_max_chunks=None, load_checkpoint=False):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -419,44 +419,49 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
 
     model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, max_nodes=effective_max_nodes).to(device)
     
-    # Robust Checkpoint Loading (Skip if sweep unless specified)
-    if not is_sweep:
+    # Robust Checkpoint Loading (opt-in, skip during sweeps)
+    if not is_sweep and load_checkpoint:
         model_path = os.path.join(os.path.dirname(__file__), "model.pth")
-        if os.path.exists(model_path):
-            print(f"[*] Found existing model at {model_path}. Attempting to load...")
-            try:
-                checkpoint = torch.load(model_path, map_location=device)
-                if 'transformer_encoder.embedding.weight' in checkpoint:
-                    embedding_key = 'transformer_encoder.embedding.weight'
-                elif 'embedding.weight' in checkpoint:
-                    embedding_key = 'embedding.weight'
-                else:
-                    print("[!] Error: Checkpoint missing embedding weights; skipping load.")
-                    embedding_key = None
+        if not os.path.exists(model_path):
+            print(
+                "[!] Error: --finetune was set but no checkpoint exists at "
+                f"{model_path}. Train from scratch or place a model.pth there."
+            )
+            sys.exit(1)
+        print(f"[*] Found existing model at {model_path}. Attempting to load...")
+        try:
+            checkpoint = torch.load(model_path, map_location=device)
+            if 'transformer_encoder.embedding.weight' in checkpoint:
+                embedding_key = 'transformer_encoder.embedding.weight'
+            elif 'embedding.weight' in checkpoint:
+                embedding_key = 'embedding.weight'
+            else:
+                print("[!] Error: Checkpoint missing embedding weights; skipping load.")
+                embedding_key = None
 
-                # Robust loading: Check shapes for all parameters (Vocab and Max Nodes)
-                state_dict = model.state_dict()
-                loaded_count = 0
-                resized_count = 0
-                
-                for name, param in checkpoint.items():
-                    if name in state_dict:
-                        if param.shape == state_dict[name].shape:
-                            state_dict[name].copy_(param)
-                            loaded_count += 1
-                        elif 'embedding.weight' in name:
-                            min_size = min(param.shape[0], state_dict[name].shape[0])
-                            state_dict[name][:min_size].copy_(param[:min_size])
-                            resized_count += 1
-                        elif 'pos_encoder' in name:
-                            min_seq = min(param.shape[1], state_dict[name].shape[1])
-                            state_dict[name][:, :min_seq, :].copy_(param[:, :min_seq, :])
-                            resized_count += 1
-                
-                model.load_state_dict(state_dict)
-                print(f"[+] Loaded weights: {loaded_count} exact, {resized_count} resized.")
-            except Exception as e:
-                print(f"[!] Error loading checkpoint: {e}")
+            # Robust loading: Check shapes for all parameters (Vocab and Max Nodes)
+            state_dict = model.state_dict()
+            loaded_count = 0
+            resized_count = 0
+            
+            for name, param in checkpoint.items():
+                if name in state_dict:
+                    if param.shape == state_dict[name].shape:
+                        state_dict[name].copy_(param)
+                        loaded_count += 1
+                    elif 'embedding.weight' in name:
+                        min_size = min(param.shape[0], state_dict[name].shape[0])
+                        state_dict[name][:min_size].copy_(param[:min_size])
+                        resized_count += 1
+                    elif 'pos_encoder' in name:
+                        min_seq = min(param.shape[1], state_dict[name].shape[1])
+                        state_dict[name][:, :min_seq, :].copy_(param[:, :min_seq, :])
+                        resized_count += 1
+            
+            model.load_state_dict(state_dict)
+            print(f"[+] Loaded weights: {loaded_count} exact, {resized_count} resized.")
+        except Exception as e:
+            print(f"[!] Error loading checkpoint: {e}")
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.TripletMarginLoss(margin=margin, p=2)
@@ -697,6 +702,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for training")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
+    parser.add_argument("--finetune", action="store_true", help="Load existing model.pth to continue training")
     parser.add_argument("--max_nodes", type=int, default=0, help="Override context window size (0 for auto)")
     parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, mps, cpu, or auto")
     
@@ -708,4 +714,12 @@ if __name__ == "__main__":
     if args.sweep:
         run_sweep(args.bootstrap_dir, epochs=args.epochs, device_name=args.device, max_nodes_override=m_nodes)
     else:
-        train_brain(args.bootstrap_dir, epochs=args.epochs, batch_size=args.batch_size, force=args.force, device_name=args.device, max_nodes_override=m_nodes)
+        train_brain(
+            args.bootstrap_dir,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            force=args.force,
+            device_name=args.device,
+            max_nodes_override=m_nodes,
+            load_checkpoint=args.finetune,
+        )

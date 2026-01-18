@@ -5,9 +5,11 @@ BOOTSTRAP_DIR="./cascade_graph_analysis/bootstrap"
 PYTHON_BIN="./ml/venv/bin/python3"
 
 # Check if venv exists, fallback to system python or auto-discovery
-if [ ! -f "$PYTHON_BIN" ]; then
-    PYTHON_BIN=$(fs.existsSync(path.join(__dirname, '../ml/venv/bin/python3')) ? path.join(__dirname, '../ml/venv/bin/python3') : 'python3')
-    # Actually, let's just use what vectorize.py uses or simple python3
+if [ -f "./ml/venv/bin/python3" ]; then
+    PYTHON_BIN="./ml/venv/bin/python3"
+elif [ -f "../ml/venv/bin/python3" ]; then
+    PYTHON_BIN="../ml/venv/bin/python3"
+else
     PYTHON_BIN="python3"
 fi
 

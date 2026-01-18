@@ -54,6 +54,7 @@ Recent sweeps prioritize cross-library generalization and robust ranking metrics
 | `bootstrap_dir` | `./ml/bootstrap_data` | Directory containing the gold ASTs. |
 | `--epochs` | `50` | Number of training iterations. |
 | `--batch_size` | `64` | Number of triplets per optimization step. |
+| `--finetune` | `false` | Load `ml/model.pth` to continue training. |
 | `--force` | `False` | Force loading a model even if the vocabulary size mismatches. |
 
 ---
@@ -113,10 +114,11 @@ The default total vocabulary size is **319**. However, the model is initialized 
 
 ### Robust Model Loading
 
-The training script includes a robust loading mechanism that:
+The training script only loads a checkpoint when `--finetune` is passed. When enabled, it:
 - Automatically detects the vocabulary size of an existing `model.pth`.
 - Warns if the current vocabulary (defined in `ml/constants.py`) differs.
-- If `--force` is used, it partially loads weights and resizes the embedding layer to allow resuming training despite vocabulary changes.
+- Partially loads weights and resizes the embedding layer to allow resuming training despite vocabulary changes.
+- Exits with an error if `--finetune` is set but `ml/model.pth` is missing.
 
 ---
 
@@ -132,7 +134,7 @@ During the analysis phase, the model is used to generate 64-dimensional vectors 
 | Argument | Description |
 | :--- | :--- |
 | `version_path` | Path to the version directory (e.g., `claude-analysis/v3.5`). |
-| `--force` | Force loading the model despite vocabulary mismatches. |
+| `--force` | Proceed without `ml/model.pth` (or despite vocab mismatch). Without it, vectorization fails if the model is missing. |
 
 ---
 

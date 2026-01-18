@@ -180,8 +180,15 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
             print(f"[+] Loaded weights: {loaded_count} exact, {resized_count} resized.")
         except Exception as e:
             print(f"[!] Error loading weights: {e}")
-            if not force: sys.exit(1)
+            if not force:
+                sys.exit(1)
     else:
+        if not force:
+            print(
+                "[!] Error: No pre-trained weights found at "
+                f"{model_path}. Train the brain first or pass --force to proceed."
+            )
+            sys.exit(1)
         print("[!] Warning: No pre-trained weights found. Using seeded random weights.")
     
     model.eval()
@@ -206,10 +213,10 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
             
             if not sequence: continue
             
-            # Truncate or pad to fixed length
-            seq_tensor = torch.tensor(sequence[:MAX_NODES]).unsqueeze(0)
-            if seq_tensor.size(1) < MAX_NODES:
-                seq_tensor = torch.nn.functional.pad(seq_tensor, (0, MAX_NODES - seq_tensor.size(1)))
+            # Truncate or pad to fixed length (matching model capacity)
+            seq_tensor = torch.tensor(sequence[:effective_max_nodes]).unsqueeze(0)
+            if seq_tensor.size(1) < effective_max_nodes:
+                seq_tensor = torch.nn.functional.pad(seq_tensor, (0, effective_max_nodes - seq_tensor.size(1)))
             
             # Literal Hashing Channel (Pad with -1.0)
             lit_tensor = torch.tensor(literals[:MAX_LITERALS]).unsqueeze(0)

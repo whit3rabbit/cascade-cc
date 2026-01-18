@@ -48,6 +48,8 @@ node src/update_registry_from_bootstrap.js
 npm run analyze 
 
 # 2. Identify libraries using the pre-trained Brain (Replace <version> with output from step 1)
+# Requires ml/model.pth; run training if it's missing.
+# npm run resync-registry # Troubleshooting if anchor fails with zero matches
 npm run anchor -- <version> 
 
 # 6. Use LLM to name proprietary logic (Requires API Key in .env)
@@ -62,7 +64,8 @@ npm run refine -- <version>
 
 ## Training the "Brain" (Transformer Encoder)
 
-If you have just cloned this repo, you can skip and use the pre-trained model in `ml/model.pth`. 
+If you have just cloned this repo, you can skip and use the pre-trained model in `ml/model.pth`.
+Vectorization requires `ml/model.pth` to exist; training does not load it unless you pass `--finetune`.
 
 Here are instructions for building your own model if you don't want to use the pre-trained model.
 
@@ -107,8 +110,9 @@ This teaches the model to recognize the DNA of those libraries even when they ar
 
 #### Basic Training
 ```bash
-npm run train -- --epochs 5 --device auto
+npm run train -- --epochs 50 --batch_size 64 --device auto
 ```
+Add `--finetune` if you want to resume from an existing `ml/model.pth`.
 
 #### Hyperparameter Sweeps
 If you want to find the absolute best settings for your hardware:

@@ -22,11 +22,11 @@ Pre-processor for CASCADE-style analysis and deobfuscation of Claude Code bundle
 
 ## Build, Training, and Development Commands
 - `npm run analyze`: Fetch and chunk the latest Claude bundle.
-- `npm run anchor -- <version>`: Structural similarity matching using the trained "Brain".
+- `npm run anchor -- <version>`: Structural similarity matching using the trained "Brain" (requires `ml/model.pth`).
 - `npm run deobfuscate -- <version> [--skip-vendor]`: LLM-based renaming of proprietary logic.
 - `npm run assemble -- <version>`: Reconstruct the deobfuscated file structure.
 - `npm run refine -- <version>`: Final LLM pass to restore original control flow and readability.
-- `npm run train [--sweep] [--device auto]`: Train or sweep hyperparameters for the Transformer Encoder.
+- `npm run train [--sweep] [--device auto] [--finetune]`: Train or sweep hyperparameters for the Transformer Encoder (`--finetune` loads `ml/model.pth`).
 - `npm run bootstrap`: Download and extract DNA from standard libraries (React, Zod, etc.).
 - `npm run visualize`: Start the local graph visualizer.
 - `npm run sync-vocab`: Sync Babel node types with ML constants.
@@ -36,7 +36,7 @@ Pre-processor for CASCADE-style analysis and deobfuscation of Claude Code bundle
 ## Neural Network (The Brain)
 The system uses a **Transformer Encoder** architecture for structural fingerprinting:
 - **Architecture**: Multi-Channel Siamese Network (Triplet Loss).
-- **Optimal Config**: Embedding Dim: 32, Hidden Dim: 64, Learning Rate: 0.001, Margin: 0.2.
+- **Optimal Config**: Embedding Dim: 32, Hidden Dim: 128, Learning Rate: 0.001, Margin: 0.5.
 - **Context Window**: Hardware-aware scaling (e.g., 256 nodes for Mac MPS, 2048 for A100).
 - **Goal**: Learning **Logic Topology** (Structural DNA) while ignoring "Surface Noise" (mangled names).
 
