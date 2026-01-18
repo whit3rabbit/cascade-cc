@@ -91,17 +91,19 @@ async function assemble(version) {
     for (const chunk of coreChunks) {
         let finalPath = '';
 
-        if (chunk.kb_info && chunk.kb_info.suggested_path) {
-            // Priority 1: Knowledge Base Path
+        // 1. Check for Neural/Golden suggested path
+        if (chunk.suggestedPath) {
+            finalPath = chunk.suggestedPath.replace('.ts', '.js');
+        }
+        // 2. Check for Knowledge Base path
+        else if (chunk.kb_info && chunk.kb_info.suggested_path) {
             finalPath = chunk.kb_info.suggested_path.replace(/`/g, '').replace('.ts', '.js');
-        } else if (chunk.suggestedFilename) {
-            // Priority 2: LLM Suggested Name
-            const folder = chunk.role.toLowerCase().replace('_', '-');
-            finalPath = `src/services/${folder}/${chunk.suggestedFilename}.js`;
-        } else {
-            // Priority 3: Fallback based on role
-            const folder = chunk.role.toLowerCase().replace('_', '-');
-            finalPath = `src/undetermined/${folder}/${chunk.name}.js`;
+        }
+        // 3. Fallback to Role-based grouping
+        else {
+            const folder = chunk.role.toLowerCase().replace(/_/g, '-');
+            const fileName = chunk.suggestedFilename || chunk.name;
+            finalPath = `src/services/${folder}/${fileName}.js`;
         }
 
         if (!fileMap.has(finalPath)) fileMap.set(finalPath, []);

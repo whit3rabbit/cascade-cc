@@ -328,43 +328,44 @@ class CascadeGraph {
         let stateVarName = null;
         const statements = ast.program.body;
 
-        console.log(`[*] Phase 0.6: Detecting internal state object via mutation patterns...`);
+        console.log(`[*] Phase 0.6: Detecting internal state object via mutation patterns (Shallow Scan)...`);
 
-        // Heuristic: Count mutations and cross-chunk usage for objects
-        const mutationCounts = new Map(); // name -> count
+        const mutationCounts = new Map();
 
-        traverse(ast, {
-            AssignmentExpression(path) {
-                if (path.node.left.type === 'MemberExpression' && path.node.left.object.type === 'Identifier') {
-                    const objName = path.node.left.object.name;
+        // Shallow scan only for performance and to avoid deep recursion crashes
+        for (const node of statements) {
+            if (node.type === 'ExpressionStatement' && node.expression.type === 'AssignmentExpression') {
+                const expr = node.expression;
+                if (expr.left.type === 'MemberExpression' && expr.left.object.type === 'Identifier') {
+                    const objName = expr.left.object.name;
                     mutationCounts.set(objName, (mutationCounts.get(objName) || 0) + 1);
                 }
-            },
-            CallExpression(path) {
-                // Heuristic: Objects passed into many functions are likely state/context
-                path.node.arguments.forEach(arg => {
-                    if (arg.type === 'Identifier') {
-                        mutationCounts.set(arg.name, (mutationCounts.get(arg.name) || 0) + 0.5);
+            } else if (node.type === 'VariableDeclaration') {
+                node.declarations.forEach(decl => {
+                    if (decl.init && decl.init.type === 'CallExpression') {
+                        decl.init.arguments.forEach(arg => {
+                            if (arg.type === 'Identifier') {
+                                mutationCounts.set(arg.name, (mutationCounts.get(arg.name) || 0) + 0.5);
+                            }
+                        });
                     }
                 });
             }
-        });
+        }
 
-        // Filter for variables that look like state (many mutations/accesses)
-        // We also check if it contains "sessionId" or "totalCostUSD" as a strong signal, but not a requirement
         let bestCandidate = null;
         let maxScore = 0;
 
         for (const [name, score] of mutationCounts.entries()) {
-            if (score > maxScore && name.length <= 4) { // typical obfuscated state var
+            if (score > maxScore && name.length <= 4) {
                 maxScore = score;
                 bestCandidate = name;
             }
         }
 
-        if (bestCandidate && maxScore > 10) {
+        if (bestCandidate && maxScore > 2) { // Lowered threshold for shallow scan
             stateVarName = bestCandidate;
-            console.log(`[*] Detected potential internal state variable: ${stateVarName} (Score: ${maxScore})`);
+            console.log(`[*] Detected potential internal state variable: ${stateVarName} (Shallow Score: ${maxScore})`);
             this.runtimeMap[stateVarName] = 'INTERNAL_STATE';
         }
 
@@ -420,12 +421,29 @@ class CascadeGraph {
         let currentTokens = 0;
         let currentCategory = 'unknown';
         let chunkIndex = 1;
-
         const seenHashes = new Map(); // hash -> chunkName
 
         const finalizeChunk = () => {
             if (currentChunkNodes.length === 0) return;
-            const chunkCode = currentChunkNodes.map(node => generate(node, { minified: true }).code).join('\n');
+
+            // Use slicing from original code for stability and speed
+            const firstNode = currentChunkNodes[0];
+            const lastNode = currentChunkNodes[currentChunkNodes.length - 1];
+            let chunkCode = code.slice(firstNode.start, lastNode.end);
+
+            // --- HEADER PRESERVATION ---
+            // If this is the first chunk, grab any leading comments from the very top of the file
+            if (chunkIndex === 1) {
+                const prefix = code.slice(0, firstNode.start);
+                // Keep only the comments and whitespace, discard skipped IIFE wrappers
+                const headerLines = prefix.split('\n').filter(line => {
+                    const trimmed = line.trim();
+                    return trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.includes('*/') || trimmed === '';
+                });
+                if (headerLines.length > 0) {
+                    chunkCode = headerLines.join('\n').trim() + '\n\n' + chunkCode;
+                }
+            }
 
             // --- DE-DUPLICATION ---
             const hash = crypto.createHash('md5').update(chunkCode).digest('hex');
@@ -453,6 +471,16 @@ class CascadeGraph {
             let kbInfo = null;
             let errorSignature = null;
             const hints = [];
+            const hasTengu = chunkCode.toLowerCase().includes('tengu_');
+
+            const entrySignals = [
+                'process.argv',
+                '#!/usr/bin/env',
+                'cliMain',
+                'commander',
+                '.parse(process.argv)'
+            ];
+            const entrySignalCount = entrySignals.filter(s => chunkCode.includes(s)).length;
 
             // --- NEW: ENHANCED KB METADATA ---
             if (KB && !IS_BOOTSTRAP) {
@@ -550,13 +578,14 @@ class CascadeGraph {
                 endLine,
                 structuralAST, // Store for saveResults
                 neighbors: new Set(),
-                score: 0,
-                category: currentCategory,
+                suggestedFilename: suggestedName,
                 kb_info: kbInfo,
                 hints: hints,
-                hasGenerator,
-                hasStateMutator,
                 error_signature: errorSignature,
+                hasGenerator: currentChunkNodes.some(n => n.type === 'YieldExpression' || n.delegate),
+                hasStateMutator: currentChunkNodes.some(n => n.type === 'AssignmentExpression' && n.left.object?.name === 'INTERNAL_STATE'),
+                hasTengu: hasTengu,
+                entrySignalCount: entrySignalCount,
                 startsWithImport: currentChunkNodes.some(node => {
                     if (node.type === 'ImportDeclaration') return true;
                     if (node.type === 'VariableDeclaration') {
@@ -795,7 +824,15 @@ class CascadeGraph {
 
         // Load the mapping we just generated in Phase 3.5
         const mappingPath = path.join(versionPath, 'metadata', 'mapping.json');
-        const nnMapping = fs.existsSync(mappingPath) ? JSON.parse(fs.readFileSync(mappingPath, 'utf8')) : { processed_chunks: [] };
+        const nnMapping = fs.existsSync(mappingPath) ? JSON.parse(fs.readFileSync(mappingPath, 'utf8')) : { processed_chunks: [], variables: {} };
+
+        // Optimize variable lookup: map source -> entry
+        const varSourceMap = new Map();
+        if (nnMapping.variables) {
+            for (const entry of Object.values(nnMapping.variables)) {
+                if (entry.source) varSourceMap.set(entry.source, entry);
+            }
+        }
 
         // 1. Pre-calculate Metrics (In-Degree)
         const inDegree = new Map();
@@ -856,8 +893,8 @@ class CascadeGraph {
                 node.category = 'vendor';
                 node.label = 'LIBRARY_MATCH';
 
-                // Try to find the suggested name from anchored variables
-                const matchEntry = Object.values(nnMapping.variables).find(v => v.source === name || v.source.includes(name));
+                // Try to find the suggested name from anchored variables (Optimized)
+                const matchEntry = varSourceMap.get(name);
                 if (matchEntry) node.role = `LIB: ${matchEntry.name}`;
 
             } else if (isFamily && node.category !== 'founder') {
@@ -918,30 +955,33 @@ class CascadeGraph {
             }
         });
 
+        // Create the flat array format expected by the pipeline
         const metadata = [];
-        const fileRanges = [];
-
+        const fileRanges = []; // Keep fileRanges for graph_map.js, but not for graph_map.json
         for (const [name, node] of this.nodes) {
-            const fileName = node.displayName ? `${name}_${node.displayName}.js` : `${name}.js`;
+            const fileName = node.suggestedFilename ? node.suggestedFilename : `${name}.js`;
             fs.writeFileSync(path.join(chunksDir, fileName), node.code);
 
             const metaEntry = {
-                name: name, // Keep raw ID (chunk001) as the primary key
-                displayName: node.displayName || null, // Store the pretty name separately
+                name,
+                displayName: node.displayName || null,
                 file: `chunks/${fileName}`,
-                tokens: node.tokens,
-                startLine: node.startLine,
-                endLine: node.endLine,
-                category: node.category,
-                label: node.label || 'UNKNOWN',
+                tokens: node.tokens || 0,
+                score: node.score || 0,
+                centrality: node.score || 0, // Corrected name
                 role: node.role || 'MODULE',
-                state_touchpoints: node.state_touchpoints || [],
-                centrality: node.score,
-                neighborCount: node.neighbors.size,
+                category: node.category || 'unknown',
+                label: node.label || null,
                 outbound: Array.from(node.neighbors),
                 kb_info: node.kb_info,
                 hints: node.hints,
-                startsWithImport: node.startsWithImport
+                proposedPath: node.proposedPath || null,
+                isGoldenMatch: node.isGoldenMatch || false,
+                hasTengu: node.hasTengu || false,
+                hasGenerator: node.hasGenerator || false,
+                hasStateMutator: node.hasStateMutator || false,
+                entrySignalCount: node.entrySignalCount || 0,
+                error_signature: node.error_signature || null
             };
             metadata.push(metaEntry);
 
@@ -981,6 +1021,10 @@ class CascadeGraph {
         const structuralASTs = {};
         for (const [name, node] of this.nodes) {
             structuralASTs[name] = node.structuralAST;
+            // Optimization: Explicitly clear large temporary structures from the node object 
+            // to free up memory before the next bulky operation (Neural Anchoring).
+            node.code = null;
+            node.structuralAST = null;
         }
         fs.writeFileSync(
             path.join(metadataDir, 'simplified_asts.json'),
@@ -988,6 +1032,7 @@ class CascadeGraph {
         );
     }
 }
+
 
 // --- 3. EXECUTION ---
 async function run() {
@@ -1027,110 +1072,54 @@ async function run() {
     // NEW: Dynamic Helper Detection
     const runtimeMap = graph.detectRuntimeHelpers(ast);
     graph.detectInternalState(ast);
-
-    // Apply Global Renaming before chunking
-    console.log(`[*] Phase 0.7: Applying dynamic renaming to AST...`);
-    const { applyDynamicRenaming } = require('./deobfuscation_helpers');
-
+    // --- OPTIMIZED GLOBAL RENAMING PASS (Phases 0.7 & 0.8) ---
     const namesToRename = Object.keys(runtimeMap);
     if (namesToRename.length > 0) {
-        traverse(ast, {
-            Program(path) {
-                namesToRename.forEach(oldName => {
-                    const newName = runtimeMap[oldName];
-                    if (path.scope.hasBinding(oldName)) {
-                        path.scope.rename(oldName, newName);
-                        console.log(`[RENAME] Global: ${oldName} -> ${newName}`);
-                    }
-                });
-                path.stop(); // Only need to process Program scope once
+        console.log(`[*] Phase 0.7+: Applying non-recursive global renaming...`);
+
+        // Custom non-recursive walker to prevent stack overflows on deep esbuild trees
+        const stack = [ast];
+        while (stack.length > 0) {
+            const node = stack.pop();
+            if (!node || typeof node !== 'object' || node._visited) continue;
+
+            if (node.type === 'Identifier') {
+                if (runtimeMap[node.name]) {
+                    node.name = runtimeMap[node.name];
+                }
             }
-        });
-    }
 
-    if (Object.values(runtimeMap).includes('INTERNAL_STATE')) {
-        console.log(`[*] Phase 0.8: Applying structural renaming to state accessors...`);
-        const stateAccessors = {};
-        const stateKeys = ['sessionId', 'cwd', 'totalCostUSD', 'startTime', 'originalCwd', 'meter', 'sessionCounter', 'locCounter', 'prCounter', 'commitCounter', 'costCounter', 'tokenCounter', 'loggerProvider', 'eventLogger', 'meterProvider', 'tracerProvider', 'isInteractive', 'clientType', 'agentColorMap', 'flagSettingsPath', 'sessionIngressToken', 'oauthTokenFromFd', 'apiKeyFromFd', 'envVarValidators', 'lastAPIRequest', 'allowedSettingSources', 'inlinePlugins', 'sessionBypassPermissionsMode', 'sessionTrustAccepted', 'sessionPersistenceDisabled', 'hasExitedPlanMode', 'needsPlanModeExitAttachment', 'hasExitedDelegateMode', 'needsDelegateModeExitAttachment', 'lspRecommendationShownThisSession', 'initJsonSchema', 'registeredHooks', 'planSlugCache', 'teleportedSessionInfo', 'invokedSkills', 'mainThreadAgentType'];
-
-        traverse(ast, {
-            FunctionDeclaration(path) {
-                const body = path.node.body.body;
-                if (body.length === 1 && t.isReturnStatement(body[0])) {
-                    const arg = body[0].argument;
-                    if (t.isMemberExpression(arg) && t.isIdentifier(arg.object)) {
-                        // Safe check: ensure the object is indeed what we detected as INTERNAL_STATE
-                        const isStateObj = arg.object.name === 'INTERNAL_STATE';
-
-                        if (isStateObj && !arg.computed && t.isIdentifier(arg.property)) {
-                            const propName = arg.property.name;
-                            if (stateKeys.includes(propName)) {
-                                stateAccessors[path.node.id.name] = `get_${propName}`;
-                            }
+            // Push children to stack
+            for (const key in node) {
+                if (key === 'tokens' || key === 'comments' || key === 'loc' || key === 'start' || key === 'end') continue;
+                const child = node[key];
+                if (child && typeof child === 'object') {
+                    if (Array.isArray(child)) {
+                        for (let i = child.length - 1; i >= 0; i--) {
+                            if (child[i] && typeof child[i] === 'object') stack.push(child[i]);
                         }
+                    } else {
+                        stack.push(child);
                     }
                 }
             }
-        });
-
-        if (Object.keys(stateAccessors).length > 0) {
-            traverse(ast, {
-                Program(path) {
-                    Object.keys(stateAccessors).forEach(oldName => {
-                        const newName = stateAccessors[oldName];
-                        if (path.scope.hasBinding(oldName)) {
-                            console.log(`    [RENAME] State Accessor: ${oldName} -> ${newName}`);
-                            path.scope.rename(oldName, newName);
-                        }
-                    });
-                    path.stop();
-                }
-            });
         }
-    }
-
-    // Phase 0.9: Global Dead Code Removal (Scope-Aware)
-    console.log(`[*] Phase 0.9: Running global dead code removal...`);
-    try {
-        traverse(ast, removeDeadCodeVisitor);
-        console.log(`    [+] Dead code removal complete.`);
-    } catch (e) {
-        console.warn(`    [!] Dead code removal failed: ${e.message}`);
     }
 
     graph.identifyNodes(ast, code);
     graph.detectNeighbors();
-    collapseProxyNodes(graph.nodes); // Collapse simple proxies before centrality
+    // collapseProxyNodes is already metadata-based
+    collapseProxyNodes(graph.nodes);
     graph.applyMarkovAnalysis();
     OUTPUT_BASE = path.join(OUTPUT_ROOT, version);
     console.log(`[*] Output directory: ${OUTPUT_BASE}`);
 
     graph.saveResults(OUTPUT_BASE);
 
-    // Phase 3.5: Integrating Neural Anchoring
-    if (IS_BOOTSTRAP) {
-        console.log(`[*] Skipping Phase 3.5 & 4 (Bootstrap Mode: Minimal side effects)`);
-    } else {
-        console.log(`[*] Phase 3.5: Integrating Neural Anchoring...`);
-        const modelPath = path.join(__dirname, '../ml/model.pth');
-        if (!fs.existsSync(modelPath)) {
-            console.warn(`    [!] Neural Network model not found at ${modelPath}`);
-            console.warn(`    [!] Performance will be degraded. Run 'npm run bootstrap && npm run train' first for deep analysis.`);
-        } else {
-            const { anchorLogic } = require('./anchor_logic');
-            try {
-                await anchorLogic(version);
-                console.log(`    [+] Neural Anchoring complete.`);
-            } catch (e) {
-                console.error(`    [!] Neural Anchoring failed: ${e.message}`);
-            }
-        }
+    graph.saveResults(OUTPUT_BASE);
 
-        graph.classify(OUTPUT_BASE);
-    }
-
-    console.log(`\n[COMPLETE]`);
-    console.log(`Analysis saved to: ${OUTPUT_BASE}`);
+    console.log(`\n[COMPLETE] Static Analysis Phase Done.`);
+    console.log(`Phase 1-3 results saved to: ${OUTPUT_BASE}`);
     return { version, path: OUTPUT_BASE };
 }
 

@@ -56,7 +56,12 @@ function calculateSimilarity(vecA, vecB) {
  */
 function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targetSymbols, refSymbols, sourceLabel, options = {}) {
     let alignedCount = 0;
-    const { lockConfidence = null } = options;
+    let { lockConfidence = null } = options;
+
+    // ADDITION: If a match comes from 'bootstrap' or label indicates golden match, lock it with 1.0 confidence
+    if (sourceLabel && (sourceLabel.includes('bootstrap') || sourceLabel.includes('GOLDEN'))) {
+        lockConfidence = 1.0;
+    }
 
     // Create a map of ref symbols by their structural key and by name
     const refSymbolMap = new Map();
@@ -165,8 +170,15 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         }
 
         console.log(`[*] Performing Registry-based Anchoring...`);
-        const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
-        const targetLogicDb = JSON.parse(fs.readFileSync(path.join(targetPath, 'metadata', 'logic_db.json'), 'utf8'));
+        // Use a more memory-efficient loading strategy if possible, 
+        // but for now, we rely on the 8GB heap.
+        const registryData = fs.readFileSync(registryPath, 'utf8');
+        const registry = JSON.parse(registryData);
+        // Explicitly null out the raw string to free memory
+        // registryData = null; // Can't null a const, and garbage collection will handle it, but we can scope it.
+
+        const targetLogicDbPath = path.join(targetPath, 'metadata', 'logic_db.json');
+        const targetLogicDb = JSON.parse(fs.readFileSync(targetLogicDbPath, 'utf8'));
 
         const targetMappingPath = path.join(targetPath, 'metadata', 'mapping.json');
         let targetMapping = { version: "1.2", variables: {}, properties: {}, processed_chunks: [], metadata: { total_renamed: 0, last_updated: new Date().toISOString() } };
@@ -183,16 +195,23 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         const lockThreshold = parseFloat(process.env.ANCHOR_LOCK_THRESHOLD) || 0.98;
         const lockConfidence = parseFloat(process.env.ANCHOR_LOCK_CONFIDENCE) || 0.99;
 
+        const registryEntries = Object.entries(registry);
+        const simThreshold = parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.9;
+
         for (const targetChunk of targetLogicDb) {
             let bestMatch = { ref: null, similarity: -1, label: null };
-            for (const [label, refData] of Object.entries(registry)) {
-                const sim = calculateSimilarity(targetChunk.vector, refData.vector);
+            const targetVec = targetChunk.vector;
+
+            // Inner loop optimization: cache registry entries
+            for (let i = 0; i < registryEntries.length; i++) {
+                const [label, refData] = registryEntries[i];
+                const sim = calculateSimilarity(targetVec, refData.vector);
                 if (sim > bestMatch.similarity) {
                     bestMatch = { ref: refData, similarity: sim, label: label };
                 }
             }
 
-            if (bestMatch.similarity > (parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.9)) {
+            if (bestMatch.similarity > simThreshold) {
                 const isNewChunk = !targetMapping.processed_chunks.includes(targetChunk.name);
                 const logPrefix = isNewChunk ? '[ANCHOR/REGISTRY] NEW MATCH' : '[ANCHOR/REGISTRY] EXISTING';
 
@@ -211,11 +230,17 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     bestMatch.similarity >= lockThreshold ? { lockConfidence } : {}
                 );
 
-                // Match anchoring results back to filenames
-                const libName = bestMatch.label;
-                if (libName.includes('_v')) {
-                    const logicalName = libName.split('_v')[0].replace(/_/g, '-');
-                    targetChunk.suggestedFilename = logicalName;
+                if (bestMatch.similarity > 0.95) {
+                    // This is a library match!
+                    const isLibrary = bestMatch.label.includes('_') || bestMatch.label.includes('-v');
+                    const libName = isLibrary ? bestMatch.label.split('_')[0] : 'unknown_lib';
+
+                    targetChunk.category = 'vendor';
+                    targetChunk.label = 'GOLDEN_LIBRARY_MATCH';
+                    targetChunk.role = `VENDOR: ${libName}`;
+                    targetChunk.isGoldenMatch = true;
+                    // Propose a file path based on the library structure
+                    targetChunk.proposedPath = `src/vendor/${libName}/${targetChunk.name}.ts`;
                 }
 
                 if (isNewChunk) {
@@ -235,9 +260,14 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         const chunks = Array.isArray(graphMapRaw) ? graphMapRaw : (graphMapRaw.chunks || []);
 
         for (const targetChunk of targetLogicDb) {
-            if (targetChunk.suggestedFilename) {
-                const mapEntry = chunks.find(m => m.name === targetChunk.name);
-                if (mapEntry) mapEntry.suggestedFilename = targetChunk.suggestedFilename;
+            const mapEntry = chunks.find(m => m.name === targetChunk.name);
+            if (mapEntry) {
+                if (targetChunk.suggestedFilename) mapEntry.suggestedFilename = targetChunk.suggestedFilename;
+                if (targetChunk.proposedPath) mapEntry.proposedPath = targetChunk.proposedPath;
+                if (targetChunk.isGoldenMatch) mapEntry.isGoldenMatch = targetChunk.isGoldenMatch;
+                if (targetChunk.category) mapEntry.category = targetChunk.category;
+                if (targetChunk.label) mapEntry.label = targetChunk.label;
+                if (targetChunk.role) mapEntry.role = targetChunk.role;
             }
         }
 
@@ -353,11 +383,25 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
 
 if (require.main === module) {
     const args = process.argv.slice(2);
-    if (args.length < 1) {
-        console.log("Usage: node src/anchor_logic.js <target_version> [reference_version]");
-        process.exit(1);
+    let targetVersion = args[0];
+
+    if (!targetVersion) {
+        // Auto-detect the latest version from cascade_graph_analysis
+        const baseDir = './cascade_graph_analysis';
+        const dirs = fs.readdirSync(baseDir).filter(d => {
+            return fs.statSync(path.join(baseDir, d)).isDirectory() && d !== 'bootstrap';
+        }).sort().reverse();
+
+        if (dirs.length > 0) {
+            targetVersion = dirs[0];
+            console.log(`[*] No version specified. Auto-detected latest: ${targetVersion}`);
+        } else {
+            console.log("Usage: node src/anchor_logic.js <target_version> [reference_version]");
+            process.exit(1);
+        }
     }
-    anchorLogic(args[0], args[1]).catch(console.error);
+
+    anchorLogic(targetVersion, args[1]).catch(console.error);
 }
 
 module.exports = { anchorLogic };

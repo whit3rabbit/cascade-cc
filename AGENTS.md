@@ -1,74 +1,50 @@
+# Claude Code Cascade Analyzer
+Pre-processor for CASCADE-style analysis and deobfuscation of Claude Code bundles using structural DNA and LLMs.
+
 # Repository Guidelines
 
 ## Project Structure & Module Organization
 - `src/`: Core analysis, LLM pipeline, and anchoring/renaming logic.
-- `ml/`: Machine Learning components (PyTorch) for structural fingerprinting.
+- `ml/`: Machine Learning components (PyTorch) for structural fingerprinting via Triplet Networks.
 - `visualizer/`: WebGL graph viewer (served by `npm run visualize`).
-- `run.js`: Command dispatcher used by `node run <task>`.
-- `knowledge_base.json`: Seed terms for chunk identification.
-- `cascade_graph_analysis/`: Generated outputs; treat as build artifacts.
-- `claude-analysis/`: Sample input bundles and analysis references.
+- `docs/`: Technical deep-dives: [Architecture](docs/ARCHITECTURE.md), [NN Internals](docs/NN.md), [Schema](docs/SCHEMA.md), [Environment](docs/ENVIRONMENT.md).
+- `cascade_graph_analysis/`: Main workspace for generated outputs, logic registries, and deobfuscated chunks.
+- `claude_analysis/`: Source code bundles and analysis references.
+- `package.json`: Central command registry and dependency management.
+- `run.js`: Task dispatcher for `node run <task>`.
+- `knowledge_base.json`: Seed terms for semantic chunk identification.
+- `sync_registry.sh`: Helper for synchronizing logic registries.
 
-## File Structure (Key Files)
-- `src/analyze.js`: Bundle analysis, simplified AST generation, and centrality scoring.
-- `src/anchor_logic.js`: ML-backed structural similarity matching and mapping.
-- `src/assemble_final.js`: Assemble deobfuscated chunks into final codebase.
-- `src/bootstrap_libs.js`: Bootstrap vendor/runtime library detection.
-- `src/deobfuscate_pipeline.js`: LLM pipeline and resume-aware orchestration.
-- `src/deobfuscation_helpers.js`: Shared helpers for deobfuscation steps.
-- `src/init_registry.js`: Initialize naming/metadata registries.
-- `src/llm_client.js`: LLM provider selection, retries, and request plumbing.
-- `src/rename_chunks.js`: Scope-aware Babel renames for deobfuscated chunks.
-- `src/sync_vocab.js`: Sync vocabulary/term lists for analysis.
-- `src/update_registry_from_bootstrap.js`: Update registry from bootstrap data.
-- `ml/constants.py`: Shared ML constants and configuration.
-- `ml/encoder.py`: Model definition for structural fingerprinting.
-- `ml/model.pth`: Trained model weights.
-- `ml/train.py`: Training loop for the structural fingerprint model.
-- `ml/vectorize.py`: Vectorization pipeline for chunk logic embeddings.
-- `visualizer/app.js`: WebGL graph renderer logic.
-- `visualizer/index.html`: Visualizer entry point.
-- `visualizer/style.css`: Visualizer styles.
-- `docs/ARCHITECTURE.md`: System architecture overview.
-- `docs/NN.md`: Neural network internals.
-- `docs/SCHEMA.md`: JSON schema documentation.
+## TL;DR & Quick Start
+1. **Setup**: `npm install` && `python3 -m venv .venv` && `source .venv/bin/activate` && `pip install -r requirements.txt`.
+2. **Initialize**: `npm run sync-vocab` && `npm run bootstrap` && `node src/update_registry_from_bootstrap.js`.
+3. **Workflow**: `analyze` -> `anchor` -> `deobfuscate` -> `assemble` -> `refine`.
 
-## Build, Test, and Development Commands
-- `source .venv/bin/activate`: Activate the local Python virtualenv (macOS).
-- `npm install`: Install dependencies.
-- `npm start`: Run the analyzer (defaults to `./cli.js` or fetches latest bundle).
-- `npm run analyze -- path/to/bundle.js`: Analyze a specific bundle (generates `simplified_asts.json`).
-- `npm run anchor -- <target> <reference>`: Structural similarity matching via Python NN.
-- `npm run deobfuscate -- [version] [--limit N] [--skip-vendor] [--force] [--rename-only]`: Run the LLM pipeline and/or rename pass.
-- `npm run assemble -- <version>`: Assemble deobfuscated chunks into a final file structure.
-- `npm run visualize`: Start the local visualizer.
-- `npm run lint`: Format all files with Prettier.
+## Build, Training, and Development Commands
+- `npm run analyze`: Fetch and chunk the latest Claude bundle.
+- `npm run anchor -- <version>`: Structural similarity matching using the trained "Brain".
+- `npm run deobfuscate -- <version> [--skip-vendor]`: LLM-based renaming of proprietary logic.
+- `npm run assemble -- <version>`: Reconstruct the deobfuscated file structure.
+- `npm run refine -- <version>`: Final LLM pass to restore original control flow and readability.
+- `npm run train [--sweep] [--device auto]`: Train or sweep hyperparameters for the Transformer Encoder.
+- `npm run bootstrap`: Download and extract DNA from standard libraries (React, Zod, etc.).
+- `npm run visualize`: Start the local graph visualizer.
+- `npm run sync-vocab`: Sync Babel node types with ML constants.
+- `npm run lint`: Auto-format codebase via Prettier.
+- `npm run execute`: Convenience command to run `analyze` followed by `deobfuscate`.
 
-## Coding Style & Naming Conventions
-- Formatting is handled by Prettier (`npm run lint`).
-- File names in `src/` use lowercase with underscores (e.g., `deobfuscate_pipeline.js`).
+## Neural Network (The Brain)
+The system uses a **Transformer Encoder** architecture for structural fingerprinting:
+- **Architecture**: Multi-Channel Siamese Network (Triplet Loss).
+- **Optimal Config**: Embedding Dim: 32, Hidden Dim: 64, Learning Rate: 0.001, Margin: 0.2.
+- **Context Window**: Hardware-aware scaling (e.g., 256 nodes for Mac MPS, 2048 for A100).
+- **Goal**: Learning **Logic Topology** (Structural DNA) while ignoring "Surface Noise" (mangled names).
 
-## Testing Guidelines
-- No automated test suite is currently present; validate with `npm start` and check `cascade_graph_analysis/`.
-
-## Architecture Overview
-- Claude Code bundles are esbuild-style single files (`cli.js`); `src/analyze.js` uses `webcrack` (with `unminify: true`), detects runtime helpers/`INTERNAL_STATE`, and exports **name-agnostic simplified ASTs** for ML.
-- **Structural Fingerprinting**: `src/anchor_logic.js` bridges to PyTorch models in `ml/` to generate logic embeddings for code chunks.
-- `src/analyze.js` calculates **centrality scores** using a Markov Chain (with `0.85` damping factor) to identify the "brain" of the application.
-- The deobfuscation pipeline in `src/deobfuscate_pipeline.js` processes chunks by **Centrality order** and **Category priority** (Founder > Family > Vendor).
-- Implements a **Resume Mechanism** via `processed_chunks` in `mapping.json` to avoid re-processing chunks. Use `--force` to override.
-- LLM prompts include **Neighbor Roles/DisplayNames** and use a **Candidate Pool** filter to minimize token usage and redundant naming.
-- `src/rename_chunks.js` applies Babel renames with refined **scope-aware logic** (inclusive of esbuild wrappers), producing `deobfuscated_chunks/`.
-- `src/analyze.js` writes chunk files to `chunks/` and graph/centrality metadata to `metadata/graph_map.json`.
-- The deobfuscation ("decryptioning") pipeline in `src/deobfuscate_pipeline.js` calls LLMs via `src/llm_client.js` and saves `metadata/mapping.json`.
-- `src/assemble_final.js` (run via `npm run assemble`) performs Path-First Aggregation to create `final_codebase/`.
-- `visualizer/` reads `metadata/` plus chunks.
-
-## Detailed Documentation
-For more in-depth information about the system, please refer to:
-- [Architecture Overview](docs/ARCHITECTURE.md) - Detailed breakdown of the analysis and deobfuscation pipeline.
-- [Neural Network (NN) Internals](docs/NN.md) - Deep dive into the machine learning models and vectorization logic.
-- [Data Schemas](docs/SCHEMA.md) - Documentation for the JSON schemas used throughout the project.
+## Architecture Flow
+- **Structural Analysis**: `src/analyze.js` uses `webcrack` and Markov centrality (`0.85` damping) to identify core logic.
+- **Neural Anchoring**: `src/anchor_logic.js` bridges to PyTorch (`ml/`) to generate logic embeddings for code chunks.
+- **Knowledge Transfer**: High-similarity matches (>90%) allow transferring deobfuscation results between versions.
+- **Assembly**: `src/assemble_final.js` performs path-first aggregation to create the final codebase.
 
 ```mermaid
 flowchart TD
@@ -87,14 +63,7 @@ flowchart TD
   M --> N[final_codebase/]
 ```
 
-## Commit & Pull Request Guidelines
-- Commit history favors short, imperative summaries (e.g., "update pipeline"). Keep messages concise.
-- PRs should include: a clear description, how to reproduce/verify, and sample outputs.
-- Include screenshots or a short clip for visualizer/UI changes.
-
-## Configuration & Security Notes
-- LLM runs require `.env` (see `.env.example`); set `LLM_PROVIDER`, `LLM_MODEL`, and an API key; never commit secrets.
-- `src/llm_client.js` defaults to Gemini if unset, selects the matching key, and retries OpenRouter 429s with backoff.
-- Use `GEMINI_API_KEY` for Gemini or `OPENROUTER_API_KEY` for OpenRouter; keys with `your_` are treated as invalid.
-- Large generated outputs belong in `cascade_graph_analysis/` and should not be hand-edited.
-- This repo assumes macOS for local development.
+## Configuration & Security
+- LLM runs require `.env` (see `.env.example`).
+- Use `GEMINI_API_KEY` or `OPENROUTER_API_KEY`; do not commit secrets.
+- Large artifacts in `cascade_graph_analysis/` are ignored by git; do not edit manually.

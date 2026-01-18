@@ -467,48 +467,47 @@ async function run() {
             }
 
             const generatePrompt = (vars, props, codeContent, goldReferenceCode = '', goldSimilarity = null) => `
-Role: Senior Reverse Engineer
-Task: Semantic Identity Mapping (Unobfuscation)
+Role: Staff Software Engineer (Reverse Engineering Team)
+Task: Reconstruct Proprietary "Founder" Logic
 
-Analyze the provided JavaScript code chunk.
-Goal: Map obfuscated identifiers to human-readable names.
+CONTEXT:
+This chunk has been identified as ${chunkMeta.role}.
+It is intended to be located at: ${chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path || 'src/undetermined/'}.
 
-CRITICAL CONSTRAINTS:
-1. UNIQUE NAMES: Every mangled identifier MUST have a unique descriptive name. Do not reuse generic placeholders like "deleted", "data", or "temp".
-2. PROTECT BUILT-INS: Never suggest names that are standard JavaScript globals (e.g., "Array", "Object", "String", "Promise").
-3. PROTECT API KEYS: Do not rename property keys that belong to standard JS APIs. For example, in Object.defineProperty, the keys "value", "enumerable", and "configurable" must stay exactly as they are.
-4. RUNTIME RECOGNITION: If you recognize esbuild/webpack runtime helpers (like __commonJS, __toESM, __lazyInit), use those standard names.
+NEIGHBOR CONTEXT:
+This code interacts with:
+${(chunkMeta.outbound || []).map(n => {
+                const neighborMeta = graphData.find(m => m.name === n);
+                return `- ${neighborMeta?.displayName || neighborMeta?.name || n}`;
+            }).join('\n')}
 
-CHUNK METADATA:
-- Role: ${chunkMeta.role}
-- Neighbors: ${(chunkMeta.outbound || []).join(', ')}
+AUTOMATED IDENTITIES (Ground Truth from Neural DNA Matching):
+The following symbols were identified via high-confidence structural matching. DO NOT change these names:
+${[...variables, ...properties].filter(id => {
+                const m = globalMapping.variables[id] || globalMapping.properties[id];
+                return m && (m.confidence >= 0.95 || m.source.includes('bootstrap'));
+            }).map(id => {
+                const m = globalMapping.variables[id] || globalMapping.properties[id];
+                return `- ${id} is ${m.name}`;
+            }).join('\n') || 'None'}
 
-${goldReferenceCode ? `GOLD REFERENCE IDENTIFIED:
-This chunk matches a known library signature (${(goldSimilarity * 100).toFixed(2)}% similarity).
-Use the names from this gold reference when mapping identifiers. Do not invent new semantics.
+${goldReferenceCode ? `GOLD REFERENCE MATCH:
+This chunk matches a library signature (${(goldSimilarity * 100).toFixed(2)}% similarity).
 \n\`\`\`javascript
 ${goldReferenceCode}
 \`\`\`
 ` : ''}
 
-${REFERENCE_TREE ? `REFERENCE STRUCTURE (Version 2.1.9):
-Use this tree to infer logical paths and names:
-${REFERENCE_TREE}` : ""}
-
-UNKNOWN IDENTIFIERS:
-- Variables: ${(vars || []).join(', ')}
-- Properties: ${(props || []).join(', ')}
-
-CODE:
+SOURCE CODE (Pre-Deobfuscated):
 \`\`\`javascript
 ${codeContent}
 \`\`\`
 
-EXISTING HINTS (from previous stages):
-${[...variables, ...properties].filter(id => globalMapping.variables[id] || globalMapping.properties[id]).map(id => {
-                const m = globalMapping.variables[id] || globalMapping.properties[id];
-                return `- ${id} is likely "${m.name}" (Confidence: ${m.confidence})`;
-            }).join('\n') || 'None'}
+INSTRUCTIONS:
+1. Identify the 'Proprietary' business logic that is unique to Claude and not part of the libraries.
+2. Rename the remaining mangled variables (single letters/short names) based on their semantic usage.
+3. Suggest a final descriptive filename if the current one is generic.
+4. Output valid JSON only.
 
 RESPONSE FORMAT (JSON ONLY):
 {

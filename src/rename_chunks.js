@@ -141,9 +141,11 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                         const isHighConfidence = confidence >= 0.95;
                         const isDescriptive = propName.length > 2;
 
+                        // SURGICAL RENAME: If we are in surgical mode (which we are by default now for Gold Standard), 
+                        // we ONLY apply if it's high confidence.
                         if (isProtectedProperty(propName)) {
                             // SKIP: Never rename reserved properties
-                        } else if (isObjectKnown || (isHighConfidence && isDescriptive)) {
+                        } else if (isHighConfidence || (isObjectKnown && isDescriptive)) {
                             p.node.property.name = newName;
                         }
                     }
@@ -213,16 +215,28 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
 const crypto = require('crypto');
 
 async function main() {
-    const versionPath = process.argv[2];
-    if (!versionPath) {
-        console.error("Usage: node rename_chunks.js <versionPath>");
-        process.exit(1);
+    let versionDir = process.argv[2];
+
+    if (!versionDir) {
+        // Auto-detect the latest version from cascade_graph_analysis
+        const baseDir = './cascade_graph_analysis';
+        const dirs = fs.readdirSync(baseDir).filter(d => {
+            return fs.statSync(path.join(baseDir, d)).isDirectory() && d !== 'bootstrap';
+        }).sort().reverse();
+
+        if (dirs.length > 0) {
+            versionDir = path.join(baseDir, dirs[0]);
+            console.log(`[*] No version directory specified. Auto-detected latest: ${versionDir}`);
+        } else {
+            console.log("Usage: node src/rename_chunks.js <version_dir>");
+            process.exit(1);
+        }
     }
 
-    const chunksDir = path.join(versionPath, 'chunks');
-    const mappingPath = path.join(versionPath, 'metadata', 'mapping.json');
-    const graphMapPath = path.join(versionPath, 'metadata', 'graph_map.json');
-    const deobfuscatedDir = path.join(versionPath, 'deobfuscated_chunks');
+    const chunksDir = path.join(versionDir, 'chunks');
+    const mappingPath = path.join(versionDir, 'metadata', 'mapping.json');
+    const graphMapPath = path.join(versionDir, 'metadata', 'graph_map.json');
+    const deobfuscatedDir = path.join(versionDir, 'deobfuscated_chunks');
 
     if (!fs.existsSync(mappingPath)) {
         console.error(`[!] mapping.json not found at ${mappingPath}`);
@@ -254,11 +268,13 @@ async function main() {
             const code = fs.readFileSync(inputPath, 'utf8');
 
             // Find metadata for this chunk
-            const chunkMeta = graphData.find(m => m.file && path.basename(m.file) === file);
+            const chunkMeta = graphData.find(m => m.name === path.basename(file, '.js'));
 
             let logicalName = "";
             if (chunkMeta) {
-                if (chunkMeta.suggestedFilename) {
+                if (chunkMeta.proposedPath) {
+                    logicalName = path.basename(chunkMeta.proposedPath, '.ts');
+                } else if (chunkMeta.suggestedFilename) {
                     logicalName = chunkMeta.suggestedFilename;
                 } else if (chunkMeta.kb_info && chunkMeta.kb_info.suggested_path) {
                     logicalName = path.basename(chunkMeta.kb_info.suggested_path.replace(/`/g, ''), '.ts').replace('.js', '');
@@ -276,7 +292,7 @@ async function main() {
                 sourceFile: chunkBase,
                 neighbors,
                 displayName: chunkMeta?.displayName,
-                suggestedPath: chunkMeta?.kb_info?.suggested_path
+                suggestedPath: chunkMeta?.proposedPath || chunkMeta?.kb_info?.suggested_path
             });
 
             const finalCode = renamedCode || code;
