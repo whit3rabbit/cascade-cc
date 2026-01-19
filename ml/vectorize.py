@@ -205,7 +205,21 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
     
     stats = {"total_nodes": 0, "unknown_nodes": 0}
     with torch.no_grad():
-        for chunk_name, ast_root in chunks.items():
+        for chunk_name, chunk_data in chunks.items():
+            # Support both legacy (list) and new (dict with metadata) formats
+            if isinstance(chunk_data, list):
+                ast_root = chunk_data
+                kb_info = None
+                hints = []
+                category = None
+                role = None
+            else:
+                ast_root = chunk_data.get("ast")
+                kb_info = chunk_data.get("kb_info")
+                hints = chunk_data.get("hints", [])
+                category = chunk_data.get("category")
+                role = chunk_data.get("role")
+
             sequence = []
             symbols = []
             literals = []
@@ -237,7 +251,11 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
             results.append({
                 "name": chunk_name,
                 "vector": fingerprint,
-                "symbols": symbols
+                "symbols": symbols,
+                "kb_info": kb_info,
+                "hints": hints,
+                "category": category,
+                "role": role
             })
 
     # Vocabulary health check

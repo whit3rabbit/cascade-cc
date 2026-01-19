@@ -1027,7 +1027,13 @@ class CascadeGraph {
         // Save Structural ASTs for ML anchoring
         const structuralASTs = {};
         for (const [name, node] of this.nodes) {
-            structuralASTs[name] = node.structuralAST;
+            structuralASTs[name] = {
+                ast: node.structuralAST,
+                kb_info: node.kb_info,
+                hints: node.hints,
+                category: node.category,
+                role: node.role
+            };
             // Optimization: Explicitly clear large temporary structures from the node object 
             // to free up memory before the next bulky operation (Neural Anchoring).
             node.code = null;
