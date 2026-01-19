@@ -985,7 +985,10 @@ class CascadeGraph {
                 hasGenerator: node.hasGenerator || false,
                 hasStateMutator: node.hasStateMutator || false,
                 entrySignalCount: node.entrySignalCount || 0,
-                error_signature: node.error_signature || null
+                error_signature: node.error_signature || null,
+                startsWithImport: node.startsWithImport || false,
+                startLine: node.startLine || 0,
+                endLine: node.endLine || 0
             };
             metadata.push(metaEntry);
 

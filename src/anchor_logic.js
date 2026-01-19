@@ -202,23 +202,48 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
             let bestMatch = { ref: null, similarity: -1, label: null };
             const targetVec = targetChunk.vector;
 
-            // Inner loop optimization: cache registry entries
+            // Heuristic Signal Extraction
+            const kbDescription = targetChunk.kb_info ? (targetChunk.kb_info.description || '').toLowerCase() : '';
+            const kbPath = targetChunk.kb_info ? (targetChunk.kb_info.suggested_path || '').toLowerCase() : '';
+            let boostLib = null;
+
+            // Simple library name extraction from KB hints (e.g. "ink" from "inkScreenRenderer")
+            if (kbPath.includes('ink') || kbDescription.includes('ink')) boostLib = 'ink';
+            else if (kbPath.includes('react') || kbDescription.includes('react')) boostLib = 'react';
+            else if (kbPath.includes('zod') || kbDescription.includes('zod')) boostLib = 'zod';
+            else if (kbPath.includes('lodash') || kbDescription.includes('lodash')) boostLib = 'lodash';
+            else if (kbPath.includes('axios') || kbDescription.includes('axios')) boostLib = 'axios';
+            else if (kbPath.includes('chalk') || kbDescription.includes('chalk')) boostLib = 'chalk';
+            else if (kbPath.includes('commander')) boostLib = 'commander';
+            // Add more common libs as needed, or make dynamic
+
             for (let i = 0; i < registryEntries.length; i++) {
                 const [label, refData] = registryEntries[i];
-                const sim = calculateSimilarity(targetVec, refData.vector);
+                let sim = calculateSimilarity(targetVec, refData.vector);
+
+                // Apply Heuristic Boost
+                // If the registry label matches the KB hint, we trust the NN match much more easily.
+                if (boostLib && label.toLowerCase().includes(boostLib)) {
+                    sim += 0.15; // significant boost
+                }
+
                 if (sim > bestMatch.similarity) {
-                    bestMatch = { ref: refData, similarity: sim, label: label };
+                    bestMatch = { ref: refData, similarity: sim, label: label, originalSim: sim - (boostLib && label.toLowerCase().includes(boostLib) ? 0.15 : 0) };
                 }
             }
 
-            if (bestMatch.similarity > simThreshold) {
+            // Lowered global threshold for better coverage (0.85 default instead of 0.9)
+            const effectiveThreshold = parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.85;
+
+            if (bestMatch.similarity > effectiveThreshold) {
                 const isNewChunk = !targetMapping.processed_chunks.includes(targetChunk.name);
                 const logPrefix = isNewChunk ? '[ANCHOR/REGISTRY] NEW MATCH' : '[ANCHOR/REGISTRY] EXISTING';
 
-                totalSimilarity += bestMatch.similarity;
+                totalSimilarity += bestMatch.originalSim; // Use real sim for stats
                 highSimCount++;
 
-                console.log(`    ${logPrefix}: ${targetChunk.name} -> ${bestMatch.label} (${(bestMatch.similarity * 100).toFixed(2)}%)`);
+                const boostTag = (bestMatch.similarity > bestMatch.originalSim) ? `[BOOSTED]` : '';
+                console.log(`    ${logPrefix}: ${targetChunk.name} -> ${bestMatch.label} (${(bestMatch.originalSim * 100).toFixed(2)}% ${boostTag} => ${(bestMatch.similarity * 100).toFixed(2)}%)`);
 
                 const namesAdded = alignSymbols(
                     targetMapping,
@@ -250,6 +275,10 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 } else {
                     existingMatchedCount++;
                 }
+            } else if (bestMatch.similarity > 0.65) {
+                // Log near misses to help debug why things aren't matching
+                const boostTag = (bestMatch.similarity > bestMatch.originalSim) ? `[BOOSTED]` : '';
+                console.log(`    [ANCHOR/MISS] ${targetChunk.name} -> ${bestMatch.label} (${(bestMatch.originalSim * 100).toFixed(2)}% ${boostTag}) - Below threshold ${effectiveThreshold}`);
             }
         }
         fs.writeFileSync(targetMappingPath, JSON.stringify(targetMapping, null, 2));

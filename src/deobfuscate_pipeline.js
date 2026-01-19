@@ -461,30 +461,12 @@ async function run() {
                 return;
             }
 
-            let code = fs.readFileSync(chunkPath, 'utf8');
-            const { variables, properties } = extractIdentifiers(code);
+            const originalCode = fs.readFileSync(chunkPath, 'utf8');
+            const { variables: origVars, properties: origProps } = extractIdentifiers(originalCode);
 
-            // OPTIMIZATION: Apply current mappings to the code before sending it to the LLM
-            // This makes the code much more 'human-readable' for the engine.
-            const neighbors = [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])];
-            try {
-                const partiallyRenamedCode = liveRenamer(code, globalMapping, {
-                    sourceFile: chunkMeta.name,
-                    neighbors,
-                    displayName: chunkMeta.displayName,
-                    suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path
-                });
-                if (partiallyRenamedCode) {
-                    code = partiallyRenamedCode;
-                }
-            } catch (err) {
-                console.warn(`    [!] Pre-renaming failed for ${file}: ${err.message}. Sending original code.`);
-            }
-
-            const { variables: remainingVars, properties: remainingProps } = extractIdentifiers(code);
-
-            const unknownVariables = remainingVars.filter(v => !globalMapping.variables[v] || (globalMapping.variables[v].confidence || 0) < 0.9);
-            const unknownProperties = remainingProps.filter(p => !globalMapping.properties[p] || (globalMapping.properties[p].confidence || 0) < 0.9);
+            // Filter for unknown identifiers using ORIGINAL mangled names
+            const unknownVariables = origVars.filter(v => !globalMapping.variables[v] || (globalMapping.variables[v].confidence || 0) < 0.9);
+            const unknownProperties = origProps.filter(p => !globalMapping.properties[p] || (globalMapping.properties[p].confidence || 0) < 0.9);
 
             if (unknownVariables.length === 0 && unknownProperties.length === 0 && !isForce) {
                 if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
@@ -496,6 +478,24 @@ async function run() {
             }
 
             console.log(`    [WORKING] ${file} (${unknownVariables.length} vars, ${unknownProperties.length} props unknown)`);
+
+            // Apply current mappings to the code before sending it to the LLM
+            // This makes the code much more 'human-readable' for the engine.
+            const neighbors = [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])];
+            let contextCode = originalCode;
+            try {
+                const partiallyRenamedCode = liveRenamer(originalCode, globalMapping, {
+                    sourceFile: chunkMeta.name,
+                    neighbors,
+                    displayName: chunkMeta.displayName,
+                    suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path
+                });
+                if (partiallyRenamedCode) {
+                    contextCode = partiallyRenamedCode;
+                }
+            } catch (err) {
+                console.warn(`    [!] Pre-renaming failed for ${file}: ${err.message}. Sending original code.`);
+            }
 
             const logicMatch = logicDbByName.get(chunkMeta.name);
             const logicLabel = logicMatch?.bestMatchLabel || logicMatch?.label || null;
@@ -537,7 +537,7 @@ ${(chunkMeta.outbound || []).map(n => {
 
 MAPPING KNOWLEDGE (High Confidence or Established Guesses):
 The following symbols have already been identified. Use these names in your reasoning.
-${[...variables, ...properties].filter(id => {
+${[...origVars, ...origProps].filter(id => {
                 const m = globalMapping.variables[id] || globalMapping.properties[id];
                 return m && (m.confidence >= 0.8 || m.source.includes('bootstrap'));
             }).map(id => {
@@ -547,7 +547,8 @@ ${[...variables, ...properties].filter(id => {
 
 ${goldReferenceCode ? `GOLD REFERENCE MATCH:
 This chunk matches a library signature (${(goldSimilarity * 100).toFixed(2)}% similarity). Use this to resolve ambiguous names.
-\n\`\`\`javascript
+
+\`\`\`javascript
 ${goldReferenceCode}
 \`\`\`
 ` : ''}
@@ -592,7 +593,7 @@ RESPONSE FORMAT (JSON ONLY):
                     if (varSub.length === 0 && propSub.length === 0) continue;
 
                     const isFirstBatch = (vOffset === 0 && pOffset === 0);
-                    const codeToPass = isFirstBatch ? code : skeletonize(code);
+                    const codeToPass = isFirstBatch ? contextCode : skeletonize(contextCode);
                     const prompt = generatePrompt(varSub, propSub, codeToPass, goldReferenceCode, goldSimilarity);
                     const PROMPT_RETRIES = 3;
                     let success = false;
@@ -670,7 +671,6 @@ RESPONSE FORMAT (JSON ONLY):
                                 const backoff = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
                                 console.warn(`    [!] Attempt ${attempt}/${PROMPT_RETRIES} failed for ${file}: ${err.message}. Retrying in ${Math.round(backoff / 1000)}s...`);
                                 await sleep(backoff);
-                                // Optional: we could try skeletonizing more aggressively or adjusting prompt here
                             } else {
                                 console.warn(`    [!] Error ${file} (Attempt ${attempt}/${PROMPT_RETRIES}): ${err.message}`);
                                 if (attempt === PROMPT_RETRIES) break;
@@ -685,10 +685,43 @@ RESPONSE FORMAT (JSON ONLY):
                 }
             }
 
+            // --- INCREMENTAL SYNC ---
+            // Apply current mappings and save to deobfuscated_chunks immediately
+            const deobfuscatedDir = path.join(versionPath, 'deobfuscated_chunks');
+            if (!fs.existsSync(deobfuscatedDir)) fs.mkdirSync(deobfuscatedDir, { recursive: true });
+
+            try {
+                let logicalName = "";
+                if (chunkMeta.proposedPath) {
+                    logicalName = path.basename(chunkMeta.proposedPath, '.ts');
+                } else if (chunkMeta.suggestedFilename) {
+                    logicalName = chunkMeta.suggestedFilename;
+                } else if (chunkMeta.kb_info && chunkMeta.kb_info.suggested_path) {
+                    logicalName = path.basename(chunkMeta.kb_info.suggested_path.replace(/`/g, ''), '.ts').replace('.js', '');
+                }
+                logicalName = logicalName.replace(/[\/\\?%*:|"<>]/g, '_');
+
+                const chunkBase = path.basename(file, '.js');
+                const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
+                const outputPath = path.join(deobfuscatedDir, finalName);
+
+                const finalRenamedCode = liveRenamer(originalCode, globalMapping, {
+                    sourceFile: chunkMeta.name,
+                    neighbors,
+                    displayName: chunkMeta.displayName,
+                    suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path
+                });
+
+                fs.writeFileSync(outputPath, finalRenamedCode || originalCode);
+            } catch (err) {
+                console.warn(`    [!] Incremental sync failed for ${file}: ${err.message}`);
+            }
+
             globalMapping.processed_chunks.push(chunkMeta.name);
             // Save progress frequently (every chunk)
             fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
         });
+
 
         console.log(`[*] Processing Core Batch (${coreChunks.length} chunks)...`);
         await Promise.all(coreChunks.map(runChunk));

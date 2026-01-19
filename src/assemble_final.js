@@ -75,35 +75,93 @@ async function assemble(version) {
         return;
     }
 
-    // 1. Filter for "Core" chunks (family, priority, founder) OR vendor chunks that have been identified (suggestedFilename)
-    const coreChunks = chunks.filter(c =>
-        c.category === 'family' ||
-        c.category === 'priority' ||
-        c.category === 'founder' ||
-        (c.category === 'vendor' && c.suggestedFilename)
-    );
+    // 1. Identify "Original Modules" and group chunks accordingly
+    // An "Original Module" is a sequence of chunks that starts with an import chunk
+    // and continues until the next import chunk or the end.
+    const modules = [];
+    let currentModule = null;
 
-    console.log(`[*] Assembling ${coreChunks.length} core/identified chunks into a structured codebase...`);
+    for (const chunk of chunks) {
+        if (chunk.startsWithImport) {
+            currentModule = {
+                chunks: [chunk],
+                bestPath: null
+            };
+            modules.push(currentModule);
+        } else if (currentModule) {
+            currentModule.chunks.push(chunk);
+        }
+    }
+
+    // Identify the best path for each module and mark chunks for inclusion
+    const finalChunksToAssemble = new Set();
+
+    modules.forEach(mod => {
+        // Find the most descriptive path within this module
+        let bestPath = null;
+        for (const chunk of mod.chunks) {
+            if (chunk.suggestedPath) {
+                bestPath = chunk.suggestedPath.replace('.ts', '.js');
+            } else if (chunk.kb_info && chunk.kb_info.suggested_path) {
+                bestPath = chunk.kb_info.suggested_path.replace(/`/g, '').replace('.ts', '.js');
+            }
+            if (bestPath) break;
+        }
+
+        // Fallback path if no descriptive path found
+        if (!bestPath && mod.chunks.length > 0) {
+            const firstChunk = mod.chunks[0];
+            const folder = firstChunk.role.toLowerCase().replace(/_/g, '-');
+            const fileName = firstChunk.suggestedFilename || firstChunk.name;
+            bestPath = `src/services/${folder}/${fileName}.js`;
+        }
+
+        mod.bestPath = bestPath;
+
+        // Mark all chunks in this "Original Module" for inclusion
+        mod.chunks.forEach(c => {
+            c.finalPath = bestPath;
+            finalChunksToAssemble.add(c);
+        });
+    });
+
+    // Also include other "Core" chunks that might not be in an original module (rare but possible)
+    chunks.forEach(c => {
+        if (!finalChunksToAssemble.has(c) && (
+            c.category === 'family' ||
+            c.category === 'priority' ||
+            c.category === 'founder' ||
+            (c.category === 'vendor' && c.suggestedFilename)
+        )) {
+            finalChunksToAssemble.add(c);
+        }
+    });
+
+    const coreChunks = Array.from(finalChunksToAssemble);
+
+    console.log(`[*] Assembling ${coreChunks.length} chunks into a structured codebase...`);
 
     // 2. Map chunks to their final file paths
     const fileMap = new Map(); // path -> Array<chunkMetadata>
 
     for (const chunk of coreChunks) {
-        let finalPath = '';
+        let finalPath = chunk.finalPath;
 
-        // 1. Check for Neural/Golden suggested path
-        if (chunk.suggestedPath) {
-            finalPath = chunk.suggestedPath.replace('.ts', '.js');
-        }
-        // 2. Check for Knowledge Base path
-        else if (chunk.kb_info && chunk.kb_info.suggested_path) {
-            finalPath = chunk.kb_info.suggested_path.replace(/`/g, '').replace('.ts', '.js');
-        }
-        // 3. Fallback to Role-based grouping
-        else {
-            const folder = chunk.role.toLowerCase().replace(/_/g, '-');
-            const fileName = chunk.suggestedFilename || chunk.name;
-            finalPath = `src/services/${folder}/${fileName}.js`;
+        if (!finalPath) {
+            // 1. Check for Neural/Golden suggested path
+            if (chunk.suggestedPath) {
+                finalPath = chunk.suggestedPath.replace('.ts', '.js');
+            }
+            // 2. Check for Knowledge Base path
+            else if (chunk.kb_info && chunk.kb_info.suggested_path) {
+                finalPath = chunk.kb_info.suggested_path.replace(/`/g, '').replace('.ts', '.js');
+            }
+            // 3. Fallback to Role-based grouping
+            else {
+                const folder = chunk.role.toLowerCase().replace(/_/g, '-');
+                const fileName = chunk.suggestedFilename || chunk.name;
+                finalPath = `src/services/${folder}/${fileName}.js`;
+            }
         }
 
         if (!fileMap.has(finalPath)) fileMap.set(finalPath, []);
@@ -204,14 +262,26 @@ async function assemble(version) {
 
         const sortedChunks = sortedNames.map(name => chunkList.find(c => c.name === name)).filter(Boolean);
 
-        // Secondary stable sort for non-dependent chunks (e.g. imports first)
-        // Note: sortedChunks already respects DAG order. We only want to bubble up imports if it doesn't break DAG.
-        // For simplicity, we'll stick to the DAG sort primarily.
+        // FORCE IMPORT SORT: Move chunks with imports to the very top
+        // This overrides topological sort because ES import statements must be at the top level
+        // and often our graph analysis might infer a dependency direction that places them later.
+        const importChunks = [];
+        const otherChunks = [];
+        sortedChunks.forEach(c => {
+            if (c.startsWithImport) {
+                importChunks.push(c);
+            } else {
+                otherChunks.push(c);
+            }
+        });
+
+        // Re-assemble with imports first - essentially "hoisting" the module header
+        const finalSortedChunks = [...importChunks, ...otherChunks];
 
         const headers = new Set();
         const finalChunks = [];
 
-        for (const chunkMeta of sortedChunks) {
+        for (const chunkMeta of finalSortedChunks) {
             const chunkFilePath = getDeobfuscatedChunkPath(chunksDir, chunkMeta);
             if (chunkFilePath) {
                 let code = fs.readFileSync(chunkFilePath, 'utf8');
