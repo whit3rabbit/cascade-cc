@@ -8,8 +8,8 @@ This document provides a detailed technical overview of the Claude Code Cascade 
 
 The system employs a **Hybrid Differential Deobfuscation** approach. Instead of relying purely on pattern matching or LLMs, it combines three distinct domains to reconstruct obfuscated codebases:
 
-1.  **Graph Theory & Static Analysis**: Understanding the relationship between code chunks, identifying entry points, and calculating importance (Markov Centrality).
-2.  **Neural Fingerprinting**: Using a Siamese Triple Network to identify code based on its "Structural DNA" (AST topology) rather than literal content.
+1.  **Graph Theory & Static Analysis**: Understanding the relationship between code chunks, identifying entry points, and calculating importance (Markov Centrality/PageRank).
+2.  **Neural Fingerprinting**: Using a **Transformer Encoder** (Siamese Network) to identify code based on its "Structural DNA" (AST topology) rather than literal content.
 3.  **LLM Semantic Inference**: Using Large Language Models (LLMs) to reconstruct human-readable names and file structures for proprietary ("Founder") logic that lacks a public baseline.
 
 ---
@@ -19,15 +19,16 @@ The system employs a **Hybrid Differential Deobfuscation** approach. Instead of 
 The repository is partitioned into three main layers:
 
 ### A. Orchestration & AST Processing (Node.js)
-- **`run.js`**: The central CLI entry point that manages environment variables (like `PYTHON_BIN`) and executes sub-processes.
-- **`src/analyze.js`**: The core analyzer. It uses Babel to chunk large bundles, extract metadata, and identify structural signals.
-- **`src/deobfuscate_pipeline.js`**: Manages the multi-stage LLM pass, handling JSON repair and scope-safe renaming.
+- **`src/analyze.js`**: The core analyzer. It uses Babel to chunk large bundles, extract metadata, and identify structural signals including "Tengu" markers.
+- **`src/anchor_logic.js`**: Bridges Node.js orchestration with Python inference. It handles logic registry synchronization, vectorization commands, and aligns symbols between target and gold-standard chunks.
+- **`src/deobfuscate_pipeline.js`**: Manages the multi-stage LLM pass, handling prioritized batching (Core Libs first, then Business Logic), incremental syncing, and JSON repair.
+- **`src/rename_chunks.js`**: Consumes `mapping.json` to apply a safe, scope-aware rename pass across the entire AST.
 - **`src/assemble_final.js`**: The reconstruction engine that uses dependency graphs to reassemble chunks into a coherent file tree.
 
 ### B. Machine Learning Core (Python/PyTorch)
-- **`ml/encoder.py`**: Defines the `CodeStructureEncoder`, a Siamese architecture using Bidirectional LSTMs for structural encoding and MLP channels for literal fingerprints.
-- **`ml/train.py`**: Implements the Triplet Loss training loop, teaching the model to ignore "surface noise" (renamed variables) and focus on "logic topology."
-- **`ml/vectorize.py`**: Generates 64-dimensional L2-normalized embeddings (fingerprints) for code chunks.
+- **`ml/encoder.py`**: Defines the `TransformerCodeEncoder`. It uses a Transformer Encoder with Positional Encoding to generate fixed-size (32-dim) embeddings from AST sequences.
+- **`ml/train.py`**: Implements the Triplet Loss training loop with "Nuclear Options" (Literal Dropout, Sequence Jittering, Node Masking) to force structural learning.
+- **`ml/vectorize.py`**: Generates 32-dimensional L2-normalized embeddings (fingerprints) for code chunks.
 
 ### C. Knowledge & Metadata (JSON)
 - **`knowledge_base.json`**: A curated database of known library "anchors" (keywords, error strings, unique patterns).
@@ -39,58 +40,67 @@ The repository is partitioned into three main layers:
 ## 3. The AI Workflow (Step-by-Step)
 
 ```mermaid
-graph TD
-    subgraph "Phase 1: Bootstrapping & Training"
-        B1[Bootstrap Libs] --> B2[Extract Gold ASTs]
-        B2 --> B3[Train Siamese Network]
-        B3 --> B4[ml/model.pth]
-    end
+flowchart TD
+  subgraph "Phase 1: Bootstrapping & Training"
+    B1[Bootstrap Libs] --> B2[Extract Gold ASTs]
+    B2 --> B3[Train Transformer]
+    B3 --> B4[ml/model.pth]
+  end
 
-    subgraph "Phase 2: Analysis & Neural Anchoring"
-        A1[Analyze Target Bundle] --> A2[Chunking & Graph Mapping]
-        A2 --> A3[Vectorize Chunks]
-        A3 --> A4[Neural Anchoring]
-        A4 --> A5[logic_registry.json Comparison]
-    end
+  subgraph "Phase 2: Analysis & Neural Anchoring"
+    A1[Analyze Target Bundle] --> A2[Chunking & Graph Mapping]
+    A2 --> A3[Vectorize Chunks]
+    A3 --> A4[Neural Anchoring]
+    A4 --> A5[logic_registry.json / KB Match]
+  end
 
-    subgraph "Phase 3: LLM & Assembly"
-        L1[Identify Founder Logic] --> L2[LLM Pass]
-        L2 --> L3[mapping.json Update]
-        L3 --> L4[Final Assembly]
-    end
+  subgraph "Phase 3: LLM & Assembly"
+    L1[Anchor Core Libs] --> L2[LLM Pass (Founder Logic)]
+    L2 --> L3[mapping.json Update]
+    L3 --> L4[Final Assembly]
+  end
 
-    subgraph "Phase 4: Refinement"
-        R1[Refine Codebase] --> R2[Final Clean Source]
-    end
+  subgraph "Phase 4: Refinement"
+    R1[Refine Codebase] --> R2[Final Clean Source]
+  end
 
-    B4 -.-> A3
-    A5 --> L1
-    L4 --> R1
+  B4 -.-> A3
+  A5 --> L1
+  L4 --> R1
 ```
 
 ### Step 1: Bootstrapping Library DNA
 The system downloads known libraries (e.g., React, Zod, Anthropic SDK) and generates clean, "Gold Standard" structural fingerprints. This creates the baseline "Brain" of the system.
 
-### Step 2: Training (Optional)
-The Siamese Network is trained on the bootstrapped data. It learns that `function a(b) { return b + 1; }` is structurally identical to `function x(y) { return y + 1; }`, even if the names are changed.
+### Step 2: Training (Nuclear Regularization)
+The Transformer Network is trained on the bootstrapped data using **Triplet Loss**. To prevent the model from overfitting to easy signals (like string literals), we employ "Nuclear Options":
+- **Literal Dropout**: Randomly masking all string/numeric literals.
+- **Sequence Jittering**: Randomly cropping or padding sequences.
+- **Node Type Masking**: Replacing valid AST node types with `UNKNOWN` tokens.
+
+This forces the model to learn the *topology* of the logic (how nodes connect) rather than superficial markers.
 
 ### Step 3: Analysis & Chunking
-The target bundle is broken down into small, manageable "chunks." The system calculates **Markov Centrality** scores to determine which chunks are the "heart" of the application (e.g., the main state machine or dispatcher).
+The target bundle is broken down into small, manageable "chunks." The system calculates **Markov Centrality** (PageRank with 0.85 damping) to determine which chunks are the "heart" of the application. It uses "Hybrid Teleportation" to bias importance towards suspected Founder logic.
 
 ### Step 4: Neural Anchoring
 Every chunk in the target bundle is vectorized. These vectors are compared against the `logic_registry.json`.
-- **Similarity > 0.95**: High-confidence library match. Symbols are automatically restored.
-- **Similarity 0.90 - 0.94**: "Version Drift" detected. Flagged for partial anchoring or LLM review.
-- **Similarity < 0.85**: Likely proprietary "Founder" logic.
+- **Similarity > 0.95**: Gold Standard / Library Match.
+- **Similarity > 0.80**: Strong Structural Match.
+- **Heuristic Boosts**: If `knowledge_base.json` suggests a library (e.g., "ink"), the similarity score is boosted to help the model lock in.
 
 ### Step 5: LLM Deobfuscation
-Chunks identified as "Founder" logic (unique to the application) are sent to an LLM. The LLM is provided with the chunk's code, its position in the dependency graph, and any partial anchors found nearby. It then generates human-readable names and suggests a file path.
+Chunks identified as "Founder" logic are sent to an LLM. The pipeline prioritizes "Core" chunks first. The LLM receives:
+1.  The chunk's code.
+2.  Neighboring chunk names (context).
+3.  Any identified "Gold" partial matches.
+4.  Existing mappings (incremental context).
 
 ### Step 6: Reconstruction
-The final step uses the `mapping.json` to perform a scope-safe rename across all chunks and writes them to a new directory structure that mirrors the inferred original codebase.
+The final step uses the `mapping.json` to perform a scope-safe rename across all chunks via `src/rename_chunks.js` and writes them to a new directory structure that mirrors the inferred original codebase.
 
 ### Step 7: Logic Refinement
-The assembled codebase undergoes a final refinement pass (`npm run refine`). This stage uses an LLM to restore high-level control flow (converting complex ternary chains back to if/else blocks), remove lingering obfuscation boilerplate, and group related functions into logical modules.
+The assembled codebase undergoes a final refinement pass (`npm run refine`). This stage uses an LLM to restore high-level control flow (converting complex ternary chains back to if/else blocks) and remove lingering obfuscation boilerplate.
 
 ---
 
@@ -99,8 +109,8 @@ The assembled codebase undergoes a final refinement pass (`npm run refine`). Thi
 ### The "Cold Start" Advantage
 Because the NN is trained on structural patterns rather than specific hashes, it can identify a library version it has never seen before, provided it follows similar architectural patterns to other libraries in the training set.
 
-### Literal Channels
-The ML model doesn't just look at AST nodes; it hashes literals (strings, numbers) into a separate vector channel. This preserves "semantic texture" (like error messages or unique constants) without the model becoming overfit to specific variable names.
+### Literal Hashing & Dropout
+The ML model uses a separate channel for literals (strings, numbers). During training, this channel is frequently "dropped out" (masked). This teaches the model to use literals as helpful hints when available, but not to depend on them, making it robust against string encryption or modification.
 
 ### Graph-Aware Deobfuscation
 Most deobfuscators look at files in isolation. This system uses the dependency graph to propagate information. If `chunkA` is identified as "Gemini Client," and `chunkB` depends heavily on it, the LLM is primed to know that `chunkB` likely contains core AI orchestration logic.

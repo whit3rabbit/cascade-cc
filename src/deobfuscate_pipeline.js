@@ -17,6 +17,9 @@ let KB = null;
 if (fs.existsSync(KB_PATH)) {
     KB = JSON.parse(fs.readFileSync(KB_PATH, 'utf8'));
     console.log(`[*] Loaded Knowledge Base with ${KB.name_hints?.length || 0} name hints.`);
+    if (KB.project_structure) {
+        console.log(`[*] Loaded Project Structure Definition.`);
+    }
 }
 
 // --- REFERENCE CONTEXT ---
@@ -528,6 +531,10 @@ CONTEXT:
 This chunk has been identified as ${chunkMeta.role}.
 It is intended to be located at: ${chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path || 'src/undetermined/'}.
 
+PROJECT STRUCTURE REFERENCE:
+Use this structure to guide your filename proposals. Place files in the most appropriate directory based on their logic.
+${KB && KB.project_structure ? JSON.stringify(KB.project_structure, null, 2) : 'Structure not available.'}
+
 NEIGHBOR CONTEXT:
 This code interacts with:
 ${(chunkMeta.outbound || []).map(n => {
@@ -617,7 +624,7 @@ RESPONSE FORMAT (JSON ONLY):
 
                                     const newEntry = typeof mapping === 'string'
                                         ? { name: newName, confidence: 0.8, source: chunkName }
-                                        : { ...mapping, name: newName, source: chunkName };
+                                        : { ...mapping, name: newName, source: chunkName, confidence: mapping.confidence || 0.8 };
 
                                     if (target[key]) {
                                         const existing = target[key];

@@ -1,4 +1,117 @@
 {
+  "project_structure": {
+    "src": {
+      "entrypoints": {
+        "description": "CLI entry logic",
+        "files": [
+          "main.ts"
+        ]
+      },
+      "core": {
+        "auth": {
+          "description": "OAuth, API Keys, and Cloud Provider credentials"
+        },
+        "config": {
+          "description": "Settings (user/project/local), Environment variables"
+        },
+        "fs": {
+          "description": "Atomic writes, encoding detection, symlink handling"
+        },
+        "session": {
+          "description": "Conversation state, token usage, and summarization"
+        },
+        "terminal": {
+          "description": "Theme management, auto-updates, and shell integration"
+        },
+        "events": {
+          "hooks": {
+            "description": "Event interception (PreToolUse, PostToolUse, etc.)",
+            "files": [
+              "engine.ts",
+              "registry.ts"
+            ]
+          }
+        }
+      },
+      "integrations": {
+        "anthropic": {
+          "description": "API Client and request/response middleware"
+        },
+        "chrome": {
+          "description": "\"Claude in Chrome\" bridge and browser automation"
+        },
+        "lsp": {
+          "description": "Language Server Protocol (diagnostics/intelligence)"
+        },
+        "mcp": {
+          "description": "Model Context Protocol (server management and transport)"
+        }
+      },
+      "security": {
+        "sandbox": {
+          "description": "Filesystem/Network isolation (Linux bwrap/Seccomp)"
+        },
+        "validation": {
+          "description": "Command injection checks and path sanitization"
+        },
+        "permissions": {
+          "description": "Tool-use approval flow and rule persistence"
+        }
+      },
+      "tools": {
+        "bash": {
+          "description": "Shell execution and background tasks"
+        },
+        "filesystem": {
+          "description": "File read/edit/write tools"
+        },
+        "notebook": {
+          "description": "Jupyter Notebook (.ipynb) manipulation"
+        },
+        "tasks": {
+          "description": "Todo list and task management (Subagents)"
+        }
+      },
+      "ui": {
+        "onboarding": {
+          "description": "First-run experience and directory selection"
+        },
+        "permissions": {
+          "description": "Interactive permission request dialogs"
+        },
+        "shared": {
+          "description": "Reusable UI elements (spinners, progress bars)"
+        },
+        "transcript": {
+          "description": "Conversation history and diff rendering"
+        }
+      },
+      "utils": {
+        "logging": {
+          "description": "Debug logs and PII filtering"
+        },
+        "metrics": {
+          "description": "Statsig and telemetry reporting"
+        },
+        "diff": {
+          "description": "Line-based diffing and hunk generation"
+        }
+      },
+      "extensions": {
+        "skills": {
+          "bundled": {
+            "description": "Hardcoded skills (e.g., think-back, init)"
+          },
+          "dynamic": {
+            "description": "Skills loaded from ~/.claude/skills/"
+          }
+        },
+        "plugins": {
+          "description": "Third-party bundles containing Tools/Hooks/Skills"
+        }
+      }
+    }
+  },
   "file_anchors": [
     {
       "suggested_path": "`src/utils/shared/lodashLikeRuntimeAndEnv.ts`",
@@ -65,7 +178,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/claude/claudeUtils.ts`",
+      "suggested_path": "`src/integrations/anthropic/claudeUtils.ts`",
       "suggested_name": "claudeUtils`",
       "description": "Inference profiles and model defaults",
       "trigger_keywords": [
@@ -76,7 +189,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/claude/anthropicApiClient.ts`",
+      "suggested_path": "`src/integrations/anthropic/anthropicApiClient.ts`",
       "suggested_name": "anthropicApiClient`",
       "description": "Auth headers and user agents",
       "trigger_keywords": [
@@ -87,7 +200,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/auth/subscription.ts`",
+      "suggested_path": "`src/core/auth/subscription.ts`",
       "suggested_name": "subscription`",
       "description": "Sonnet-1M access checking",
       "trigger_keywords": [
@@ -97,7 +210,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/statsig.ts`",
+      "suggested_path": "`src/utils/metrics/statsig.ts`",
       "suggested_name": "statsig`",
       "description": "Telemetry and feature flags",
       "trigger_keywords": [
@@ -107,7 +220,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/claude/modelSettings.ts`",
+      "suggested_path": "`src/integrations/anthropic/modelSettings.ts`",
       "suggested_name": "modelSettings`",
       "description": "Model configs and normalization",
       "trigger_keywords": [
@@ -137,7 +250,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/auth/authStatus.ts`",
+      "suggested_path": "`src/core/auth/authStatus.ts`",
       "suggested_name": "authStatus`",
       "description": "Authentication status and UI state",
       "trigger_keywords": [
@@ -147,7 +260,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/auth/authSource.ts`",
+      "suggested_path": "`src/core/auth/authSource.ts`",
       "suggested_name": "authSource`",
       "description": "Auth token source detection",
       "trigger_keywords": [
@@ -158,7 +271,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/auth/awsCredentials.ts`",
+      "suggested_path": "`src/core/auth/awsCredentials.ts`",
       "suggested_name": "awsCredentials`",
       "description": "AWS credential management",
       "trigger_keywords": [
@@ -167,7 +280,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/auth/apiKeyManager.ts`",
+      "suggested_path": "`src/core/auth/apiKeyManager.ts`",
       "suggested_name": "apiKeyManager`",
       "description": "API key retrieval, savings, and helpers",
       "trigger_keywords": [
@@ -177,7 +290,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/auth/oauthManager.ts`",
+      "suggested_path": "`src/core/auth/oauthManager.ts`",
       "suggested_name": "oauthManager`",
       "description": "OAuth token management and refresh",
       "trigger_keywords": [
@@ -188,7 +301,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/terminal/selfUpdate.ts`",
+      "suggested_path": "`src/core/terminal/selfUpdate.ts`",
       "suggested_name": "selfUpdate`",
       "description": "Local CLI installation and updates",
       "trigger_keywords": [
@@ -198,7 +311,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/telemetryEvents.ts`",
+      "suggested_path": "`src/utils/metrics/telemetryEvents.ts`",
       "suggested_name": "telemetryEvents`",
       "description": "Telemetry event serialization logic",
       "trigger_keywords": [
@@ -209,7 +322,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/telemetryExporter.ts`",
+      "suggested_path": "`src/utils/metrics/telemetryExporter.ts`",
       "suggested_name": "telemetryExporter`",
       "description": "Batched telemetry exporter with retries",
       "trigger_keywords": [
@@ -221,7 +334,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/telemetryInit.ts`",
+      "suggested_path": "`src/utils/metrics/telemetryInit.ts`",
       "suggested_name": "telemetryInit`",
       "description": "Telemetry initialization and logging",
       "trigger_keywords": [
@@ -382,7 +495,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/terminal/themeManager.tsx`",
+      "suggested_path": "`src/core/terminal/themeManager.tsx`",
       "suggested_name": "themeManagerx`",
       "description": "Theme context and preview management",
       "trigger_keywords": [
@@ -406,7 +519,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/terminal/errorMessage.tsx`",
+      "suggested_path": "`src/core/terminal/errorMessage.tsx`",
       "suggested_name": "errorMessagex`",
       "description": "Beautiful error rendering with code snippets",
       "trigger_keywords": [
@@ -558,7 +671,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/sandbox/macosSandbox.ts` / `src/services/sandbox/seccompFilter.ts`",
+      "suggested_path": "`src/security/sandbox/macosSandbox.ts` / `src/security/sandbox/seccompFilter.ts`",
       "suggested_name": "seccompFilter`",
       "description": "macOS sandbox profile generation and Seccomp filters",
       "trigger_keywords": [
@@ -571,7 +684,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/sandbox/violationMonitor.ts` / `src/services/sandbox/sandboxManager.ts`",
+      "suggested_path": "`src/security/sandbox/violationMonitor.ts` / `src/security/sandbox/sandboxManager.ts`",
       "suggested_name": "sandboxManager`",
       "description": "Sandbox violation monitoring and orchestration",
       "trigger_keywords": [
@@ -582,7 +695,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/sandbox/sandboxApi.ts` / `src/services/sandbox/pathResolver.ts`",
+      "suggested_path": "`src/security/sandbox/sandboxApi.ts` / `src/security/sandbox/pathResolver.ts`",
       "suggested_name": "pathResolver`",
       "description": "Public sandbox API and path resolution",
       "trigger_keywords": [
@@ -593,7 +706,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/sandbox/sandboxService.ts` / `src/services/sandbox/sandboxConfigGenerator.ts` / `src/utils/shared/partialJsonParser.ts`",
+      "suggested_path": "`src/security/sandbox/sandboxService.ts` / `src/security/sandbox/sandboxConfigGenerator.ts` / `src/utils/shared/partialJsonParser.ts`",
       "suggested_name": "partialJsonParser`",
       "description": "High-level sandbox service, configuration, and partial JSON parsing",
       "trigger_keywords": [
@@ -608,7 +721,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/terminal/anthropicStream.ts`",
+      "suggested_path": "`src/core/terminal/anthropicStream.ts`",
       "suggested_name": "anthropicStream`",
       "description": "Anthropic streaming API wrapper and tool descriptions",
       "trigger_keywords": [
@@ -630,7 +743,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/telemetryUtils.ts`",
+      "suggested_path": "`src/utils/metrics/telemetryUtils.ts`",
       "suggested_name": "telemetryUtils`",
       "description": "Telemetry hashing and remote URL anonymization",
       "trigger_keywords": [
@@ -675,7 +788,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/terminal/focusTracker.ts`",
+      "suggested_path": "`src/core/terminal/focusTracker.ts`",
       "suggested_name": "focusTracker`",
       "description": "Terminal focus detection (\\x1B[I / \\x1B[O)",
       "trigger_keywords": [
@@ -865,7 +978,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/terminal/mcpMode.ts`",
+      "suggested_path": "`src/core/terminal/mcpMode.ts`",
       "suggested_name": "mcpMode`",
       "description": "MCP and Tool Search mode detection",
       "trigger_keywords": [
@@ -876,7 +989,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/terminal/terminalUtils.ts`",
+      "suggested_path": "`src/core/terminal/terminalUtils.ts`",
       "suggested_name": "terminalUtils`",
       "description": "Terminal title and output folding utilities",
       "trigger_keywords": [
@@ -1210,7 +1323,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/auth/OAuth2Client.ts`",
+      "suggested_path": "`src/core/auth/OAuth2Client.ts`",
       "suggested_name": "OAuth2Client`",
       "description": "OAuth2 Client Service",
       "trigger_keywords": [
@@ -1350,7 +1463,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/sandbox/SandboxConfigSchema.ts`",
+      "suggested_path": "`src/security/sandbox/SandboxConfigSchema.ts`",
       "suggested_name": "SandboxConfigSchema`",
       "description": "Sandbox Config Schema",
       "trigger_keywords": [
@@ -1887,7 +2000,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/MetricAggregators.ts`",
+      "suggested_path": "`src/utils/metrics/MetricAggregators.ts`",
       "suggested_name": "MetricAggregators`",
       "description": "Metric Aggregators",
       "trigger_keywords": [
@@ -1917,7 +2030,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/TelemetryTracing.ts`",
+      "suggested_path": "`src/utils/metrics/TelemetryTracing.ts`",
       "suggested_name": "TelemetryTracing`",
       "description": "Telemetry Tracing",
       "trigger_keywords": [
@@ -1926,7 +2039,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/TelemetrySetup.ts`",
+      "suggested_path": "`src/utils/metrics/TelemetrySetup.ts`",
       "suggested_name": "TelemetrySetup`",
       "description": "Telemetry Setup",
       "trigger_keywords": [
@@ -1935,7 +2048,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/CliActivityTracker.tsx`",
+      "suggested_path": "`src/utils/metrics/CliActivityTracker.tsx`",
       "suggested_name": "CliActivityTrackerx`",
       "description": "CLI Activity Tracker and Components",
       "trigger_keywords": [
@@ -1945,7 +2058,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/telemetry/TelemetryUtils.ts`",
+      "suggested_path": "`src/utils/metrics/TelemetryUtils.ts`",
       "suggested_name": "TelemetryUtils`",
       "description": "Telemetry Utils and DOM Helpers",
       "trigger_keywords": [
@@ -2267,7 +2380,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/terminal/BashExecutor.ts`",
+      "suggested_path": "`src/core/terminal/BashExecutor.ts`",
       "suggested_name": "BashExecutor`",
       "description": "Shell environment detection, bash execution, and snapshots",
       "trigger_keywords": [
@@ -2332,7 +2445,7 @@
       ]
     },
     {
-      "suggested_path": "`src/services/terminal/IdeIntegrationService.ts`",
+      "suggested_path": "`src/core/terminal/IdeIntegrationService.ts`",
       "suggested_name": "IdeIntegrationService`",
       "description": "IDE integration and plugin management",
       "trigger_keywords": [
@@ -2491,11 +2604,11 @@
       "logic_anchor": "Ajv Entry, Structured Output & Exit Plan tools, Editor utils"
     },
     {
-      "suggested_name": "`src/components/permissions/PlanPermissionRequests.tsx`, `src/tools/definitions/EnterPlanModeTool.tsx`, `src/services/terminal/SlashCommandHandler.ts`",
+      "suggested_name": "`src/components/permissions/PlanPermissionRequests.tsx`, `src/tools/definitions/EnterPlanModeTool.tsx`, `src/core/terminal/SlashCommandHandler.ts`",
       "logic_anchor": "Plan Permissions, Enter Plan tool, Slash command parsing"
     },
     {
-      "suggested_name": "`src/tools/definitions/SkillTool.tsx`, `src/services/terminal/SlashCommandExecutor.ts`",
+      "suggested_name": "`src/tools/definitions/SkillTool.tsx`, `src/core/terminal/SlashCommandExecutor.ts`",
       "logic_anchor": "Skill tool and Slash command execution"
     },
     {
@@ -2503,15 +2616,15 @@
       "logic_anchor": "AskUserQuestion tool, Permission prompt dispatcher, Schema utils"
     },
     {
-      "suggested_name": "`src/components/terminal/ElicitationDialog.tsx`, `src/utils/shared/XDGUtils.ts`, `src/services/terminal/AutoUpdater.ts`, `src/utils/shared/PIDLock.ts`",
+      "suggested_name": "`src/components/terminal/ElicitationDialog.tsx`, `src/utils/shared/XDGUtils.ts`, `src/core/terminal/AutoUpdater.ts`, `src/utils/shared/PIDLock.ts`",
       "logic_anchor": "Elicitation dialog, XDG/AutoUpdater/Locking logic"
     },
     {
-      "suggested_name": "`src/services/terminal/NativeInstaller.ts`",
+      "suggested_name": "`src/core/terminal/NativeInstaller.ts`",
       "logic_anchor": "Native installer logic (binary management, versioning)"
     },
     {
-      "suggested_name": "`src/services/terminal/AutoUpdaterUI.tsx`, `src/services/terminal/LegacyInstallerRemover.ts`",
+      "suggested_name": "`src/core/terminal/AutoUpdaterUI.tsx`, `src/core/terminal/LegacyInstallerRemover.ts`",
       "logic_anchor": "Auto-updater UI and Legacy installation cleanup"
     },
     {
@@ -2591,11 +2704,11 @@
       "logic_anchor": "Fuse.js fuzzy search implementation"
     },
     {
-      "suggested_name": "`src/services/terminal/SuggestionsService.ts`, `src/services/terminal/FileIndexService.ts`, `src/services/bash/ShellEnvironmentManager.ts`",
+      "suggested_name": "`src/core/terminal/SuggestionsService.ts`, `src/core/terminal/FileIndexService.ts`, `src/services/bash/ShellEnvironmentManager.ts`",
       "logic_anchor": "Suggestions, File Indexing, Shell Env logic"
     },
     {
-      "suggested_name": "`src/services/bash/BashExecutor.ts`, `src/services/terminal/ShellCompletionService.ts`",
+      "suggested_name": "`src/services/bash/BashExecutor.ts`, `src/core/terminal/ShellCompletionService.ts`",
       "logic_anchor": "Bash command executor and Shell completion"
     },
     {
@@ -2603,7 +2716,7 @@
       "logic_anchor": "Plan Permission Components"
     },
     {
-      "suggested_name": "`src/services/terminal/SlashCommandHandler.ts`",
+      "suggested_name": "`src/core/terminal/SlashCommandHandler.ts`",
       "logic_anchor": "Slash Command Handler"
     },
     {
@@ -2611,7 +2724,7 @@
       "logic_anchor": "Updated Plan Tools (EnterPlanMode)"
     },
     {
-      "suggested_name": "`src/services/terminal/SlashCommandExecutor.ts`",
+      "suggested_name": "`src/core/terminal/SlashCommandExecutor.ts`",
       "logic_anchor": "Slash Command Execution and Skill Tool"
     },
     {
@@ -2639,11 +2752,11 @@
       "logic_anchor": "AutoUpdater UI component and migration controller"
     },
     {
-      "suggested_name": "`src/services/terminal/FileIndexService.ts`",
+      "suggested_name": "`src/core/terminal/FileIndexService.ts`",
       "logic_anchor": "File Indexing and Suggestions"
     },
     {
-      "suggested_name": "`src/services/terminal/BashExecutor.ts`",
+      "suggested_name": "`src/core/terminal/BashExecutor.ts`",
       "logic_anchor": "Bash Execution and Shell Autocomplete"
     },
     {
@@ -2671,7 +2784,7 @@
       "logic_anchor": "Tool Call UI and Internal Libs"
     },
     {
-      "suggested_name": "`src/services/telemetry/TelemetryService.ts`",
+      "suggested_name": "`src/utils/metrics/TelemetryService.ts`",
       "logic_anchor": "Telemetry and Event Processing"
     },
     {
@@ -2691,23 +2804,23 @@
       "logic_anchor": "Tool call output and progress rendering"
     },
     {
-      "suggested_name": "`src/services/terminal/LifecycleService.ts`",
+      "suggested_name": "`src/core/terminal/LifecycleService.ts`",
       "logic_anchor": "Application lifecycle management (re-init with hooks)"
     },
     {
-      "suggested_name": "`src/services/terminal/PermissionService.ts`",
+      "suggested_name": "`src/core/terminal/PermissionService.ts`",
       "logic_anchor": "Tool and file permission management with persistent storage"
     },
     {
-      "suggested_name": "`src/services/terminal/PermissionService.ts`",
+      "suggested_name": "`src/core/terminal/PermissionService.ts`",
       "logic_anchor": "Permission service initialization and CLI hooks"
     },
     {
-      "suggested_name": "`src/services/terminal/PlanModeService.ts`",
+      "suggested_name": "`src/core/terminal/PlanModeService.ts`",
       "logic_anchor": "Plan mode management and execution loop orchestration"
     },
     {
-      "suggested_name": "`src/services/terminal/DiagnosticsService.ts`",
+      "suggested_name": "`src/core/terminal/DiagnosticsService.ts`",
       "logic_anchor": "LSP diagnostics aggregation and reporting"
     },
     {
@@ -2767,7 +2880,7 @@
       "logic_anchor": "ASCII chart generation for terminal visualizations"
     },
     {
-      "suggested_name": "`src/services/terminal/AnalyticsService.ts`",
+      "suggested_name": "`src/core/terminal/AnalyticsService.ts`",
       "logic_anchor": "User activity analytics and activity heatmap rendering"
     },
     {
@@ -2803,15 +2916,15 @@
       "logic_anchor": "Tool Permissions and Remote Sync"
     },
     {
-      "suggested_name": "`src/services/terminal/SubmissionPipeline.ts`",
+      "suggested_name": "`src/core/terminal/SubmissionPipeline.ts`",
       "logic_anchor": "Input Processing and Query Profiler"
     },
     {
-      "suggested_name": "`src/services/terminal/ChatSessionOrchestrator.ts`",
+      "suggested_name": "`src/core/terminal/ChatSessionOrchestrator.ts`",
       "logic_anchor": "Chat Loop Generator and IDE Sync"
     },
     {
-      "suggested_name": "`src/services/terminal/ExtraFeatures.ts`",
+      "suggested_name": "`src/core/terminal/ExtraFeatures.ts`",
       "logic_anchor": "Cache Warming and Feedback Surveys"
     },
     {
@@ -2823,7 +2936,7 @@
       "logic_anchor": "Browser Extension and Plugin Marketplace"
     },
     {
-      "suggested_name": "`src/services/terminal/ProTipsService.tsx`",
+      "suggested_name": "`src/core/terminal/ProTipsService.tsx`",
       "logic_anchor": "Tooltips, Cooldowns, and Network Guard"
     },
     {
@@ -2851,7 +2964,7 @@
       "logic_anchor": "Bash timeout and output length configuration"
     },
     {
-      "suggested_name": "`src/services/terminal/GitPolicyService.ts`",
+      "suggested_name": "`src/core/terminal/GitPolicyService.ts`",
       "logic_anchor": "Git safety protocol and shell UI"
     },
     {
@@ -2879,7 +2992,7 @@
       "logic_anchor": "`MeasuredText` class for terminal layout."
     },
     {
-      "suggested_name": "`src/services/terminal/VimInputService.ts`",
+      "suggested_name": "`src/core/terminal/VimInputService.ts`",
       "logic_anchor": "Vim mode logic and Paste handler."
     },
     {
@@ -2887,23 +3000,23 @@
       "logic_anchor": "Footer UI and Shell Details view."
     },
     {
-      "suggested_name": "`src/services/terminal/StandardInputService.ts`",
+      "suggested_name": "`src/core/terminal/StandardInputService.ts`",
       "logic_anchor": "Core terminal input logic (Emacs keys)."
     },
     {
-      "suggested_name": "`src/services/terminal/PermissionService.ts`",
+      "suggested_name": "`src/core/terminal/PermissionService.ts`",
       "logic_anchor": "Tool registry and permission bootstrapping"
     },
     {
-      "suggested_name": "`src/services/terminal/MessageFactory.ts`",
+      "suggested_name": "`src/core/terminal/MessageFactory.ts`",
       "logic_anchor": "Settings loading and message serialization"
     },
     {
-      "suggested_name": "`src/services/terminal/StreamingHandler.ts`",
+      "suggested_name": "`src/core/terminal/StreamingHandler.ts`",
       "logic_anchor": "Transcript normalization and streaming logic"
     },
     {
-      "suggested_name": "`src/services/terminal/PlanModeService.ts`",
+      "suggested_name": "`src/core/terminal/PlanModeService.ts`",
       "logic_anchor": "Plan mode orchestration and attachment mapping"
     },
     {
@@ -2979,11 +3092,11 @@
       "logic_anchor": "Detailed tool browser and inspector for MCP integrations"
     },
     {
-      "suggested_name": "`src/services/claude/claudeUtils.ts`",
+      "suggested_name": "`src/integrations/anthropic/claudeUtils.ts`",
       "logic_anchor": "Claude model mappings, cost calculations, and inference profiles"
     },
     {
-      "suggested_name": "`src/services/claude/claudeUtils.ts`",
+      "suggested_name": "`src/integrations/anthropic/claudeUtils.ts`",
       "logic_anchor": "Model display names, recommended models, and model aliases"
     },
     {
@@ -3071,11 +3184,11 @@
       "logic_anchor": "Terminal charting, rate limit UI, and account upgrade commands"
     },
     {
-      "suggested_name": "`src/services/terminal/AnalyticsService.ts`",
+      "suggested_name": "`src/core/terminal/AnalyticsService.ts`",
       "logic_anchor": "Activity tracking, streak calculation, and Wasm integration"
     },
     {
-      "suggested_name": "`src/services/terminal/ScreenshotService.ts`",
+      "suggested_name": "`src/core/terminal/ScreenshotService.ts`",
       "logic_anchor": "Terminal capturing and clipboard integration with resvg support"
     },
     {
@@ -3083,7 +3196,7 @@
       "logic_anchor": "Main stats UI and command/skill registry management"
     },
     {
-      "suggested_name": "`src/services/terminal/PromptService.ts`",
+      "suggested_name": "`src/core/terminal/PromptService.ts`",
       "logic_anchor": "System prompt construction and environment metadata"
     },
     {
@@ -3091,7 +3204,7 @@
       "logic_anchor": "Low-level hashing, encryption, and pattern matching utilities"
     },
     {
-      "suggested_name": "`src/services/terminal/StreamingService.ts`",
+      "suggested_name": "`src/core/terminal/StreamingService.ts`",
       "logic_anchor": "Core Claude API streaming logic and error fallbacks"
     },
     {
@@ -3107,31 +3220,31 @@
       "logic_anchor": "Advanced terminal input with Emacs keybindings and image paste"
     },
     {
-      "suggested_name": "`src/services/terminal/HookService.tsx`",
+      "suggested_name": "`src/core/terminal/HookService.tsx`",
       "logic_anchor": "Permission persistence UI and event hook management system"
     },
     {
-      "suggested_name": "`src/services/terminal/HookExecutionService.ts`",
+      "suggested_name": "`src/core/terminal/HookExecutionService.ts`",
       "logic_anchor": "Backend engine for executing Bash and Agent-based hooks"
     },
     {
-      "suggested_name": "`src/services/terminal/HookOrchestrator.ts`",
+      "suggested_name": "`src/core/terminal/HookOrchestrator.ts`",
       "logic_anchor": "Orchestration logic for multi-hook events and state aggregation"
     },
     {
-      "suggested_name": "`src/services/terminal/LifecycleService.ts`",
+      "suggested_name": "`src/core/terminal/LifecycleService.ts`",
       "logic_anchor": "Application lifecycle, signal handling, and global auto-updater"
     },
     {
-      "suggested_name": "`src/services/terminal/ConfigService.ts`",
+      "suggested_name": "`src/core/terminal/ConfigService.ts`",
       "logic_anchor": "Hierarchical configuration management and atomic persistence"
     },
     {
-      "suggested_name": "`src/services/terminal/ConfigDefaults.ts` / `src/services/terminal/GrowthBookService.ts`",
+      "suggested_name": "`src/core/terminal/ConfigDefaults.ts` / `src/core/terminal/GrowthBookService.ts`",
       "logic_anchor": "Settings Defaults and Feature Flags"
     },
     {
-      "suggested_name": "`src/services/terminal/settings.ts`",
+      "suggested_name": "`src/core/terminal/settings.ts`",
       "logic_anchor": "Layered settings merging, atomic writing, and FS utilities"
     },
     {
@@ -3159,7 +3272,7 @@
       "logic_anchor": "Onboarding sequence (Auth, Theme, Security Setup)"
     },
     {
-      "suggested_name": "`src/services/terminal/PluginCliService.ts`",
+      "suggested_name": "`src/core/terminal/PluginCliService.ts`",
       "logic_anchor": "Plugin CLI commands, MCP server bridge, and log cleanup"
     },
     {
@@ -3167,15 +3280,15 @@
       "logic_anchor": "Datadog/Segment analytics bridge and safety confirmation UI"
     },
     {
-      "suggested_name": "`src/services/terminal/ControlStreamService.ts`",
+      "suggested_name": "`src/core/terminal/ControlStreamService.ts`",
       "logic_anchor": "JSON-RPC stdio protocol for remote subagent control"
     },
     {
-      "suggested_name": "`src/services/terminal/WebSocketTransport.ts`",
+      "suggested_name": "`src/core/terminal/WebSocketTransport.ts`",
       "logic_anchor": "WebSocket transport and remote session orchestration"
     },
     {
-      "suggested_name": "`src/services/terminal/SessionRecoveryService.ts`",
+      "suggested_name": "`src/core/terminal/SessionRecoveryService.ts`",
       "logic_anchor": "Session recovery, teleportation, and MCP client syncing"
     },
     {
@@ -3183,7 +3296,7 @@
       "logic_anchor": "Native binary installation view and launcher setup"
     },
     {
-      "suggested_name": "`src/services/terminal/SetupOrchestrator.ts`",
+      "suggested_name": "`src/core/terminal/SetupOrchestrator.ts`",
       "logic_anchor": "App startup orchestrator (Auth, Terms, Onboarding)"
     },
     {
@@ -3291,7 +3404,7 @@
       "logic_anchor": "Shell quoting, path resolution, and custom errors"
     },
     {
-      "suggested_name": "`src/services/terminal/OAuthService.ts`",
+      "suggested_name": "`src/core/terminal/OAuthService.ts`",
       "logic_anchor": "OAuth PKCE flow, API key exchange, and profile sync"
     },
     {
@@ -3311,7 +3424,7 @@
       "logic_anchor": "MCP tool schemas for browser-side introspection"
     },
     {
-      "suggested_name": "`src/services/terminal/AgentMainLoop.ts`",
+      "suggested_name": "`src/core/terminal/AgentMainLoop.ts`",
       "logic_anchor": "Main agent orchestration and message loop logic"
     },
     {
@@ -3319,11 +3432,11 @@
       "logic_anchor": "Main TUI container and interactive UI components"
     },
     {
-      "suggested_name": "`src/services/terminal/BashSecurityPolicy.ts`",
+      "suggested_name": "`src/core/terminal/BashSecurityPolicy.ts`",
       "logic_anchor": "Safelist of allowed bash commands and safe flags"
     },
     {
-      "suggested_name": "`src/services/terminal/BashSecurityPolicy.ts`",
+      "suggested_name": "`src/core/terminal/BashSecurityPolicy.ts`",
       "logic_anchor": "Regex safelist for immediate terminal execution"
     },
     {
@@ -3335,7 +3448,7 @@
       "logic_anchor": "Installed plugins manager (list view continuation)"
     },
     {
-      "suggested_name": "`src/services/terminal/CliSetup.ts`",
+      "suggested_name": "`src/core/terminal/CliSetup.ts`",
       "logic_anchor": "CLI command handler and setup orchestrator"
     },
     {
@@ -3343,7 +3456,7 @@
       "logic_anchor": "MCP management CLI subcommands (add, remove, list)"
     },
     {
-      "suggested_name": "`src/services/terminal/PluginCliAdmin.ts`",
+      "suggested_name": "`src/core/terminal/PluginCliAdmin.ts`",
       "logic_anchor": "Plugin and Marketplace management CLI subcommands"
     },
     {

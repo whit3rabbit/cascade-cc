@@ -147,6 +147,16 @@ async function assemble(version) {
     for (const chunk of coreChunks) {
         let finalPath = chunk.finalPath;
 
+        // CRITICAL FIX: Prioritize explicit proposed paths from Anchoring (e.g. Vendor matches)
+        // and enforce vendor isolation to prevent giant files.
+        if (chunk.proposedPath) {
+            finalPath = chunk.proposedPath.replace('.ts', '.js');
+        } else if (chunk.category === 'vendor') {
+            const folder = chunk.role.replace(/[:\s]/g, '_').replace(/VENDOR_/g, '').toLowerCase();
+            const fileName = chunk.suggestedFilename || chunk.name;
+            finalPath = `src/vendor/${folder}/${fileName}.js`;
+        }
+
         if (!finalPath) {
             // 1. Check for Neural/Golden suggested path
             if (chunk.suggestedPath) {
@@ -319,6 +329,34 @@ async function assemble(version) {
         fs.writeFileSync(fullOutputPath, mergedCode);
         console.log(`    [+] Generated: ${filePath}`);
     }
+
+    // 4. Generate Assembly Map
+    console.log(`[*] Generating Assembly Map...`);
+    let mapContent = `# Assembly Map\n\nGenerated on: ${new Date().toISOString()}\n\n`;
+
+    // Sort files alphabetically for the report
+    const sortedFiles = Array.from(fileMap.keys()).sort();
+
+    for (const filePath of sortedFiles) {
+        const chunkList = fileMap.get(filePath);
+        mapContent += `## ${filePath}\n\n`;
+
+        // Sort chunks by start line for consistent output
+        const sortedChunksForMap = chunkList.slice().sort((a, b) => (a.startLine || 0) - (b.startLine || 0));
+
+        for (const chunk of sortedChunksForMap) {
+            const originalFileName = path.basename(chunk.file);
+            mapContent += `- **${chunk.name}**\n`;
+            mapContent += `  - Original File: \`${originalFileName}\`\n`;
+            mapContent += `  - Lines: ${chunk.startLine}-${chunk.endLine}\n`;
+            mapContent += `  - Role: ${chunk.role}\n`;
+        }
+        mapContent += `\n`;
+    }
+
+    const mapPath = path.join(finalDir, 'ASSEMBLY_MAP.md');
+    fs.writeFileSync(mapPath, mapContent);
+    console.log(`    [+] Generated: ASSEMBLY_MAP.md`);
 
 
     console.log(`\n[OK] Assembly complete. Codebase located in: ${finalDir}`);
