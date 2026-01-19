@@ -233,7 +233,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
             }
 
             // Lowered global threshold for better coverage (0.85 default instead of 0.9)
-            const effectiveThreshold = parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.85;
+            const effectiveThreshold = parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.80;
 
             if (bestMatch.similarity > effectiveThreshold) {
                 const isNewChunk = !targetMapping.processed_chunks.includes(targetChunk.name);
@@ -361,7 +361,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 }
             }
 
-            if (bestMatch.similarity > (parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.9)) { // Lowered for cold start reliability
+            if (bestMatch.similarity > (parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.80)) { // Lowered for cold start reliability
                 totalSimilarity += bestMatch.similarity;
                 highSimCount++;
 
