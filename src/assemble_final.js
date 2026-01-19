@@ -78,17 +78,26 @@ async function assemble(version) {
     // 1. Identify "Original Modules" and group chunks accordingly
     // An "Original Module" is a sequence of chunks that starts with an import chunk
     // and continues until the next import chunk or the end.
+    // 1. Identify "Original Modules" and group chunks accordingly
+    // An "Original Module" is a sequence of chunks that starts with an import chunk
+    // and continues until the next import chunk or the end.
     const modules = [];
-    let currentModule = null;
+    // Start with a default module in case the first chunks don't have import signals
+    let currentModule = {
+        chunks: [],
+        bestPath: null
+    };
+    modules.push(currentModule);
 
     for (const chunk of chunks) {
-        if (chunk.startsWithImport) {
+        // If we hit a new import signal AND the current module already has content, start a new one
+        if (chunk.startsWithImport && currentModule.chunks.length > 0) {
             currentModule = {
                 chunks: [chunk],
                 bestPath: null
             };
             modules.push(currentModule);
-        } else if (currentModule) {
+        } else {
             currentModule.chunks.push(chunk);
         }
     }

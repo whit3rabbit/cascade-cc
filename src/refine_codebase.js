@@ -10,7 +10,7 @@ async function refineFile(filePath, relPath) {
     const code = fs.readFileSync(filePath, 'utf8');
 
     // Skip very large files or vendor files if needed, but for now let's try all
-    if (code.length > 50000) {
+    if (code.length > 100000) {
         console.warn(`[!] Skipping ${relPath} (too large: ${code.length} chars)`);
         return;
     }

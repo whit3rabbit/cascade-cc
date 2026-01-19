@@ -80,6 +80,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             }
 
                             let newName = null;
+                            let entryName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
                             if (Array.isArray(entry)) {
                                 // Prioritize exact chunk match
                                 const match = entry.find(e => e && (e.source === chunkBase || e.source === sourceFile)) ||
@@ -88,7 +89,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                                     entry[0];
                                 newName = match ? match.name : null;
                             } else {
-                                newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                                newName = entryName;
                             }
 
                             if (newName) {
@@ -161,6 +162,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             }
                         }
                     } else {
+                        // Handle strict object format { name: "foo", confidence: 0.9 }
                         newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
                         confidence = (entry && typeof entry === 'object') ? (entry.confidence || 0.8) : 0.8;
                     }
@@ -171,17 +173,24 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             return;
                         }
                         // SAFETY CHECKS:
-                        const isObjectKnown = (p.node.object.type === 'Identifier' && mapping.variables[p.node.object.name]) ||
-                            p.node.object.type === 'ThisExpression' ||
-                            p.node.object.type === 'MemberExpression'; // Allow nested properties if they look logical
-                        const isHighConfidence = confidence >= 0.95;
+                        const isObjectKnown = (p.node.object.type === 'Identifier' && mapping.variables && mapping.variables[p.node.object.name]);
+                        const isHighConfidence = confidence >= 0.98;
                         const isDescriptive = propName.length > 2;
+
+                        // PROPERTY CONTEXTUALIZATION:
+                        // Prevent "pollution" where a global short mapping (e.g. 'e' -> 'error') 
+                        // renames properties on unrelated objects (e.g. 'event.e').
+                        // Only rename short properties if we are VERY sure, or if we know the parent object.
+                        if (!isDescriptive && !isHighConfidence && !isObjectKnown) {
+                            // SKIP: Context is too weak for such a short name
+                            return;
+                        }
 
                         // SURGICAL RENAME: If we are in surgical mode (which we are by default now for Gold Standard), 
                         // we ONLY apply if it's high confidence.
                         if (isProtectedProperty(propName)) {
                             // SKIP: Never rename reserved properties
-                        } else if (isHighConfidence || (isObjectKnown && isDescriptive)) {
+                        } else if (isHighConfidence || (isObjectKnown && isDescriptive) || (isDescriptive && confidence > 0.8)) {
                             p.node.property.name = newName;
                         }
                     }
@@ -221,6 +230,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             }
                         }
                     } else {
+                        // Handle strict object format { name: "foo", confidence: 0.9 }
                         newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
                         confidence = (entry && typeof entry === 'object') ? (entry.confidence || 0.8) : 0.8;
                     }

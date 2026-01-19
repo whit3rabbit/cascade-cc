@@ -587,16 +587,14 @@ class CascadeGraph {
                 hasTengu: hasTengu,
                 entrySignalCount: entrySignalCount,
                 startsWithImport: currentChunkNodes.some(node => {
-                    if (node.type === 'ImportDeclaration') return true;
-                    if (node.type === 'VariableDeclaration') {
-                        const subCode = code.slice(node.start, node.end);
-                        return subCode.includes('require(') || subCode.includes('_toESM');
-                    }
-                    if (node.type === 'ExpressionStatement') {
-                        const subCode = code.slice(node.start, node.end);
-                        return subCode.includes('require(');
-                    }
-                    return false;
+                    const nodeCode = code.slice(node.start, node.end);
+                    return (
+                        node.type === 'ImportDeclaration' ||
+                        nodeCode.includes('require(') ||
+                        nodeCode.includes('_toESM(') ||
+                        nodeCode.includes('__commonJS(') ||
+                        nodeCode.includes('import.meta')
+                    );
                 })
             });
 
@@ -955,6 +953,18 @@ class CascadeGraph {
             }
         });
 
+        // SOFT MERGE: Preserve valuable metadata from previous runs
+        let existingMetadata = [];
+        if (fs.existsSync(path.join(metadataDir, 'graph_map.json'))) {
+            try {
+                const raw = JSON.parse(fs.readFileSync(path.join(metadataDir, 'graph_map.json')));
+                existingMetadata = Array.isArray(raw) ? raw : (raw.chunks || []);
+                console.log(`[*] Soft Merge: Loaded ${existingMetadata.length} existing chunks for metadata preservation.`);
+            } catch (e) {
+                console.warn(`[!] Soft Merge: Failed to read existing metadata. Starting fresh.`);
+            }
+        }
+
         // Create the flat array format expected by the pipeline
         const metadata = [];
         const fileRanges = []; // Keep fileRanges for graph_map.js, but not for graph_map.json
@@ -966,21 +976,27 @@ class CascadeGraph {
 
             fs.writeFileSync(path.join(chunksDir, fileName), node.code);
 
+            // Soft Match Logic
+            const oldEntry = existingMetadata.find(e => e.name === name);
+
             const metaEntry = {
                 name,
-                displayName: node.displayName || null,
+                displayName: node.displayName || (oldEntry ? oldEntry.displayName : null),
                 file: `chunks/${fileName}`,
                 tokens: node.tokens || 0,
                 score: node.score || 0,
                 centrality: node.score || 0, // Corrected name
-                role: node.role || 'MODULE',
+                role: node.role !== 'MODULE' ? node.role : (oldEntry ? oldEntry.role : 'MODULE'),
                 category: node.category || 'unknown',
                 label: node.label || null,
                 outbound: Array.from(node.neighbors),
                 kb_info: node.kb_info,
                 hints: node.hints,
-                proposedPath: node.proposedPath || null,
-                isGoldenMatch: node.isGoldenMatch || false,
+                // CRITICAL: Preserve expensive LLM-generated paths
+                proposedPath: node.proposedPath || (oldEntry ? oldEntry.proposedPath : null),
+                suggestedFilename: node.suggestedFilename || (oldEntry ? oldEntry.suggestedFilename : null),
+                isGoldenMatch: node.isGoldenMatch || (oldEntry ? oldEntry.isGoldenMatch : false),
+
                 hasTengu: node.hasTengu || false,
                 hasGenerator: node.hasGenerator || false,
                 hasStateMutator: node.hasStateMutator || false,
