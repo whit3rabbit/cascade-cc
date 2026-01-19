@@ -47,7 +47,11 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         const similarity = matchMeta ? matchMeta.similarity : 0;
 
         // EVIDENCE FOR VENDOR: Only if NN is very sure (> 0.92)
-        const isProvenLibrary = similarity > 0.92 || node.isGoldenMatch;
+        // PROTECT FIRST_PARTY: If name contains "claude" or "theme", assume it's ours.
+        const lowerName = (node.displayName || node.name || "").toLowerCase();
+        const looksLikeFirstParty = lowerName.includes('claude') || lowerName.includes('theme');
+
+        const isProvenLibrary = (similarity > 0.92 || node.isGoldenMatch) && !looksLikeFirstParty;
 
         // EVIDENCE FOR FOUNDER: 
         // a) Explicit signals (Tengu, Generators, Entry Points)

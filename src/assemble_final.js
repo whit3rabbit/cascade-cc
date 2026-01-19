@@ -139,14 +139,19 @@ async function assemble(version) {
         if (!finalChunksToAssemble.has(c) && (
             c.category === 'family' ||
             c.category === 'priority' ||
-            c.category === 'founder' ||
-            (c.category === 'vendor' && c.suggestedFilename)
+            c.category === 'founder'
+            // Exclude vendor chunks as per user request
+            // || (c.category === 'vendor' && c.suggestedFilename)
         )) {
             finalChunksToAssemble.add(c);
         }
     });
 
-    const coreChunks = Array.from(finalChunksToAssemble);
+    const coreChunks = Array.from(finalChunksToAssemble).filter(c =>
+        c.category !== 'vendor' &&
+        !c.role.startsWith('LIB:') &&
+        !c.role.toLowerCase().startsWith('lib:')
+    );
 
     console.log(`[*] Assembling ${coreChunks.length} chunks into a structured codebase...`);
 
@@ -166,6 +171,8 @@ async function assemble(version) {
             finalPath = `src/vendor/${folder}/${fileName}.js`;
         }
 
+
+
         if (!finalPath) {
             // 1. Check for Neural/Golden suggested path
             if (chunk.suggestedPath) {
@@ -181,6 +188,18 @@ async function assemble(version) {
                 const fileName = chunk.suggestedFilename || chunk.name;
                 finalPath = `src/services/${folder}/${fileName}.js`;
             }
+        }
+
+        // DOUBLE CHECK: Ensure no path ever points to vendor, even after fallbacks
+        if (finalPath && (
+            finalPath.startsWith('src/vendor/') ||
+            finalPath.includes('/vendor/') ||
+            finalPath.includes('lib:') ||
+            finalPath.includes('lib__')
+        )) {
+            // Force a neutral path
+            const fileName = chunk.suggestedFilename || chunk.name;
+            finalPath = `src/services/external/${fileName}.js`;
         }
 
         if (!fileMap.has(finalPath)) fileMap.set(finalPath, []);
