@@ -78,9 +78,17 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             }
 
                             if (newName) {
+                                if (typeof newName !== 'string') {
+                                    console.warn(`[WARN] Variable mapping for ${oldName} is not a string:`, newName);
+                                    return;
+                                }
                                 if (RESERVED_GLOBALS.has(newName) || DISALLOWED_VARIABLE_NAMES.has(newName)) return;
-                                p.scope.rename(oldName, newName);
-                                renamedBindings.add(oldName);
+                                try {
+                                    p.scope.rename(oldName, newName);
+                                    renamedBindings.add(oldName);
+                                } catch (err) {
+                                    console.warn(`[WARN] Failed to rename variable ${oldName} -> ${newName}: ${err.message}`);
+                                }
                             }
                         }
                     }
@@ -134,6 +142,10 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                     }
 
                     if (newName) {
+                        if (typeof newName !== 'string') {
+                            console.warn(`[WARN] Property mapping for ${propName} is not a string:`, newName);
+                            return;
+                        }
                         // SAFETY CHECKS:
                         const isObjectKnown = (p.node.object.type === 'Identifier' && mapping.variables[p.node.object.name]) ||
                             p.node.object.type === 'ThisExpression' ||
@@ -190,6 +202,10 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                     }
 
                     if (newName) {
+                        if (typeof newName !== 'string') {
+                            console.warn(`[WARN] Object Property mapping for ${propName} is not a string:`, newName);
+                            return;
+                        }
                         const isHighConfidence = confidence >= 0.95;
                         const isDescriptive = propName.length > 3;
 
