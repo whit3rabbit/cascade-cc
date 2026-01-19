@@ -65,6 +65,20 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             const entry = mapping.variables[oldName];
                             if (!entry) return;
 
+                            // Ensure usedNames is initialized for this scope/file if not already passed
+                            // NOTE: traversing AST repeatedly with same `usedNames` is key, but here we are inside traverse.
+                            // We really need a file-level tracker. The `renamedBindings` is local to function execution, 
+                            // but we need to track *target* names too.
+
+                            // Initialize file-level used names tracking on first run
+                            if (!sourceInfo.usedNames) {
+                                sourceInfo.usedNames = new Set();
+                                // Pre-fill with existing top-level variables to avoid collisions with un-renamed globals
+                                for (const name in p.scope.getAllBindings()) {
+                                    sourceInfo.usedNames.add(name);
+                                }
+                            }
+
                             let newName = null;
                             if (Array.isArray(entry)) {
                                 // Prioritize exact chunk match
@@ -83,11 +97,21 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                                     return;
                                 }
                                 if (RESERVED_GLOBALS.has(newName) || DISALLOWED_VARIABLE_NAMES.has(newName)) return;
+
+                                // Uniqueness Enforcement
+                                let distinctName = newName;
+                                let counter = 2;
+                                while (sourceInfo.usedNames.has(distinctName) || p.scope.hasBinding(distinctName)) {
+                                    distinctName = `${newName}_${counter}`;
+                                    counter++;
+                                }
+
                                 try {
-                                    p.scope.rename(oldName, newName);
-                                    renamedBindings.add(oldName);
+                                    p.scope.rename(oldName, distinctName);
+                                    renamedBindings.add(oldName); // Track old name as processed
+                                    sourceInfo.usedNames.add(distinctName); // Track new name as taken
                                 } catch (err) {
-                                    console.warn(`[WARN] Failed to rename variable ${oldName} -> ${newName}: ${err.message}`);
+                                    console.warn(`[WARN] Failed to rename variable ${oldName} -> ${distinctName}: ${err.message}`);
                                 }
                             }
                         }
