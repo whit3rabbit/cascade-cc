@@ -39,15 +39,35 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
     });
 
     // 2. Identify "Founder Seeds" (Flags from Static Analysis)
+    // 2. Identify Seeds (Strategic Shift: Inversion of Proof)
     const familySet = new Set();
+
     graphData.chunks.forEach(node => {
-        const isFounder = node.hasTengu || node.hasGenerator || node.hasStateMutator || !!node.error_signature;
-        if (isFounder) {
+        const matchMeta = nnMapping.matches ? nnMapping.matches[node.name] : null;
+        const similarity = matchMeta ? matchMeta.similarity : 0;
+
+        // EVIDENCE FOR VENDOR: Only if NN is very sure (> 0.92)
+        const isProvenLibrary = similarity > 0.92 || node.isGoldenMatch;
+
+        // EVIDENCE FOR FOUNDER: 
+        // a) Explicit signals (Tengu, Generators, Entry Points)
+        const hasHardSignal = node.hasTengu || node.hasGenerator || node.entrySignalCount > 0;
+        // b) Architectural importance WITHOUT library identity
+        const isImportantOrphan = node.centrality > 0.01 && !isProvenLibrary;
+
+        if (hasHardSignal || isImportantOrphan) {
             familySet.add(node.name);
             node.category = 'founder';
+        } else if (isProvenLibrary) {
+            node.category = 'vendor';
+        } else {
+            // THE TIPPING POINT: If we can't prove it's a library, 
+            // and it's not a leaf-node utility, it's probably proprietary.
+            node.category = 'family';
+            familySet.add(node.name);
         }
     });
-    console.log(`    [+] Identified ${familySet.size} founder seed chunks.`);
+    console.log(`    [+] Identified ${familySet.size} founder/family chunks.`);
 
     // 3. Spreading Activation
     let changed = true;
@@ -72,42 +92,42 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
     }
     console.log(`    [+] Spreading complete: ${familySet.size} chunks in family set.`);
 
-    // 4. Role Assignment
-    const vendorIn = parseInt(process.env.VENDOR_LIBRARY_IN_DEGREE) || 15;
-    const vendorOut = parseInt(process.env.VENDOR_LIBRARY_OUT_DEGREE) || 5;
-    const coreIn = parseInt(process.env.CORE_ORCHESTRATOR_IN_DEGREE) || 5;
-    const coreOut = parseInt(process.env.CORE_ORCHESTRATOR_OUT_DEGREE) || 5;
-
+    // 4. Role Assignment (The Brain)
     graphData.chunks.forEach(node => {
-        const inCount = inDegree.get(node.name) || 0;
-        const outCount = (node.outbound || []).length;
-        const isFamily = familySet.has(node.name);
-        const isAnchored = nnMapping.processed_chunks.includes(node.name);
+        const matchMeta = nnMapping.matches ? nnMapping.matches[node.name] : null;
+        const isLibrary = node.category === 'vendor';
+        const isFounder = node.category === 'founder' || node.category === 'family';
 
-        if (isAnchored) {
-            node.category = 'vendor';
-            node.label = 'LIBRARY_MATCH';
-            const matchEntry = varSourceMap.get(node.name);
-            if (matchEntry) node.role = `LIB: ${matchEntry.name}`;
-            node.isGoldenMatch = true;
-        } else if (isFamily && node.category !== 'founder') {
-            node.category = 'family';
-        } else if (!isFamily) {
-            node.category = 'vendor';
-        }
-
-        if (!isFamily && inCount > vendorIn && outCount < vendorOut) {
+        // --- 1. Known Vendor Roles (Auto-populated from Registry) ---
+        if (isLibrary && matchMeta?.label) {
+            const libBase = matchMeta.label.split('_')[0]; // Gets "zod", "react", etc.
+            node.role = `LIB: ${libBase.toUpperCase()}`;
             node.label = 'VENDOR_LIBRARY';
-        } else if (isFamily && inCount > coreIn && outCount > coreOut) {
-            node.label = 'CORE_ORCHESTRATOR';
+            node.isGoldenMatch = true;
         }
 
-        // Apply fallback roles
-        if (!node.role || node.role === 'MODULE') {
-            if (node.hasGenerator) node.role = 'STREAM_ORCHESTRATOR';
-            // Entry signals
-            if (node.entrySignalCount > 0) node.role = 'CLI_MODULE';
+        // --- 2. Founder Roles (Semantic Inference) ---
+        else if (isFounder) {
+            // Assign roles based on capabilities found during static analysis
+            if (node.entrySignalCount > 0) {
+                node.role = 'CLI_ENTRY_POINT';
+            } else if (node.hasGenerator) {
+                node.role = 'STREAM_PROCESSOR';
+            } else if (node.hasNetwork) {
+                node.role = 'API_CLIENT';
+            } else if (node.hasFS) {
+                node.role = 'FILESYSTEM_SERVICE';
+            } else if (node.hasStateMutator) {
+                node.role = 'STATE_ORCHESTRATOR';
+            } else {
+                node.role = 'BUSINESS_LOGIC'; // Default for Founder
+            }
+
+            node.label = (node.centrality > 0.05) ? 'CORE_MODULE' : 'INTERNAL_HELPER';
         }
+
+        // --- 3. Default Fallback ---
+        if (!node.role) node.role = 'UNKNOWN_MODULE';
     });
 
     // 5. Entry Point Identification

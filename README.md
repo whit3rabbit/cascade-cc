@@ -7,7 +7,7 @@ Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Ne
 ### Workflow
 
 1. Bootstrap Library DNA - Download the libraries Claude depends on (Zod, React, etc.) and extract their structural fingerprints. Mangles and minifies the libraries to simulate real-world obfuscation. We train the neural network on this data. ```npm run bootstrap && npm run train```
-2. Analyze & Anchor Claude - Analyze a real Claude bundle. This is a two-part process: **Structural Analysis** (JavaScript) followed by **Neural Anchoring** (Python). ```npm run analyze && npm run anchor -- <version>```
+2. Analyze & Anchor Claude - Analyze a real Claude bundle, then anchor and re-run analyze to apply library/vendor classification from anchor metadata. ```npm run analyze && npm run anchor -- <version> && npm run analyze -- claude-analysis/<version>/cli.js --version <version>```
 3. Deobfuscate (LLM Phase) - Process the proprietary "Founder" logic using the LLM. ```npm run deobfuscate -- <version>```
 4. Assemble Final Codebase - Organize deobfuscated chunks into a coherent file structure based on inferred roles. ```npm run assemble -- <version>```
 5. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
@@ -51,6 +51,9 @@ npm run analyze
 # Requires ml/model.pth; run training if it's missing.
 # npm run resync-registry # Troubleshooting if anchor fails with zero matches
 npm run anchor -- <version> 
+
+# 3. Re-run analyze to apply anchor metadata (avoids re-download by pointing at the local bundle)
+npm run analyze -- claude-analysis/<version>/cli.js --version <version>
 
 # 6. Use LLM to name proprietary logic (Requires API Key in .env)
 npm run deobfuscate -- <version> --skip-vendor
@@ -125,7 +128,7 @@ npm run train -- --sweep --epochs 3
 
 ### Step 3: Analyze & Anchor Claude
 
-Now, analyze a real Claude bundle. This is a two-part process: **Structural Analysis** (JavaScript) followed by **Neural Anchoring** (Python).
+Now, analyze a real Claude bundle. This is a three-step process: **Structural Analysis** (JavaScript), **Neural Anchoring** (Python), then **Re-Analyze** to apply anchor metadata to classifications.
 
 ```bash
 # 1. Analyze (JavaScript Phase)
@@ -137,7 +140,11 @@ npm run analyze
 # (Replace '2.1.7' with the version reported by the analyze step)
 npm run anchor -- 2.1.7 --device auto
 
-# 3. Deobfuscate (LLM Phase)
+# 3. Re-Analyze (Apply Anchor Metadata)
+# Uses the local bundle to avoid re-downloading.
+npm run analyze -- claude-analysis/2.1.7/cli.js --version 2.1.7
+
+# 4. Deobfuscate (LLM Phase)
 # Processes the proprietary "Founder" logic using the LLM.
 npm run deobfuscate -- 2.1.7 --skip-vendor
 ```
@@ -242,10 +249,13 @@ When Claude releases a new version (e.g., `2.1.7` -> `2.1.9`), much of the under
 If you have already deobfuscated version `2.1.7` and want to analyze `2.1.9`, run:
 
 ```bash
-# 1. Analyze the new version
-npm run analyze -- 2.1.9
+# 1. Analyze the new version (downloads latest if not present)
+npm run analyze
 
-# 2. Transfer knowledge from the old version
+# 2. If you already have the bundle locally, you can re-run analyze without re-downloading
+npm run analyze -- claude-analysis/2.1.9/cli.js --version 2.1.9
+
+# 3. Transfer knowledge from the old version
 node run anchor 2.1.9 2.1.7
 ```
 

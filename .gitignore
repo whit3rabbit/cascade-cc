@@ -48,3 +48,4 @@ ml/bootstrap_data
 *$py.class
 .ipynb_checkpoints/
 *.bak
+rename.log

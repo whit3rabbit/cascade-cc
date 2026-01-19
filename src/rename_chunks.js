@@ -94,7 +94,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
 
                             if (newName) {
                                 if (typeof newName !== 'string') {
-                                    console.warn(`[WARN] Variable mapping for ${oldName} is not a string:`, newName);
+                                    // Silently ignore invalid mappings
                                     return;
                                 }
                                 if (RESERVED_GLOBALS.has(newName) || DISALLOWED_VARIABLE_NAMES.has(newName)) return;
@@ -169,7 +169,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
 
                     if (newName) {
                         if (typeof newName !== 'string') {
-                            console.warn(`[WARN] Property mapping for ${propName} is not a string:`, newName);
+                            // Silently ignore invalid mappings
                             return;
                         }
                         // SAFETY CHECKS:
@@ -237,7 +237,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
 
                     if (newName) {
                         if (typeof newName !== 'string') {
-                            console.warn(`[WARN] Object Property mapping for ${propName} is not a string:`, newName);
+                            // Silently ignore invalid mappings (e.g. empty objects from registry)
                             return;
                         }
                         const isHighConfidence = confidence >= 0.95;

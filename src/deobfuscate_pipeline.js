@@ -472,11 +472,11 @@ async function run() {
             // Send to LLM if: 1. No mapping exists OR 2. Mapping is low confidence OR 3. The "resolved" name is still 1-2 chars
             const unknownVariables = origVars.filter(v => {
                 const m = globalMapping.variables[v];
-                return !m || (m.confidence || 0) < 0.85 || m.name.length <= 2;
+                return !m || (m.confidence || 0) < 0.85 || (m.name && m.name.length <= 2);
             });
             const unknownProperties = origProps.filter(p => {
                 const m = globalMapping.properties[p];
-                return !m || (m.confidence || 0) < 0.85 || m.name.length <= 2;
+                return !m || (m.confidence || 0) < 0.85 || (m.name && m.name.length <= 2);
             });
 
             if (unknownVariables.length === 0 && unknownProperties.length === 0 && !isForce) {

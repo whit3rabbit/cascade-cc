@@ -111,26 +111,34 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
 
         if (resolvedVar) {
             if (!targetMapping.variables[targetMangled]) {
-                targetMapping.variables[targetMangled] = {
-                    name: typeof resolvedVar === 'string' ? resolvedVar : resolvedVar.name,
-                    confidence: lockConfidence ?? (match.method === 'key'
-                        ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9)
-                        : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85)),
-                    source: `anchored_${match.method}_${sourceLabel}`
-                };
-                alignedCount++;
+                const bestName = typeof resolvedVar === 'string' ? resolvedVar : (resolvedVar && typeof resolvedVar.name === 'string' ? resolvedVar.name : null);
+
+                if (bestName) {
+                    targetMapping.variables[targetMangled] = {
+                        name: bestName,
+                        confidence: lockConfidence ?? (match.method === 'key'
+                            ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9)
+                            : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85)),
+                        source: `anchored_${match.method}_${sourceLabel}`
+                    };
+                    alignedCount++;
+                }
             }
         }
         if (resolvedProp) {
             if (!targetMapping.properties[targetMangled]) {
-                targetMapping.properties[targetMangled] = {
-                    name: typeof resolvedProp === 'string' ? resolvedProp : resolvedProp.name,
-                    confidence: lockConfidence ?? (match.method === 'key'
-                        ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9)
-                        : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85)),
-                    source: `anchored_${match.method}_${sourceLabel}`
-                };
-                alignedCount++;
+                const bestName = typeof resolvedProp === 'string' ? resolvedProp : (resolvedProp && typeof resolvedProp.name === 'string' ? resolvedProp.name : null);
+
+                if (bestName) {
+                    targetMapping.properties[targetMangled] = {
+                        name: bestName,
+                        confidence: lockConfidence ?? (match.method === 'key'
+                            ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9)
+                            : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85)),
+                        source: `anchored_${match.method}_${sourceLabel}`
+                    };
+                    alignedCount++;
+                }
             }
         }
     }
@@ -255,10 +263,13 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     bestMatch.similarity >= lockThreshold ? { lockConfidence } : {}
                 );
 
-                if (bestMatch.similarity > 0.95) {
+                const isLibraryLabel = bestMatch.label.includes('_') || bestMatch.label.includes('-v');
+                const libraryThreshold = parseFloat(process.env.LIBRARY_MATCH_THRESHOLD) || 0.95;
+                const isLibraryMatch = isLibraryLabel && bestMatch.similarity >= libraryThreshold;
+
+                if (isLibraryMatch) {
                     // This is a library match!
-                    const isLibrary = bestMatch.label.includes('_') || bestMatch.label.includes('-v');
-                    const libName = isLibrary ? bestMatch.label.split('_')[0] : 'unknown_lib';
+                    const libName = isLibraryLabel ? bestMatch.label.split('_')[0] : 'unknown_lib';
 
                     targetChunk.category = 'vendor';
                     targetChunk.label = 'GOLDEN_LIBRARY_MATCH';
@@ -267,6 +278,15 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     // Propose a file path based on the library structure
                     targetChunk.proposedPath = `src/vendor/${libName}/${targetChunk.name}.ts`;
                 }
+
+                if (!targetMapping.matches) targetMapping.matches = {};
+                targetMapping.matches[targetChunk.name] = {
+                    label: bestMatch.label,
+                    similarity: bestMatch.originalSim,
+                    similarity_boosted: bestMatch.similarity,
+                    is_library_label: isLibraryLabel,
+                    is_library_match: isLibraryMatch,
+                };
 
                 if (isNewChunk) {
                     targetMapping.processed_chunks.push(targetChunk.name);
@@ -297,6 +317,14 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 if (targetChunk.category) mapEntry.category = targetChunk.category;
                 if (targetChunk.label) mapEntry.label = targetChunk.label;
                 if (targetChunk.role) mapEntry.role = targetChunk.role;
+                const matchMeta = targetMapping.matches && targetMapping.matches[targetChunk.name];
+                if (matchMeta) {
+                    mapEntry.matchLabel = matchMeta.label;
+                    mapEntry.matchSimilarity = matchMeta.similarity;
+                    mapEntry.matchSimilarityBoosted = matchMeta.similarity_boosted;
+                    mapEntry.matchIsLibraryLabel = matchMeta.is_library_label;
+                    mapEntry.matchIsLibrary = matchMeta.is_library_match;
+                }
             }
         }
 

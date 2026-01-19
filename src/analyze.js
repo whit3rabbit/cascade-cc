@@ -586,6 +586,10 @@ class CascadeGraph {
                 hasStateMutator: currentChunkNodes.some(n => n.type === 'AssignmentExpression' && n.left.object?.name === 'INTERNAL_STATE'),
                 hasTengu: hasTengu,
                 entrySignalCount: entrySignalCount,
+                hasNetwork: chunkCode.toLowerCase().includes('http') || chunkCode.toLowerCase().includes('https') || chunkCode.toLowerCase().includes('socket'),
+                hasFS: chunkCode.toLowerCase().includes('fs.') || chunkCode.toLowerCase().includes('path.') || chunkCode.toLowerCase().includes('filename'),
+                hasCrypto: chunkCode.toLowerCase().includes('crypto') || chunkCode.toLowerCase().includes('hash'),
+                isUI: chunkCode.toLowerCase().includes('react') || chunkCode.toLowerCase().includes('ink') || chunkCode.toLowerCase().includes('box'),
                 startsWithImport: currentChunkNodes.some(node => {
                     const nodeCode = code.slice(node.start, node.end);
                     return (
@@ -885,9 +889,11 @@ class CascadeGraph {
             const outCount = node.neighbors.size;
             const isFamily = familySet.has(name);
             const isAnchored = nnMapping.processed_chunks.includes(name);
+            const matchMeta = nnMapping.matches ? nnMapping.matches[name] : null;
+            const isLibraryMatch = matchMeta ? !!matchMeta.is_library_match : false;
 
-            if (isAnchored) {
-                // The NN found a match in the Gold Standard library DB
+            if (isAnchored && isLibraryMatch) {
+                // Library match confirmed by anchor stage metadata
                 node.category = 'vendor';
                 node.label = 'LIBRARY_MATCH';
 
@@ -895,6 +901,9 @@ class CascadeGraph {
                 const matchEntry = varSourceMap.get(name);
                 if (matchEntry) node.role = `LIB: ${matchEntry.name}`;
 
+            } else if (isAnchored && !isLibraryMatch) {
+                if (!node.label) node.label = 'ANCHOR_MATCH';
+                if (matchMeta?.label) node.role = `ANCHOR: ${matchMeta.label}`;
             } else if (isFamily && node.category !== 'founder') {
                 node.category = 'family';
             } else if (!isFamily) {
