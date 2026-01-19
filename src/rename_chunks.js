@@ -308,7 +308,8 @@ async function main() {
             const code = fs.readFileSync(inputPath, 'utf8');
 
             // Find metadata for this chunk
-            const chunkMeta = graphData.find(m => m.name === path.basename(file, '.js'));
+            const chunkBaseName = path.basename(file, '.js');
+            const chunkMeta = graphData.find(m => m.name === chunkBaseName || chunkBaseName.startsWith(`${m.name}_`));
 
             let logicalName = "";
             if (chunkMeta) {
@@ -323,7 +324,13 @@ async function main() {
 
             logicalName = logicalName.replace(/[\/\\?%*:|"<>]/g, '_');
             const chunkBase = path.basename(file, '.js');
-            const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
+            let finalName = file;
+            if (logicalName) {
+                const suffix = `_${logicalName}`;
+                if (!chunkBase.endsWith(suffix) && !chunkBase.includes(suffix)) { // Added includes check to be safer
+                    finalName = `${chunkBase}_${logicalName}.js`;
+                }
+            }
             const outputPath = path.join(deobfuscatedDir, finalName);
             generatedFiles.add(finalName);
 
@@ -335,20 +342,43 @@ async function main() {
                 suggestedPath: chunkMeta?.proposedPath || chunkMeta?.kb_info?.suggested_path
             });
 
-            const finalCode = renamedCode || code;
-            const newHash = crypto.createHash('md5').update(finalCode).digest('hex');
+            const finalCodeRaw = renamedCode || code;
+
+            // Generate Metadata Block
+            let metadataBlock = "";
+            if (chunkMeta) {
+                metadataBlock = `/**
+ * ------------------------------------------------------------------
+ * Deobfuscated Chunk: ${chunkMeta.displayName || chunkMeta.name}
+ * ------------------------------------------------------------------
+ * Category: ${chunkMeta.category || 'Unknown'}
+ * Role: ${chunkMeta.role || 'Unknown'}
+ * Proposed Path: ${chunkMeta.proposedPath || 'N/A'}
+ *
+ * KB Info:
+ * ${chunkMeta.kb_info ? JSON.stringify(chunkMeta.kb_info, null, 2).split('\n').map(line => ' * ' + line).join('\n') : 'None'}
+ *
+ * Related Chunks:
+ * ${(chunkMeta.outbound || []).map(n => ` * - ${n}`).join('\n') || ' * None'}
+ * ------------------------------------------------------------------
+ */
+`;
+            }
+
+            const finalContent = metadataBlock ? metadataBlock + '\n' + finalCodeRaw : finalCodeRaw;
+            const newHash = crypto.createHash('md5').update(finalContent).digest('hex');
 
             if (fs.existsSync(outputPath)) {
                 const oldHash = crypto.createHash('md5').update(fs.readFileSync(outputPath, 'utf8')).digest('hex');
                 if (newHash === oldHash) {
                     unchangedCount++;
                 } else {
-                    fs.writeFileSync(outputPath, finalCode);
+                    fs.writeFileSync(outputPath, finalContent);
                     updatedCount++;
                     console.log(`    [UPDATE] ${finalName}`);
                 }
             } else {
-                fs.writeFileSync(outputPath, finalCode);
+                fs.writeFileSync(outputPath, finalContent);
                 newCount++;
                 console.log(`    [NEW] ${finalName}`);
             }

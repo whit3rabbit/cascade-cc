@@ -719,7 +719,26 @@ RESPONSE FORMAT (JSON ONLY):
                     suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path
                 });
 
-                fs.writeFileSync(outputPath, finalRenamedCode || originalCode);
+                // Generate Metadata Block
+                const metadataBlock = `/**
+ * ------------------------------------------------------------------
+ * Deobfuscated Chunk: ${chunkMeta.displayName || chunkMeta.name}
+ * ------------------------------------------------------------------
+ * Category: ${chunkMeta.category}
+ * Role: ${chunkMeta.role}
+ * Proposed Path: ${chunkMeta.proposedPath || 'N/A'}
+ *
+ * KB Info:
+ * ${chunkMeta.kb_info ? JSON.stringify(chunkMeta.kb_info, null, 2).split('\n').map(line => ' * ' + line).join('\n') : 'None'}
+ *
+ * Related Chunks:
+ * ${(chunkMeta.outbound || []).map(n => ` * - ${n}`).join('\n') || ' * None'}
+ * ------------------------------------------------------------------
+ */
+`;
+
+                const finalContent = metadataBlock + '\n' + (finalRenamedCode || originalCode);
+                fs.writeFileSync(outputPath, finalContent);
             } catch (err) {
                 console.warn(`    [!] Incremental sync failed for ${file}: ${err.message}`);
             }
