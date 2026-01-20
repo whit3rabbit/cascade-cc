@@ -1310,8 +1310,12 @@ async function run() {
     return { version, path: OUTPUT_BASE };
 }
 
-run().catch(err => {
-    console.error(`\n[!] FATAL ERROR during analysis:`);
-    console.error(err);
-    process.exit(1);
-});
+module.exports = { simplifyAST };
+
+if (require.main === module) {
+    run().catch(err => {
+        console.error(`\n[!] FATAL ERROR during analysis:`);
+        console.error(err);
+        process.exit(1);
+    });
+}

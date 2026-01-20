@@ -46,10 +46,14 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         const matchMeta = nnMapping.matches ? nnMapping.matches[node.name] : null;
         const similarity = matchMeta ? matchMeta.similarity : 0;
 
+        // NEW: Custom Gold Detection
+        // Checks if the match label indicates our custom proprietary gold standard
+        const isCustomGold = matchMeta && matchMeta.label && matchMeta.label.includes('custom_claude_gold');
+
         // EVIDENCE FOR VENDOR: Only if NN is very sure (> 0.92)
-        // PROTECT FIRST_PARTY: If name contains "claude" or "theme", assume it's ours.
+        // PROTECT FIRST_PARTY: If name contains "claude" or "theme", OR if it matches custom gold, assume it's ours.
         const lowerName = (node.displayName || node.name || "").toLowerCase();
-        const looksLikeFirstParty = lowerName.includes('claude') || lowerName.includes('theme');
+        const looksLikeFirstParty = lowerName.includes('claude') || lowerName.includes('theme') || isCustomGold;
 
         const isProvenLibrary = (similarity > 0.92 || node.isGoldenMatch) && !looksLikeFirstParty;
 
@@ -59,7 +63,17 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         // b) Architectural importance WITHOUT library identity
         const isImportantOrphan = node.centrality > 0.01 && !isProvenLibrary;
 
-        if (hasHardSignal || isImportantOrphan) {
+        if (isCustomGold) {
+            node.category = 'founder';
+            node.isGoldenMatch = true;
+            node.label = 'CONFIRMED_PROPRIETARY';
+
+            // Auto-assign the path you provided in your custom_gold folder
+            if (matchMeta.ref && matchMeta.ref.proposedPath) {
+                node.proposedPath = matchMeta.ref.proposedPath;
+            }
+            familySet.add(node.name);
+        } else if (hasHardSignal || isImportantOrphan) {
             familySet.add(node.name);
             node.category = 'founder';
         } else if (isProvenLibrary) {
@@ -139,6 +153,9 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
             node.role = 'UNCLASSIFIED_LOGIC';
         }
 
+        if (node.suggestedFilename === '-') node.suggestedFilename = null;
+        if (node.proposedPath === '-') node.proposedPath = null;
+
         // --- 4. Role-based Path Hinting (New) ---
         const roleToFolderMap = {
             'STREAM_ORCHESTRATOR': 'src/core/session',
@@ -149,6 +166,10 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
             'STATE_ORCHESTRATOR': 'src/core/state',
             'APP_LOGIC': 'src/core/logic'
         };
+
+        if (node.kb_info && node.kb_info.suggested_path && node.kb_info.suggested_path !== '-') {
+            node.proposedPath = node.kb_info.suggested_path.replace(/`/g, '');
+        }
 
         if (roleToFolderMap[node.role] && !node.proposedPath) {
             node.proposedPath = `${roleToFolderMap[node.role]}/${node.displayName || node.name}.ts`;

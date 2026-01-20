@@ -22,7 +22,9 @@ function getDeobfuscatedChunkPath(chunksDir, chunkMeta) {
     const chunkBase = path.basename(originalFile, '.js');
 
     let logicalName = "";
-    if (chunkMeta.suggestedFilename) {
+    if (chunkMeta.proposedPath) {
+        logicalName = path.basename(chunkMeta.proposedPath, '.ts');
+    } else if (chunkMeta.suggestedFilename) {
         logicalName = chunkMeta.suggestedFilename;
     } else if (chunkMeta.kb_info && chunkMeta.kb_info.suggested_path) {
         logicalName = path.basename(chunkMeta.kb_info.suggested_path.replace(/`/g, ''), '.ts').replace('.js', '');
@@ -153,7 +155,10 @@ async function assemble(version) {
     const coreChunks = Array.from(finalChunksToAssemble).filter(c =>
         c.category !== 'vendor' &&
         !c.role.startsWith('LIB:') &&
-        !c.role.toLowerCase().startsWith('lib:')
+        !c.role.toLowerCase().startsWith('lib:') &&
+        !c.matchIsLibrary &&
+        !(c.finalPath && (c.finalPath.includes('/vendor/') || c.finalPath.includes('/third_party/'))) &&
+        !(c.proposedPath && (c.proposedPath.includes('/vendor/') || c.proposedPath.includes('/third_party/')))
     );
 
     console.log(`[*] Assembling ${coreChunks.length} chunks into a structured codebase...`);
