@@ -8,10 +8,11 @@ Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Ne
 
 1. Bootstrap Library DNA - Download the libraries Claude depends on (Zod, React, etc.) and extract their structural fingerprints. Mangles and minifies the libraries to simulate real-world obfuscation. We train the neural network on this data. ```npm run bootstrap && npm run train```
 2. Analyze & Anchor Claude - Analyze a real Claude bundle, then anchor and re-run analyze to apply library/vendor classification from anchor metadata. ```npm run analyze && npm run anchor -- <version> && npm run analyze -- claude-analysis/<version>/cli.js --version <version>```
-3. Deobfuscate (LLM Phase) - Process the proprietary "Founder" logic using the LLM. ```npm run deobfuscate -- <version>```
-4. Assemble Final Codebase - Organize deobfuscated chunks into a coherent file structure based on inferred roles. ```npm run assemble -- <version>```
-5. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
-6. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
+3. Classify Architecture - Assign roles and proposed paths for each chunk before LLM naming. ```node src/classify_logic.js```
+4. Deobfuscate (LLM Phase) - Process the proprietary "Founder" logic using the LLM. ```npm run deobfuscate -- <version>```
+5. Assemble Final Codebase - Organize deobfuscated chunks into a coherent file structure based on inferred roles. ```npm run assemble -- <version>```
+6. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
+7. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
 
 > [!TIP]
 > **Pro-Tip**: Use the `--device auto` flag with `npm run train` or `npm run anchor` to let the system choose between CUDA, MPS (Metal), or CPU automatically.
@@ -52,16 +53,16 @@ npm run analyze
 # npm run resync-registry # Troubleshooting if anchor fails with zero matches
 npm run anchor -- <version> 
 
-# 4. Role & Folder hinting
+# 3. Role & Folder hinting
 node src/classify_logic.js
 
-# 6. Use LLM to name proprietary logic (Requires API Key in .env)
+# 4. Use LLM to name proprietary logic (Requires API Key in .env)
 npm run deobfuscate -- <version> --skip-vendor
 
-# 7. Assemble chunks into a final file structure
+# 5. Assemble chunks into a final file structure
 npm run assemble -- <version>
 
-# 8. (Recommended) Restore original logic flow and readability via LLM
+# 6. (Recommended) Restore original logic flow and readability via LLM
 npm run refine -- <version>
 ```
 
@@ -144,7 +145,10 @@ npm run anchor -- 2.1.7 --device auto
 # Uses the local bundle to avoid re-downloading.
 npm run analyze -- claude-analysis/2.1.7/cli.js --version 2.1.7
 
-# 4. Deobfuscate (LLM Phase)
+# 4. Classify Architecture
+node src/classify_logic.js
+
+# 5. Deobfuscate (LLM Phase)
 # Processes the proprietary "Founder" logic using the LLM.
 npm run deobfuscate -- 2.1.7 --skip-vendor
 ```

@@ -21,6 +21,7 @@ The repository is partitioned into three main layers:
 ### A. Orchestration & AST Processing (Node.js)
 - **`src/analyze.js`**: The core analyzer. It uses Babel to chunk large bundles, extract metadata, detected "Module Envelopes" for logical grouping, and calculates Identifier Affinity scores.
 - **`src/anchor_logic.js`**: Bridges Node.js orchestration with Python inference. It handles logic registry synchronization, vectorization commands, and aligns symbols between target and gold-standard chunks.
+- **`src/classify_logic.js`**: Assigns architectural roles and proposed paths based on graph metrics and anchor metadata.
 - **`src/deobfuscate_pipeline.js`**: Manages the multi-stage LLM pass, including the **Consolidation Pass** for grouped chunks and inherited scope mapping.
 - **`src/rename_chunks.js`**: Consumes `mapping.json` to apply a safe, scope-aware rename pass across the entire AST.
 - **`src/assemble_final.js`**: The reconstruction engine that performs **Deduplicating Merges** to strip module wrappers and reassemble split chunks into clean files.
@@ -54,6 +55,11 @@ flowchart TD
     A4 --> A5[logic_registry.json / KB Match]
   end
 
+  subgraph "Phase 2.5: Architectural Classification"
+    A5 --> C1[Architectural Classification]
+    C1 --> C2[Role & Path Assignment]
+  end
+
   subgraph "Phase 3: LLM & Assembly"
     L1[Anchor Core Libs] --> L2[LLM Pass (Founder Logic)]
     L2 --> L3[mapping.json Update]
@@ -65,7 +71,7 @@ flowchart TD
   end
 
   B4 -.-> A3
-  A5 --> L1
+  C2 --> L1
   L4 --> R1
 ```
 
@@ -89,6 +95,9 @@ Every chunk in the target bundle is vectorized. These vectors are compared again
 - **Similarity > 0.80**: Strong Structural Match.
 - **Heuristic Boosts**: If `knowledge_base.json` suggests a library (e.g., "ink"), the similarity score is boosted to help the model lock in.
 
+### Step 4.5: Architectural Classification
+The classifier (`src/classify_logic.js`) uses graph metrics and anchor metadata to assign roles (e.g., `VENDOR_LIBRARY`, `APP_LOGIC`) and propose paths before the LLM pass.
+
 ### Step 5: LLM Deobfuscation
 Chunks identified as "Founder" logic are sent to an LLM. The pipeline prioritizes "Core" chunks first. The LLM receives:
 1.  The chunk's code.
@@ -101,6 +110,10 @@ The final step uses the `mapping.json` to perform a scope-safe rename across all
 
 ### Step 7: Logic Refinement
 The assembled codebase undergoes a final refinement pass (`npm run refine`). This stage uses an LLM to restore high-level control flow (converting complex ternary chains back to if/else blocks) and remove lingering obfuscation boilerplate.
+
+**Refinement scripts**:
+- **`src/systematic_refiner.js`**: Bulk symbol replacement using the registry and mapping metadata.
+- **`src/refine_codebase.js`**: LLM-driven logic reconstruction, aliased to `npm run refine`.
 
 ---
 

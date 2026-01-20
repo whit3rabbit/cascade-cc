@@ -19,11 +19,17 @@ These variables tune the static analysis and anchoring logic.
 | :--- | :--- | :--- |
 | `ANCHOR_KEY_CONFIDENCE` | `0.9` | The minimum confidence score required to accept a structural key match. |
 | `ANCHOR_NAME_CONFIDENCE`| `0.85` | The minimum confidence score required to accept a name-based match. |
-| `ANCHOR_SIMILARITY_THRESHOLD` | `0.9` | The minimum vector similarity (0.0 to 1.0) needed for a chunk to be considered a match. |
+| `ANCHOR_SIMILARITY_THRESHOLD` | `0.80` | The minimum vector similarity (0.0 to 1.0) needed for a chunk to be considered a match. |
+| `LIBRARY_MATCH_THRESHOLD` | `0.95` | Similarity required to auto-label a chunk as a vendor library match. |
+| `ANCHOR_LOCK_THRESHOLD` | `0.98` | Similarity required to lock a match and apply names with high confidence. |
+| `ANCHOR_LOCK_CONFIDENCE` | `0.99` | Confidence score assigned to locked matches. |
 | `MARKOV_DAMPING_FACTOR`| `0.85` | Used in the PageRank-style Centrality algorithm. Higher values increase the influence of long-range connections. |
 | `CHUNKING_TOKEN_THRESHOLD` | `2000` | The target number of tokens per code chunk during analysis. |
 | `SPREADING_THRESHOLD_RATIO` | `0.3` | Threshold for property spreading activation. |
 | `SPREADING_THRESHOLD_COUNT` | `2` | Minimum number of hits for property name propagation. |
+| `ML_LITERAL_DROPOUT` | `0.5` | Training regularization: probability of masking literal features. |
+| `ML_NODE_MASKING` | `0.15` | Training regularization: probability of masking node types. |
+| `ML_SEQ_JITTER` | `0.3` | Training regularization: probability of sequence jittering. |
 
 ## Role Classification Thresholds
 
@@ -35,6 +41,8 @@ The system uses Graph Theory metrics to identify the role of each chunk (e.g., V
 | `VENDOR_LIBRARY_OUT_DEGREE` | Out-degree threshold to classify a chunk as a Vendor library. |
 | `CORE_ORCHESTRATOR_IN_DEGREE` | In-degree threshold to classify a chunk as a Core orchestrator. |
 | `CORE_ORCHESTRATOR_OUT_DEGREE` | Out-degree threshold to classify a chunk as a Core orchestrator. |
+
+These thresholds are actively used by `src/classify_logic.js` to separate utility libraries from application logic.
 
 ---
 

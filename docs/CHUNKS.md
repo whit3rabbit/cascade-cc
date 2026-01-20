@@ -41,3 +41,4 @@ When reassembling the final codebase, simply concatenating chunks would result i
 -   **Header Stripping**: The assembler detects and removes the module envelope definition from the first chunk of a group.
 -   **Footer Stripping**: The closing braces of the wrapper are removed from the final chunk.
 -   **Body Fusion**: The effective bodies of the chunks are merged, reconstructing the original file content without the bundler's scaffolding.
+-   **Cycle Handling**: `src/assemble_final.js` uses Strongly Connected Components (SCC) logic to safely merge cyclic dependencies between chunks.

@@ -82,6 +82,9 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
     - Logic: Uses Multi-Head Attention to capture global structural dependencies.
     - Normalization: Applies **L2 Normalization** to the final embedding.
     - Padding: PAD tokens are masked during attention and pooling.
+2.  **Literal Channel (Permutation-Invariant Pooling)**:
+    - Inputs: Hashed literals (Strings/Numbers) per chunk.
+    - Logic: Uses permutation-invariant pooling (order-independent) so constant ordering does not alter fingerprints.
 
 ### Training Notes
 
@@ -90,6 +93,7 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
 *   **Sweep batch size**: Sweeps use a fixed batch size of `64` inside `ml/train.py` regardless of CLI defaults.
 *   **Early stopping**: Training stops after several stagnant epochs on margin improvement.
 *   **Evaluation metrics**: Margin and MRR are tracked; sweeps select on minimum library MRR.
+*   **Leave-multi-library-out validation**: The training script can hold out multiple libraries at once to stress cross-library generalization.
 
 ---
 
@@ -108,7 +112,7 @@ The model's vocabulary is dynamically generated from `@babel/types`.
     - `Builtin_module`
 
 ### Vocabulary Size
-The default total vocabulary size is **319**. However, the model is initialized with `VOCAB_SIZE + 5` to provide a safety buffer for future Babel updates without immediately breaking model loading.
+The vocabulary size is dynamic and synced with `@babel/types` via `npm run sync-vocab`. The model still initializes with `VOCAB_SIZE + 5` to provide a safety buffer for future Babel updates without immediately breaking model loading.
 
 ---
 
