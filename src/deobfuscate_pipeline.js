@@ -772,118 +772,125 @@ RESPONSE FORMAT (JSON ONLY):
             const VAR_CHUNK_SIZE = 40;
             const PROP_CHUNK_SIZE = 40;
 
-            for (let vOffset = 0; vOffset < unknownVariables.length; vOffset += VAR_CHUNK_SIZE) {
-                for (let pOffset = 0; pOffset < unknownProperties.length; pOffset += PROP_CHUNK_SIZE) {
-                    const varSub = unknownVariables.slice(vOffset, vOffset + VAR_CHUNK_SIZE);
-                    const propSub = unknownProperties.slice(pOffset, pOffset + PROP_CHUNK_SIZE);
-                    if (varSub.length === 0 && propSub.length === 0) continue;
+            // Parallel processing loop (fix for nested loop bug)
+            const varBatches = Math.ceil(unknownVariables.length / VAR_CHUNK_SIZE);
+            const propBatches = Math.ceil(unknownProperties.length / PROP_CHUNK_SIZE);
+            const maxBatches = Math.max(varBatches, propBatches);
 
-                    const isFirstBatch = (vOffset === 0 && pOffset === 0);
-                    const codeToPass = isFirstBatch ? contextCode : skeletonize(contextCode);
-                    const prompt = generatePrompt(varSub, propSub, codeToPass, goldReferenceCode, goldSimilarity, precedingContext);
-                    const PROMPT_RETRIES = 3;
-                    let success = false;
+            for (let i = 0; i < maxBatches; i++) {
+                const vOffset = i * VAR_CHUNK_SIZE;
+                const pOffset = i * PROP_CHUNK_SIZE;
 
-                    for (let attempt = 1; attempt <= PROMPT_RETRIES; attempt++) {
-                        try {
-                            const llmResponse = await callLLM(prompt);
-                            const { cleaned: cleanedJson, isTruncated } = cleanLLMResponse(llmResponse);
-                            if (!cleanedJson) throw new Error("No JSON found in LLM response");
+                const varSub = unknownVariables.slice(vOffset, vOffset + VAR_CHUNK_SIZE);
+                const propSub = unknownProperties.slice(pOffset, pOffset + PROP_CHUNK_SIZE);
 
-                            const { jsonrepair } = require('jsonrepair');
-                            const responseData = JSON.parse(jsonrepair(cleanedJson));
+                if (varSub.length === 0 && propSub.length === 0) continue;
 
-                            const updateMapping = (source, target, chunkName, usedNamesInThisChunk) => {
-                                for (const [key, mapping] of Object.entries(source)) {
-                                    if (!mapping) continue;
-                                    const newName = typeof mapping === 'string' ? mapping : mapping.name;
-                                    if (!newName) continue;
-                                    if (usedNamesInThisChunk.has(newName)) continue;
-                                    usedNamesInThisChunk.add(newName);
+                const isFirstBatch = (vOffset === 0 && pOffset === 0);
+                const codeToPass = isFirstBatch ? contextCode : skeletonize(contextCode);
+                const prompt = generatePrompt(varSub, propSub, codeToPass, goldReferenceCode, goldSimilarity, precedingContext);
+                const PROMPT_RETRIES = 3;
+                let success = false;
 
-                                    const newEntry = typeof mapping === 'string'
-                                        ? { name: newName, confidence: 0.8, source: chunkName }
-                                        : { ...mapping, name: newName, source: chunkName, confidence: mapping.confidence || 0.8 };
+                for (let attempt = 1; attempt <= PROMPT_RETRIES; attempt++) {
+                    try {
+                        const llmResponse = await callLLM(prompt);
+                        const { cleaned: cleanedJson, isTruncated } = cleanLLMResponse(llmResponse);
+                        if (!cleanedJson) throw new Error("No JSON found in LLM response");
 
-                                    if (target[key]) {
-                                        const existing = target[key];
-                                        if (newEntry.confidence > (existing.confidence || 0)) {
-                                            if (existing.name !== newEntry.name) newMappingsCount++;
-                                            target[key] = newEntry;
-                                        }
-                                    } else {
+                        const { jsonrepair } = require('jsonrepair');
+                        const responseData = JSON.parse(jsonrepair(cleanedJson));
+
+                        const updateMapping = (source, target, chunkName, usedNamesInThisChunk) => {
+                            for (const [key, mapping] of Object.entries(source)) {
+                                if (!mapping) continue;
+                                const newName = typeof mapping === 'string' ? mapping : mapping.name;
+                                if (!newName) continue;
+                                if (usedNamesInThisChunk.has(newName)) continue;
+                                usedNamesInThisChunk.add(newName);
+
+                                const newEntry = typeof mapping === 'string'
+                                    ? { name: newName, confidence: 0.8, source: chunkName }
+                                    : { ...mapping, name: newName, source: chunkName, confidence: mapping.confidence || 0.8 };
+
+                                if (target[key]) {
+                                    const existing = target[key];
+                                    if (newEntry.confidence > (existing.confidence || 0)) {
+                                        if (existing.name !== newEntry.name) newMappingsCount++;
                                         target[key] = newEntry;
-                                        newMappingsCount++;
                                     }
-                                }
-                            };
-
-                            if (responseData.mappings?.variables) {
-                                const usedNamesInThisChunk = new Set();
-                                updateMapping(responseData.mappings.variables, globalMapping.variables, chunkMeta.name, usedNamesInThisChunk);
-                            }
-                            if (responseData.mappings?.properties) {
-                                const usedNamesInThisChunk = new Set();
-                                updateMapping(responseData.mappings.properties, globalMapping.properties, chunkMeta.name, usedNamesInThisChunk);
-                            }
-
-                            // HANDLE CORRECTIONS (Override even high-confidence errors)
-                            if (responseData.corrections) {
-                                for (const [mangled, correction] of Object.entries(responseData.corrections)) {
-                                    const newName = typeof correction === 'string' ? correction : correction.name;
-                                    const rationale = correction.rationale || "LLM semantic correction";
-                                    console.log(`    [*] Corrected mapping for ${mangled}: -> ${newName} (${rationale})`);
-
-                                    const targetColl = globalMapping.variables[mangled] ? globalMapping.variables : (globalMapping.properties[mangled] ? globalMapping.properties : null);
-                                    if (targetColl) {
-                                        targetColl[mangled] = {
-                                            name: newName,
-                                            confidence: 0.98, // High confidence for manual/LLM overrides
-                                            source: `${chunkMeta.name}_correction`,
-                                            rationale
-                                        };
-                                        correctionCount++;
-                                    }
+                                } else {
+                                    target[key] = newEntry;
+                                    newMappingsCount++;
                                 }
                             }
-                            if (responseData.suggestedPath) {
-                                chunkMeta.suggestedPath = responseData.suggestedPath;
-                                // Also populate suggestedFilename for backward compatibility
-                                chunkMeta.suggestedFilename = path.basename(responseData.suggestedPath, path.extname(responseData.suggestedPath));
+                        };
 
-                                // Proactive Hinting: Tell neighbors about this decision
-                                const neighborNames = [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])];
-                                neighborNames.forEach(nName => {
-                                    const neighbor = sortedChunks.find(m => m.name === nName); // Look up in sortedChunks which references the graph objects
-                                    if (neighbor && !neighbor.suggestedPath) {
-                                        neighbor.parentHintPath = path.dirname(responseData.suggestedPath);
-                                    }
-                                });
-                            } else if (responseData.suggestedFilename) {
-                                chunkMeta.suggestedFilename = responseData.suggestedFilename;
-                            }
+                        if (responseData.mappings?.variables) {
+                            const usedNamesInThisChunk = new Set();
+                            updateMapping(responseData.mappings.variables, globalMapping.variables, chunkMeta.name, usedNamesInThisChunk);
+                        }
+                        if (responseData.mappings?.properties) {
+                            const usedNamesInThisChunk = new Set();
+                            updateMapping(responseData.mappings.properties, globalMapping.properties, chunkMeta.name, usedNamesInThisChunk);
+                        }
 
-                            console.log(`    [+] Mapped identifiers in ${file} (Sub-pass)`);
-                            success = true;
-                            break; // Exit retry loop on success
-                        } catch (err) {
-                            const isTransient = err.message?.includes('JSON') || err.message?.includes('Colon expected') || err.message?.includes('Unexpected token');
-                            if (isTransient && attempt < PROMPT_RETRIES) {
-                                const backoff = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
-                                console.warn(`    [!] Attempt ${attempt}/${PROMPT_RETRIES} failed for ${file}: ${err.message}. Retrying in ${Math.round(backoff / 1000)}s...`);
-                                await sleep(backoff);
-                            } else {
-                                console.warn(`    [!] Error ${file} (Attempt ${attempt}/${PROMPT_RETRIES}): ${err.message}`);
-                                if (attempt === PROMPT_RETRIES) break;
+                        // HANDLE CORRECTIONS (Override even high-confidence errors)
+                        if (responseData.corrections) {
+                            for (const [mangled, correction] of Object.entries(responseData.corrections)) {
+                                const newName = typeof correction === 'string' ? correction : correction.name;
+                                const rationale = correction.rationale || "LLM semantic correction";
+                                console.log(`    [*] Corrected mapping for ${mangled}: -> ${newName} (${rationale})`);
+
+                                const targetColl = globalMapping.variables[mangled] ? globalMapping.variables : (globalMapping.properties[mangled] ? globalMapping.properties : null);
+                                if (targetColl) {
+                                    targetColl[mangled] = {
+                                        name: newName,
+                                        confidence: 0.98, // High confidence for manual/LLM overrides
+                                        source: `${chunkMeta.name}_correction`,
+                                        rationale
+                                    };
+                                    correctionCount++;
+                                }
                             }
                         }
-                    }
+                        if (responseData.suggestedPath) {
+                            chunkMeta.suggestedPath = responseData.suggestedPath;
+                            // Also populate suggestedFilename for backward compatibility
+                            chunkMeta.suggestedFilename = path.basename(responseData.suggestedPath, path.extname(responseData.suggestedPath));
 
-                    // Reliability delay between batches
-                    const { PROVIDER_CONFIG } = require('./llm_client');
-                    const delay = (PROVIDER_CONFIG && PROVIDER_CONFIG[PROVIDER]?.delay) || 3000;
-                    await sleep(delay + Math.random() * 1000);
+                            // Proactive Hinting: Tell neighbors about this decision
+                            const neighborNames = [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])];
+                            neighborNames.forEach(nName => {
+                                const neighbor = sortedChunks.find(m => m.name === nName); // Look up in sortedChunks which references the graph objects
+                                if (neighbor && !neighbor.suggestedPath) {
+                                    neighbor.parentHintPath = path.dirname(responseData.suggestedPath);
+                                }
+                            });
+                        } else if (responseData.suggestedFilename) {
+                            chunkMeta.suggestedFilename = responseData.suggestedFilename;
+                        }
+
+                        console.log(`    [+] Mapped identifiers in ${file} (Sub-pass)`);
+                        success = true;
+                        break; // Exit retry loop on success
+                    } catch (err) {
+                        const isTransient = err.message?.includes('JSON') || err.message?.includes('Colon expected') || err.message?.includes('Unexpected token');
+                        if (isTransient && attempt < PROMPT_RETRIES) {
+                            const backoff = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
+                            console.warn(`    [!] Attempt ${attempt}/${PROMPT_RETRIES} failed for ${file}: ${err.message}. Retrying in ${Math.round(backoff / 1000)}s...`);
+                            await sleep(backoff);
+                        } else {
+                            console.warn(`    [!] Error ${file} (Attempt ${attempt}/${PROMPT_RETRIES}): ${err.message}`);
+                            if (attempt === PROMPT_RETRIES) break;
+                        }
+                    }
                 }
+
+                // Reliability delay between batches
+                const { PROVIDER_CONFIG } = require('./llm_client');
+                const delay = (PROVIDER_CONFIG && PROVIDER_CONFIG[PROVIDER]?.delay) || 3000;
+                await sleep(delay + Math.random() * 1000);
             }
 
             // --- INCREMENTAL SYNC ---
