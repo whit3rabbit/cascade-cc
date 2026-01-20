@@ -420,6 +420,7 @@ class CascadeGraph {
         let currentChunkNodes = [];
         let currentTokens = 0;
         let currentCategory = 'unknown';
+        let currentModuleId = null; // New: Track active module envelope
         let chunkIndex = 1;
         const seenHashes = new Map(); // hash -> chunkName
 
@@ -590,6 +591,7 @@ class CascadeGraph {
                 hasFS: chunkCode.toLowerCase().includes('fs.') || chunkCode.toLowerCase().includes('path.') || chunkCode.toLowerCase().includes('filename'),
                 hasCrypto: chunkCode.toLowerCase().includes('crypto') || chunkCode.toLowerCase().includes('hash'),
                 isUI: chunkCode.toLowerCase().includes('react') || chunkCode.toLowerCase().includes('ink') || chunkCode.toLowerCase().includes('box'),
+                moduleId: currentModuleId, // Track the hard module envelope ID
                 startsWithImport: currentChunkNodes.some(node => {
                     const nodeCode = code.slice(node.start, node.end);
                     return (
@@ -633,6 +635,78 @@ class CascadeGraph {
 
         statements.forEach((node) => {
             const nodeCodeApprox = code.slice(node.start, node.end).toLowerCase();
+            const nodeCodeExact = code.slice(node.start, node.end);
+
+            // --- MODULE ENVELOPE DETECTION (Hard Signal) ---
+            // If we see a start of a module wrapper, set the current Module ID
+            const isModuleStart = node.type === 'VariableDeclaration' &&
+                node.declarations.some(d => d.init && d.init.type === 'CallExpression' && wrapperNames.has(d.init.callee.name));
+
+            if (isModuleStart) {
+                // If we were already in a module, close it first? 
+                // Usually esbuild flattens them, so a new commonJS call means a new module started.
+                const declPrefix = nodeCodeExact.substring(0, 50).replace(/\s+/g, '');
+                // Generate a stable ID based on the variable name or a hash
+                currentModuleId = `mod_${crypto.createHash('md5').update(declPrefix).digest('hex').slice(0, 6)}`;
+            }
+
+            // Check for end of module (heuristic: closing brace of the wrapper function)
+            // This is hard because the wrapper wraps the *entire* content. 
+            // So strictly speaking, currentModuleId applies to everything INSIDE the wrapper.
+            // But we are processing top-level statements. 
+            // If the parser already unwrapped the IIFE, then we might not see the wrapper calls here?
+            // Wait, analyze.js unwrapIIFE logic (lines 400-418) dives into the body.
+            // If the bundle is: var foo = __commonJS((exports) => { ... });
+            // Then "statements" ARE the body of that commonJS function?
+            // NO. The parser unwraps the IIFE at the very top level (webpack style), but esbuild often has:
+            // var require_a = __commonJS(...)
+            // var require_b = __commonJS(...)
+            // So "statements" contains these VariableDeclarations.
+
+            // The challenge: The *content* of require_a is inside the arrow function passed to __commonJS.
+            // If `statements` is iterating over the TOP LEVEL, then `node` IS the entire module `var a = ...`
+            // If that is the case, `shouldSplit` will eventually split this huge node if it's too big?
+            // Wait, `isInsideLargeDeclaration` (line 658) prevents splitting INSIDE a variable declaration if it's > 250 tokens?
+            // NO, `!isInsideLargeDeclaration` in the split condition means "Do NOT split if we are inside a large declaration".
+            // Actually it means "shouldSplit" is FALSE if `isInsideLargeDeclaration` is true? 
+            // Line 664: `!isInsideLargeDeclaration`. Correct.
+            // So if `var a = __commonJS(...)` is 10k lines, we define it as ONE chunk. 
+            // We want to force split it BUT keep the moduleId.
+
+            // Refined Logic:
+            // If `isModuleStart` is true, we are about to process a node that IS a module wrapper.
+            // Use specific logic for `isModuleWrapperCall` to ALLOW splitting inside it if we modify the traverse?
+            // AST traversal here is flat over top-level statements. 
+            // If the node is `var a = ...`, it's ONE node. 
+            // We cannot split *inside* a node using this `forEach(statement)` loop.
+            // To split a large commonJS module, we must have entered its body.
+            // But we only entered the body if `unwrapIIFE` did so.
+
+            // If the bundle is standard esbuild (flat list of commonJS wrappers), we actually WANT to treat each wrapper as a chunk (or set of chunks).
+            // Currently `isModuleWrapperCall` is used to FORCE split (line 666).
+            // This means we treat `var a = ...` as a split point.
+            // But if `var a = ...` is 500kb, it's still one AST node in `statements`.
+            // The current logic CANNOT split a single huge AST node. 
+            // UNLESS we recursively traverse into it.
+
+            // Modification: The current analyzer assumes reasonably sized top-level nodes.
+            // If `webcrack` runs (Phase 0), it might have unpacked things? 
+            // Webcrack usually converts `var a = __commonJS(...)` into distinct files or ESM.
+            // If webcrack failed or didn't unpack, we are stuck with huge nodes.
+
+            // Assuming for now we are dealing with chunks that *have* been somewhat split or we accept them as units.
+            // If `currentModuleId` is set, we tag the chunk.
+
+            // If this node IS the module wrapper, we should probably check if we need to reset moduleId after it unique to this node?
+            if (isModuleStart) {
+                // The module ID applies effectively just to this node (and any chunks we form from it if we could split it).
+                // Since we can't split inside this node in this loop, the entire node gets this ID.
+                // But wait, if we have sequential small nodes that belong to a logical module (e.g. "lazy init" pattern where logic is spread),
+                // we might see `var A = ...; A.prototype.foo = ...;`
+                // In that case, `currentModuleId` should persist.
+            }
+
+            // ... (rest of logic)
             // Performance Optimization: Rough token estimate (length / 2.5)
             // Obfuscated code has many short identifiers, making length/4 too optimistic.
             const nodeTokensApprox = nodeCodeApprox.length / 2.5;
@@ -726,6 +800,78 @@ class CascadeGraph {
                         }
                     }
                 });
+            }
+        }
+    }
+
+    // Step B.5: Identifier Affinity (Soft Cohesion Signal)
+    calculateAffinity() {
+        console.log(`[*] Phase 2.5: Calculating Identifier Affinity (Soft Signal)...`);
+        const chunks = Array.from(this.nodes.values()).sort((a, b) => a.id - b.id);
+
+        for (let i = 0; i < chunks.length - 1; i++) {
+            const current = chunks[i];
+            const next = chunks[i + 1];
+
+            // 1. Module ID Continuity (Hard Signal)
+            if (current.moduleId && next.moduleId && current.moduleId === next.moduleId) {
+                // already linked by hard signal
+                continue;
+            }
+
+            // 2. Identifier Cohesion (Soft Signal)
+            // Extract defined vars in Current that are used in Next
+            const currentDefs = this.extractInternalNames({
+                type: 'VariableDeclaration',
+                declarations: current.structuralAST ? [] : [] // Mocking node structure not needed if we rely on regex/set, but let's use what we have or re-parse
+            });
+            // Used a simpler approach: Re-use internalName map logic limited to short names
+
+            // Just scan for short variables defined in A used in B
+            const definedInA = new Set();
+            const usedInB = new Set();
+
+            const extract = (code, targetSet, isDef) => {
+                const ast = parser.parse(code, { sourceType: 'module', plugins: ['jsx', 'typescript'] });
+                traverse(ast, {
+                    Identifier(p) {
+                        if (p.node.name.length <= 2) {
+                            if (isDef && (p.isBindingIdentifier() || p.key === p.node)) targetSet.add(p.node.name);
+                            else if (!isDef && p.isReferencedIdentifier()) targetSet.add(p.node.name);
+                        }
+                    }
+                });
+            };
+
+            try {
+                // We can't afford full re-parse performance hit for every chunk pair if it's huge, 
+                // but for localized affinity it's okay. Limits:
+                if (current.tokens < 5000 && next.tokens < 5000) {
+                    // actually, let's use a faster regex heuristic for affinity to be safe
+                    const simpleDefRegex = /\b(?:var|let|const|function)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+                    let match;
+                    while ((match = simpleDefRegex.exec(current.code)) !== null) {
+                        if (match[1].length <= 3) definedInA.add(match[1]);
+                    }
+
+                    const currentCode = next.code;
+                    for (const def of definedInA) {
+                        if (currentCode.includes(def)) {
+                            // Verify it's not a keyword match with boundary
+                            if (new RegExp(`\\b${def}\\b`).test(currentCode)) {
+                                usedInB.add(def);
+                            }
+                        }
+                    }
+                }
+            } catch (e) { continue; }
+
+            const cohesionScore = usedInB.size;
+            if (cohesionScore >= 3) {
+                console.log(`    [+] Affinity Link: ${current.name} -> ${next.name} (Shared ${cohesionScore} short vars)`);
+                current.affinityLink = next.name;
+                next.parentChunk = current.name;
+                next.affinityScore = cohesionScore;
             }
         }
     }
@@ -1012,6 +1158,10 @@ class CascadeGraph {
                 entrySignalCount: node.entrySignalCount || 0,
                 error_signature: node.error_signature || null,
                 startsWithImport: node.startsWithImport || false,
+                moduleId: node.moduleId || null,
+                affinityLink: node.affinityLink || null,
+                parentChunk: node.parentChunk || null,
+                affinityScore: node.affinityScore || 0,
                 startLine: node.startLine || 0,
                 endLine: node.endLine || 0
             };
@@ -1145,6 +1295,7 @@ async function run() {
     }
 
     graph.identifyNodes(ast, code);
+    graph.calculateAffinity(); // New Phase 2.5
     graph.detectNeighbors();
     // collapseProxyNodes is already metadata-based
     collapseProxyNodes(graph.nodes);

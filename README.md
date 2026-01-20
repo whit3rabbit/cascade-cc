@@ -52,8 +52,8 @@ npm run analyze
 # npm run resync-registry # Troubleshooting if anchor fails with zero matches
 npm run anchor -- <version> 
 
-# 3. Re-run analyze to apply anchor metadata (avoids re-download by pointing at the local bundle)
-npm run analyze -- claude-analysis/<version>/cli.js --version <version>
+# 4. Role & Folder hinting
+node src/classify_logic.js
 
 # 6. Use LLM to name proprietary logic (Requires API Key in .env)
 npm run deobfuscate -- <version> --skip-vendor

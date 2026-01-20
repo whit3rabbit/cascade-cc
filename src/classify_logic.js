@@ -104,7 +104,11 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
 
         // --- 1. Known Vendor Roles (Auto-populated from Registry) ---
         if (isLibrary && matchMeta?.label) {
-            const libBase = matchMeta.label.split('_')[0]; // Gets "zod", "react", etc.
+            let libBase = matchMeta.label.split('_')[0]; // Gets "zod", "react", etc.
+            // SANITIZATION: If libBase contains non-alphanumeric chars (e.g. "require(.."), use "vendor_misc"
+            if (/[^a-zA-Z0-9-]/.test(libBase)) {
+                libBase = 'vendor_misc';
+            }
             node.role = `LIB: ${libBase.toUpperCase()}`;
             node.label = 'VENDOR_LIBRARY';
             node.isGoldenMatch = true;
@@ -124,14 +128,31 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
             } else if (node.hasStateMutator) {
                 node.role = 'STATE_ORCHESTRATOR';
             } else {
-                node.role = 'BUSINESS_LOGIC'; // Default for Founder
+                node.role = 'APP_LOGIC'; // Default for Founder
             }
 
             node.label = (node.centrality > 0.05) ? 'CORE_MODULE' : 'INTERNAL_HELPER';
         }
 
-        // --- 3. Default Fallback ---
-        if (!node.role) node.role = 'UNKNOWN_MODULE';
+        // --- 3. Default Fallback & Sanitization ---
+        if (!node.role || node.role.includes('require(') || node.role.includes('tmp/') || node.role.length > 50) {
+            node.role = 'UNCLASSIFIED_LOGIC';
+        }
+
+        // --- 4. Role-based Path Hinting (New) ---
+        const roleToFolderMap = {
+            'STREAM_ORCHESTRATOR': 'src/core/session',
+            'API_CLIENT': 'src/integrations/anthropic',
+            'FILESYSTEM_SERVICE': 'src/core/fs',
+            'UI_COMPONENT': 'src/ui/shared',
+            'CLI_ENTRY_POINT': 'src/cli',
+            'STATE_ORCHESTRATOR': 'src/core/state',
+            'APP_LOGIC': 'src/core/logic'
+        };
+
+        if (roleToFolderMap[node.role] && !node.proposedPath) {
+            node.proposedPath = `${roleToFolderMap[node.role]}/${node.displayName || node.name}.ts`;
+        }
     });
 
     // 5. Entry Point Identification

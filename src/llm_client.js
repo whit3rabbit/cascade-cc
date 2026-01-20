@@ -6,7 +6,7 @@ dotenv.config();
 const PROVIDER = process.env.LLM_PROVIDER || 'gemini';
 const MODEL = process.env.LLM_MODEL || (PROVIDER === 'gemini' ? 'gemini-2.0-flash' : 'google/gemini-2.0-flash-exp:free');
 const API_KEY = PROVIDER === 'gemini' ? process.env.GEMINI_API_KEY : process.env.OPENROUTER_API_KEY;
-const LLM_TIMEOUT_MS = 90000; // 90 seconds
+const LLM_TIMEOUT_MS = 300000; // 5 minutes
 
 let geminiClient = null;
 let openaiClient = null; // Renamed to openrouterClient below for clarity if needed, but keeping variable name for minimal diff if preferred. Actually let's rename for correctness.
@@ -155,6 +155,8 @@ async function callLLM(prompt, retryCount = 0) {
             await sleep(delay);
             return callLLM(prompt, retryCount + 1);
         }
+        console.error(`[!] Unhandled LLM Error (${err.name}): ${err.message}`);
+        if (err.stack) console.error(err.stack);
         throw err;
     }
 }

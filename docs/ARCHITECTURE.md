@@ -19,11 +19,11 @@ The system employs a **Hybrid Differential Deobfuscation** approach. Instead of 
 The repository is partitioned into three main layers:
 
 ### A. Orchestration & AST Processing (Node.js)
-- **`src/analyze.js`**: The core analyzer. It uses Babel to chunk large bundles, extract metadata, and identify structural signals including "Tengu" markers.
+- **`src/analyze.js`**: The core analyzer. It uses Babel to chunk large bundles, extract metadata, detected "Module Envelopes" for logical grouping, and calculates Identifier Affinity scores.
 - **`src/anchor_logic.js`**: Bridges Node.js orchestration with Python inference. It handles logic registry synchronization, vectorization commands, and aligns symbols between target and gold-standard chunks.
-- **`src/deobfuscate_pipeline.js`**: Manages the multi-stage LLM pass, handling prioritized batching (Core Libs first, then Business Logic), incremental syncing, and JSON repair.
+- **`src/deobfuscate_pipeline.js`**: Manages the multi-stage LLM pass, including the **Consolidation Pass** for grouped chunks and inherited scope mapping.
 - **`src/rename_chunks.js`**: Consumes `mapping.json` to apply a safe, scope-aware rename pass across the entire AST.
-- **`src/assemble_final.js`**: The reconstruction engine that uses dependency graphs to reassemble chunks into a coherent file tree.
+- **`src/assemble_final.js`**: The reconstruction engine that performs **Deduplicating Merges** to strip module wrappers and reassemble split chunks into clean files.
 
 ### B. Machine Learning Core (Python/PyTorch)
 - **`ml/encoder.py`**: Defines the `TransformerCodeEncoder`. It uses a Transformer Encoder with Positional Encoding to generate fixed-size (32-dim) embeddings from AST sequences.
@@ -104,7 +104,25 @@ The assembled codebase undergoes a final refinement pass (`npm run refine`). Thi
 
 ---
 
-## 4. Key Architectural Innovations
+## 4. Advanced Chunk Reconstruction (The "Holy Grail")
+
+To solve the problem of identifying which split chunks belong to the same original source file, the system uses a multi-tiered signal detection system.
+
+### A. Hard Signal: Module Envelopes
+The analyzer (`src/analyze.js`) detects bundler wrappers (e.g., `__commonJS`, `__lazyInit`) and assigns a persistent `moduleId` to all chunks contained within the wrapper. This effectively groups split parts of a large module together.
+
+### B. Soft Signal: Identifier Affinity
+We calculate a **Cohesion Score** between adjacent chunks based on the continuity of short, scoped variables (e.g., `_a`, `x`). If Chunk A defines `_a` and Chunk B immediately uses it, an **Affinity Link** is established, treating them as a logical continuum.
+
+### C. Consolidation & Deduplication
+- **Consolidation Pass**: Before deobfuscation, a "Consolidation Pass" groups linked chunks and prompts the LLM to identify the single "Unified Path" for the group.
+- **Deduplicating Merge**: During assembly (`src/assemble_final.js`), module wrappers and redundant helpers are stripped, merging the bodies of split chunks into a clean, singular file.
+
+*For a deep dive on the math and logic, see [Advanced Chunk Reconstruction](CHUNKS.md).*
+
+---
+
+## 5. Key Architectural Innovations
 
 ### The "Cold Start" Advantage
 Because the NN is trained on structural patterns rather than specific hashes, it can identify a library version it has never seen before, provided it follows similar architectural patterns to other libraries in the training set.
@@ -117,16 +135,10 @@ Most deobfuscators look at files in isolation. This system uses the dependency g
 
 ---
 
-## 5. Visualization Integration
+## 6. Visualization Integration
 
 The `visualizer/` directory contains a D3.js-based interface that allows developers to interactively explore the codebase's "Topology."
 - **Nodes**: Chunks of code.
 - **Edges**: Import/Export relationships.
 - **Size**: Proportional to Markov Centrality (Importance).
 - **Color**: Indicates whether a chunk is "Vendor" (Library) or "Founder" (App Logic).
-
----
-
-For more details on specific components, see:
-- [Neural Network Documentation](file:///Users/whit3rabbit/Documents/GitHub/cascade-like/docs/NN.md)
-- [Data Schemas](file:///Users/whit3rabbit/Documents/GitHub/cascade-like/docs/SCHEMA.md)

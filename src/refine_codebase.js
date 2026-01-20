@@ -96,7 +96,7 @@ async function run() {
 
     console.log(`[*] Found ${files.length} files to refine.`);
 
-    const limit = pLimit(PROVIDER === 'gemini' ? 2 : 5);
+    const limit = pLimit(PROVIDER === 'gemini' ? 2 : 2); // Conservative limit for all providers to avoid timeouts
     const tasks = files.map(file => limit(() => refineFile(file, path.relative(assembleDir, file))));
 
     await Promise.all(tasks);

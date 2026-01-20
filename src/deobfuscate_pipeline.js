@@ -411,6 +411,126 @@ async function run() {
 
     const CORE_LIBS = ['zod', 'react', 'react-dom', 'next', 'lucide', 'framer-motion', 'clsx', 'tailwind', 'radix-ui'];
 
+    // --- CONSOLIDATION PASS (Phase 0.9) ---
+    // Group chunks by Module ID or Affinity Link to propose unified file paths *before* individual processing
+    const consolidationGroups = [];
+    const processedInConsolidation = new Set();
+
+    // Ensure chronological order for consolidation grouping
+    const chronoChunks = graphData.slice().sort((a, b) => { // Fixed: Ensure clean numeric sort
+        const idA = parseInt(a.name.replace('chunk', ''), 10);
+        const idB = parseInt(b.name.replace('chunk', ''), 10);
+        return idA - idB;
+    });
+
+    for (let i = 0; i < chronoChunks.length; i++) {
+        const chunk = chronoChunks[i];
+        if (processedInConsolidation.has(chunk.name)) continue;
+
+        const group = [chunk];
+        processedInConsolidation.add(chunk.name);
+
+        // Look ahead for linked chunks
+        let nextIdx = i + 1;
+        while (nextIdx < chronoChunks.length) {
+            const next = chronoChunks[nextIdx];
+            const prev = group[group.length - 1];
+
+            const isHardLinked = (prev.moduleId && next.moduleId && prev.moduleId === next.moduleId);
+            const isSoftLinked = (prev.affinityLink === next.name);
+
+            if (isHardLinked || isSoftLinked) {
+                group.push(next);
+                processedInConsolidation.add(next.name);
+                nextIdx++;
+            } else {
+                break;
+            }
+        }
+
+        if (group.length > 1) {
+            consolidationGroups.push(group);
+        }
+    }
+
+    if (consolidationGroups.length > 0 && !isDryRun) {
+        console.log(`[*] Phase 0.9: Running Consolidation Pass on ${consolidationGroups.length} groups...`);
+        const pLimit = require('p-limit');
+        const limit = pLimit(5); // Fast parallel check
+
+        const runConsolidation = (group) => limit(async () => {
+            // Skip if we already have good paths for all
+            if (group.every(c => c.proposedPath || c.suggestedPath)) return;
+
+            const groupMeta = group.map(c => {
+                let code = c.code;
+                if (!code) {
+                    try {
+                        const file = c.name.endsWith('.js') ? c.name : `${c.name}.js`;
+                        code = fs.readFileSync(path.join(chunksDir, file), 'utf8');
+                    } catch (e) {
+                        code = "";
+                    }
+                }
+                return {
+                    name: c.name,
+                    preview: code ? code.slice(0, 300).replace(/\n/g, ' ') : "",
+                    vars: (code.match(/var\s+([a-zA-Z0-9_$]+)/g) || []).slice(0, 5).join(', ')
+                };
+            });
+
+            const prompt = `
+Role: Senior Code Architect
+Task: Reconstruct Original Source File from Split Chunks
+
+We have detected that the following ${group.length} chunks belong to the SAME logical module (linked by internal closure state or affinity).
+Your job is to identify the singular ORIGINAL source file they belong to.
+
+Chunks:
+${JSON.stringify(groupMeta, null, 2)}
+
+Existing Hints:
+${group.map(c => c.kb_info ? `- ${c.name}: KB suggests ${c.kb_info.suggested_path}` : '').join('\n')}
+
+Instructions:
+1. Analyze the variable scope continuity and logic.
+2. Propose a single unified file path (e.g. "src/services/sessionManager.ts") that contains all these chunks.
+3. Assign "part" numbers to each chunk (1, 2, 3...).
+
+Response JSON:
+{
+  "unifiedPath": "src/path/to/file.ts",
+  "rationale": "Why these chunks are one file",
+  "parts": {
+    "chunk001": 1,
+    "chunk002": 2
+  }
+}
+`;
+            try {
+                // Short timeout, this should be quick intuition
+                const response = await callLLM(prompt);
+                const { cleaned } = cleanLLMResponse(response);
+                if (cleaned) {
+                    const result = JSON.parse(cleaned);
+                    if (result.unifiedPath) {
+                        console.log(`    [+] Consolidated ${group.length} chunks into ${result.unifiedPath}`);
+                        group.forEach(c => {
+                            c.proposedPath = result.unifiedPath;
+                            c.partIndex = result.parts?.[c.name] || 1;
+                            // Propagate to global mapping logic if needed
+                        });
+                    }
+                }
+            } catch (e) {
+                console.warn(`    [!] Consolidation failed for group ${group[0].name}: ${e.message}`);
+            }
+        });
+
+        await Promise.all(consolidationGroups.map(runConsolidation));
+    }
+
+
     let sortedChunks = graphData.slice().sort((a, b) => {
         // 1. Prioritize Core Libraries
         const aIsCore = CORE_LIBS.some(lib => a.displayName?.toLowerCase().includes(lib) || a.proposedPath?.toLowerCase().includes(lib));
@@ -445,7 +565,7 @@ async function run() {
         const coreChunks = sortedChunks.filter(c => CORE_LIBS.some(lib => c.displayName?.toLowerCase().includes(lib) || c.proposedPath?.toLowerCase().includes(lib)));
         const otherChunks = sortedChunks.filter(c => !coreChunks.includes(c));
 
-        const runChunk = (chunkMeta) => limit(async () => {
+        const runChunk = async (chunkMeta, precedingContext = null) => {
             const file = path.basename(chunkMeta.file);
             const chunkPath = path.join(chunksDir, file);
             if (!fs.existsSync(chunkPath)) return;
@@ -460,8 +580,18 @@ async function run() {
             }
 
             if (globalMapping.processed_chunks.includes(chunkMeta.name) && !isForce) {
+                // Return existing deobfuscated code as context if available
+                const deobfuscatedPath = path.join(versionPath, 'deobfuscated_chunks', file);
+                try {
+                    // Try to find if a renamed version exists
+                    const candidates = fs.readdirSync(path.join(versionPath, 'deobfuscated_chunks')).filter(f => f.startsWith(chunkMeta.name));
+                    if (candidates.length > 0) {
+                        return fs.readFileSync(path.join(versionPath, 'deobfuscated_chunks', candidates[0]), 'utf8');
+                    }
+                } catch (e) { }
+
                 skipProcessedCount++;
-                return;
+                return originalCode; // Fallback to original code for context
             }
 
             const originalCode = fs.readFileSync(chunkPath, 'utf8');
@@ -531,23 +661,34 @@ async function run() {
                 goldReferenceCode = truncateReference(goldReferenceCode);
             }
 
-            const generatePrompt = (vars, props, codeContent, goldReferenceCode = '', goldSimilarity = null) => `
+            const existingPaths = sortedChunks
+                .filter(c => c.suggestedPath && globalMapping.processed_chunks.includes(c.name))
+                .sort((a, b) => (b.centrality || 0) - (a.centrality || 0))
+                .slice(0, 20)
+                .map(c => `- ${c.name} (${c.role}) -> ${c.suggestedPath}`);
+
+            const generatePrompt = (vars, props, codeContent, goldReferenceCode = '', goldSimilarity = null, precedingContext = null) => `
 Role: Staff Software Engineer (Reverse Engineering Team)
-Task: Reconstruct Proprietary "Founder" Logic
+Task: Reconstruct Proprietary "Founder" Logic and File Structure
 
 CONTEXT:
 This chunk has been identified as ${chunkMeta.role}.
-It is intended to be located at: ${chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path || 'src/undetermined/'}.
+It is intended to be located at: ${chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path || (chunkMeta.parentHintPath ? path.join(chunkMeta.parentHintPath, 'child_module.ts') : 'src/undetermined/')}.
 
 PROJECT STRUCTURE REFERENCE:
 Use this structure to guide your filename proposals. Place files in the most appropriate directory based on their logic.
 ${KB && KB.project_structure ? JSON.stringify(KB.project_structure, null, 2) : 'Structure not available.'}
 
+INFERRED FILESYSTEM STATE (Active Context):
+These are the directory paths we have already confirmed for key modules. Use these to maintain consistency (e.g. if you see a neighbor listed here, put this file close to it).
+${existingPaths.length > 0 ? existingPaths.join('\n') : 'No paths confirmed yet.'}
+
 NEIGHBOR CONTEXT:
 This code interacts with:
 ${(chunkMeta.outbound || []).map(n => {
                 const neighborMeta = graphData.find(m => m.name === n);
-                return `- ${neighborMeta?.displayName || neighborMeta?.name || n}`;
+                const pathHint = neighborMeta?.suggestedPath || neighborMeta?.proposedPath ? ` (Located: ${neighborMeta.suggestedPath || neighborMeta.proposedPath})` : '';
+                return `- ${neighborMeta?.displayName || neighborMeta?.name || n}${pathHint}`;
             }).join('\n')}
 
 MAPPING KNOWLEDGE (High Confidence or Established Guesses):
@@ -560,15 +701,40 @@ ${[...origVars, ...origProps].filter(id => {
                 return `- ${id} is ${m.name} (Source: ${m.source}, Confidence: ${m.confidence})`;
             }).join('\n') || 'None'}
 
-${goldReferenceCode ? `GOLD REFERENCE MATCH:
-This chunk matches a library signature (${(goldSimilarity * 100).toFixed(2)}% similarity). Use this to resolve ambiguous names.
+            ${goldReferenceCode ? `GOLD REFERENCE MATCH:
+            This chunk matches a library signature (${(goldSimilarity * 100).toFixed(2)}% similarity). Use this to resolve ambiguous names.
+            
+            \`\`\`javascript
+            ${goldReferenceCode}
+            \`\`\`
+            ` : ''}
 
-\`\`\`javascript
-${goldReferenceCode}
-\`\`\`
-` : ''}
+            INHERITED MAPPINGS (From Previous Chunks in ${chunkMeta.proposedPath || 'Module'}):
+            ${(() => {
+                    if (chunkMeta.parentChunk || (chunkMeta.partIndex && chunkMeta.partIndex > 1)) {
+                        // Find likely parent
+                        const parentName = chunkMeta.parentChunk ||
+                            (chunkMeta.partIndex ? graphData.find(c => c.proposedPath === chunkMeta.proposedPath && c.partIndex === chunkMeta.partIndex - 1)?.name : null);
 
-SOURCE CODE:
+                        if (parentName) {
+                            const parentVars = globalMapping.variables;
+                            const inherited = Object.entries(parentVars)
+                                .filter(([k, v]) => v.source === parentName)
+                                .map(([k, v]) => `- ${k} -> ${v.name} (Inherited)`)
+                                .join('\n');
+                            return inherited || "None relevant.";
+                        }
+                    }
+                    return "None.";
+                })()}
+
+            ${precedingContext ? `PRECEDING CODE CONTEXT (The code immediately before this chunk in the same file):
+            \`\`\`javascript
+            ${precedingContext.slice(-2000)}
+            \`\`\`
+            ` : ''}
+
+            SOURCE CODE:
 \`\`\`javascript
 ${codeContent}
 \`\`\`
@@ -577,7 +743,11 @@ INSTRUCTIONS:
 1. Examine the code for logical consistency. If an existing mapping (listed above) results in nonsensical code (e.g. \`Date.filter()\`), suggest a corrected name in the "corrections" block.
 2. Identify the 'Proprietary' business logic that is unique to Claude.
 3. Rename the remaining mangled variables (single letters/short names) based on their semantic usage.
-4. Output valid JSON only.
+4. PROPOSE A FULL FILE PATH:
+   - Priority 1: If a neighbor is already in a specific folder (see NEIGHBOR CONTEXT), prefer placing this file in the same directory or a sub-directory unless it crosses an architectural boundary.
+   - Priority 2: Use the PROJECT STRUCTURE REFERENCE.
+   - Example: "src/utils/stringHelpers.js" NOT just "stringHelpers"
+5. Output valid JSON only.
 
 RESPONSE FORMAT (JSON ONLY):
 {
@@ -588,12 +758,13 @@ RESPONSE FORMAT (JSON ONLY):
   "corrections": {
     "mangled": { "name": "new_correct_name", "rationale": "Why the previous automated mapping was wrong (e.g. results in Date.filter which is not a function)" }
   },
-  "suggestedFilename": "descriptive_name"
+  "suggestedPath": "src/path/to/logical_name.js"
 }
 `;
 
             if (isDryRun) {
                 console.log(`[DRY RUN] Prompt for ${file} would be generated.`);
+                if (existingPaths.length > 0) console.log(`[DRY RUN] Inferred State Example: ${existingPaths[0]}`);
                 return;
             }
 
@@ -609,7 +780,7 @@ RESPONSE FORMAT (JSON ONLY):
 
                     const isFirstBatch = (vOffset === 0 && pOffset === 0);
                     const codeToPass = isFirstBatch ? contextCode : skeletonize(contextCode);
-                    const prompt = generatePrompt(varSub, propSub, codeToPass, goldReferenceCode, goldSimilarity);
+                    const prompt = generatePrompt(varSub, propSub, codeToPass, goldReferenceCode, goldSimilarity, precedingContext);
                     const PROMPT_RETRIES = 3;
                     let success = false;
 
@@ -675,7 +846,22 @@ RESPONSE FORMAT (JSON ONLY):
                                     }
                                 }
                             }
-                            if (responseData.suggestedFilename) chunkMeta.suggestedFilename = responseData.suggestedFilename;
+                            if (responseData.suggestedPath) {
+                                chunkMeta.suggestedPath = responseData.suggestedPath;
+                                // Also populate suggestedFilename for backward compatibility
+                                chunkMeta.suggestedFilename = path.basename(responseData.suggestedPath, path.extname(responseData.suggestedPath));
+
+                                // Proactive Hinting: Tell neighbors about this decision
+                                const neighborNames = [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])];
+                                neighborNames.forEach(nName => {
+                                    const neighbor = sortedChunks.find(m => m.name === nName); // Look up in sortedChunks which references the graph objects
+                                    if (neighbor && !neighbor.suggestedPath) {
+                                        neighbor.parentHintPath = path.dirname(responseData.suggestedPath);
+                                    }
+                                });
+                            } else if (responseData.suggestedFilename) {
+                                chunkMeta.suggestedFilename = responseData.suggestedFilename;
+                            }
 
                             console.log(`    [+] Mapped identifiers in ${file} (Sub-pass)`);
                             success = true;
@@ -705,6 +891,8 @@ RESPONSE FORMAT (JSON ONLY):
             const deobfuscatedDir = path.join(versionPath, 'deobfuscated_chunks');
             if (!fs.existsSync(deobfuscatedDir)) fs.mkdirSync(deobfuscatedDir, { recursive: true });
 
+            let finalRenamedCode = null;
+
             try {
                 let logicalName = "";
                 if (chunkMeta.proposedPath) {
@@ -720,7 +908,7 @@ RESPONSE FORMAT (JSON ONLY):
                 const finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
                 const outputPath = path.join(deobfuscatedDir, finalName);
 
-                const finalRenamedCode = liveRenamer(originalCode, globalMapping, {
+                finalRenamedCode = liveRenamer(originalCode, globalMapping, {
                     sourceFile: chunkMeta.name,
                     neighbors,
                     displayName: chunkMeta.displayName,
@@ -753,15 +941,51 @@ RESPONSE FORMAT (JSON ONLY):
 
             globalMapping.processed_chunks.push(chunkMeta.name);
             // Save progress frequently (every chunk)
+            // Save progress frequently (every chunk)
             fs.writeFileSync(mappingPath, JSON.stringify(globalMapping, null, 2));
+
+            return finalRenamedCode || originalCode;
+        };
+
+        // --- SCHEDULER: Grouped Execution ---
+        const chunkToGroup = new Map();
+        consolidationGroups.forEach(group => {
+            group.forEach(c => chunkToGroup.set(c.name, group));
         });
 
+        const executeBatch = async (chunks) => {
+            const workUnits = [];
+            const scheduled = new Set();
+
+            for (const chunk of chunks) {
+                if (scheduled.has(chunk.name)) continue;
+
+                const group = chunkToGroup.get(chunk.name);
+                if (group) {
+                    workUnits.push(group);
+                    group.forEach(c => scheduled.add(c.name));
+                } else {
+                    workUnits.push([chunk]);
+                    scheduled.add(chunk.name);
+                }
+            }
+
+            // Execute work units
+            await Promise.all(workUnits.map(unit => limit(async () => {
+                let context = null;
+                for (const unitChunk of unit) {
+                    // Start of unit (or first processed chunk) needs no prev context, only the chain does
+                    const result = await runChunk(unitChunk, context);
+                    if (result) context = result;
+                }
+            })));
+        };
 
         console.log(`[*] Processing Core Batch (${coreChunks.length} chunks)...`);
-        await Promise.all(coreChunks.map(runChunk));
+        await executeBatch(coreChunks);
 
         console.log(`[*] Processing Remaining Batch (${otherChunks.length} chunks)...`);
-        await Promise.all(otherChunks.map(runChunk));
+        await executeBatch(otherChunks);
 
         // Persist updated metadata back to graph_map.json
         console.log(`[*] Persisting updated metadata (suggested filenames) to graph_map.json...`);

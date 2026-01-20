@@ -75,64 +75,67 @@ async function assemble(version) {
         return;
     }
 
-    // 1. Identify "Original Modules" and group chunks accordingly
-    // An "Original Module" is a sequence of chunks that starts with an import chunk
-    // and continues until the next import chunk or the end.
-    // 1. Identify "Original Modules" and group chunks accordingly
-    // An "Original Module" is a sequence of chunks that starts with an import chunk
-    // and continues until the next import chunk or the end.
-    const modules = [];
-    // Start with a default module in case the first chunks don't have import signals
-    let currentModule = {
-        chunks: [],
-        bestPath: null
-    };
-    modules.push(currentModule);
+    // 1. Group chunks by their INTENDED logical file path
+    // Previous logic relied on 'startsWithImport', but now we trust the LLM/Classifier's 'suggestedPath'
+    const modulesMap = new Map(); // path -> Array<chunk>
 
-    for (const chunk of chunks) {
-        // If we hit a new import signal AND the current module already has content, start a new one
-        if (chunk.startsWithImport && currentModule.chunks.length > 0) {
-            currentModule = {
-                chunks: [chunk],
-                bestPath: null
-            };
-            modules.push(currentModule);
-        } else {
-            currentModule.chunks.push(chunk);
+    chunks.forEach(chunk => {
+        let logicalPath = null;
+
+        // Priority 1: Proven Vendor
+        if (chunk.category === 'vendor') {
+            const folder = chunk.role.replace(/[:\s]/g, '_').replace(/VENDOR_/g, '').toLowerCase();
+            const fileName = chunk.suggestedFilename || chunk.name;
+            logicalPath = `src/vendor/${folder}/${fileName}.js`;
         }
-    }
+        // Priority 2: Explicit Proposal
+        else if (chunk.proposedPath) {
+            logicalPath = chunk.proposedPath;
+        }
+        // Priority 3: LLM Suggested Path
+        else if (chunk.suggestedPath) {
+            logicalPath = chunk.suggestedPath;
+        }
+        // Priority 4: KB Legacy
+        else if (chunk.kb_info && chunk.kb_info.suggested_path) {
+            logicalPath = chunk.kb_info.suggested_path.replace(/`/g, '');
+        }
 
-    // Identify the best path for each module and mark chunks for inclusion
-    const finalChunksToAssemble = new Set();
-
-    modules.forEach(mod => {
-        // Find the most descriptive path within this module
-        let bestPath = null;
-        for (const chunk of mod.chunks) {
-            if (chunk.suggestedPath) {
-                bestPath = chunk.suggestedPath.replace('.ts', '.js');
-            } else if (chunk.kb_info && chunk.kb_info.suggested_path) {
-                bestPath = chunk.kb_info.suggested_path.replace(/`/g, '').replace('.ts', '.js');
+        // Clean up path
+        if (logicalPath) {
+            logicalPath = logicalPath.replace('.ts', '.js');
+            if (!logicalPath.startsWith('src/') && !logicalPath.startsWith('test/')) {
+                logicalPath = path.join('src', logicalPath);
             }
-            if (bestPath) break;
+        } else {
+            // Fallback: Group by Role/Folder
+            const folder = (chunk.role || 'misc').toLowerCase().replace(/[^a-z0-9]/g, '-');
+            const fileName = chunk.suggestedFilename || chunk.name;
+            logicalPath = `src/services/${folder}/${fileName}.js`;
         }
 
-        // Fallback path if no descriptive path found
-        if (!bestPath && mod.chunks.length > 0) {
-            const firstChunk = mod.chunks[0];
-            const folder = firstChunk.role.toLowerCase().replace(/_/g, '-');
-            const fileName = firstChunk.suggestedFilename || firstChunk.name;
-            bestPath = `src/services/${folder}/${fileName}.js`;
+        // Sanitization
+        logicalPath = logicalPath.replace(/\.\./g, '__').replace(/^\//, '');
+
+        if (!modulesMap.has(logicalPath)) {
+            modulesMap.set(logicalPath, []);
         }
+        modulesMap.get(logicalPath).push(chunk);
+    });
 
-        mod.bestPath = bestPath;
+    const finalChunksToAssemble = new Set();
+    const modules = [];
 
-        // Mark all chunks in this "Original Module" for inclusion
-        mod.chunks.forEach(c => {
+    for (const [bestPath, chunkList] of modulesMap) {
+        modules.push({
+            bestPath,
+            chunks: chunkList
+        });
+        chunkList.forEach(c => {
             c.finalPath = bestPath;
             finalChunksToAssemble.add(c);
         });
-    });
+    }
 
     // Also include other "Core" chunks that might not be in an original module (rare but possible)
     chunks.forEach(c => {
@@ -159,47 +162,17 @@ async function assemble(version) {
     const fileMap = new Map(); // path -> Array<chunkMetadata>
 
     for (const chunk of coreChunks) {
+        // Since we already calculated finalPath in step 1, we just need to verify and add
         let finalPath = chunk.finalPath;
 
-        // CRITICAL FIX: Prioritize explicit proposed paths from Anchoring (e.g. Vendor matches)
-        // and enforce vendor isolation to prevent giant files.
-        if (chunk.proposedPath) {
-            finalPath = chunk.proposedPath.replace('.ts', '.js');
-        } else if (chunk.category === 'vendor') {
-            const folder = chunk.role.replace(/[:\s]/g, '_').replace(/VENDOR_/g, '').toLowerCase();
-            const fileName = chunk.suggestedFilename || chunk.name;
-            finalPath = `src/vendor/${folder}/${fileName}.js`;
+        // DOUBLE CHECK: Ensure no path ever points to vendor if it's not a vendor chunk (extra safety)
+        if (chunk.category !== 'vendor' && finalPath.includes('/vendor/')) {
+            finalPath = finalPath.replace('/vendor/', '/third_party/');
         }
-
-
 
         if (!finalPath) {
-            // 1. Check for Neural/Golden suggested path
-            if (chunk.suggestedPath) {
-                finalPath = chunk.suggestedPath.replace('.ts', '.js');
-            }
-            // 2. Check for Knowledge Base path
-            else if (chunk.kb_info && chunk.kb_info.suggested_path) {
-                finalPath = chunk.kb_info.suggested_path.replace(/`/g, '').replace('.ts', '.js');
-            }
-            // 3. Fallback to Role-based grouping
-            else {
-                const folder = chunk.role.toLowerCase().replace(/_/g, '-');
-                const fileName = chunk.suggestedFilename || chunk.name;
-                finalPath = `src/services/${folder}/${fileName}.js`;
-            }
-        }
-
-        // DOUBLE CHECK: Ensure no path ever points to vendor, even after fallbacks
-        if (finalPath && (
-            finalPath.startsWith('src/vendor/') ||
-            finalPath.includes('/vendor/') ||
-            finalPath.includes('lib:') ||
-            finalPath.includes('lib__')
-        )) {
-            // Force a neutral path
-            const fileName = chunk.suggestedFilename || chunk.name;
-            finalPath = `src/services/external/${fileName}.js`;
+            console.warn(`[WARN] Chunk ${chunk.name} has no final path? defaulting.`);
+            finalPath = `src/services/misc/${chunk.name}.js`;
         }
 
         if (!fileMap.has(finalPath)) fileMap.set(finalPath, []);
@@ -332,6 +305,20 @@ async function assemble(version) {
                     code = code.replace(helperRegex, '').trim();
                 }
 
+                // Module Wrapper Stripping (Hard Signal)
+                // If this chunk starts a module wrapper (search for __commonJS( or __lazyInit(), strip the envelope
+                const wrapperStartRegex = /var\s+[\w$]+\s*=\s*(?:__commonJS|__lazyInit)\s*\(((?:exports)?\s*=>\s*\{|\s*function\s*\(\w*\)\s*\{)/;
+                if (wrapperStartRegex.test(code)) {
+                    // console.log(`    [i] Stripping module wrapper from ${chunkMeta.name}`);
+                    code = code.replace(wrapperStartRegex, '');
+                }
+
+                // Strip wrapper end
+                const wrapperEndRegex = /\}\);\s*$/;
+                if (wrapperEndRegex.test(code)) {
+                    code = code.replace(wrapperEndRegex, '');
+                }
+
                 finalChunks.push({
                     meta: chunkMeta,
                     code
@@ -344,6 +331,7 @@ async function assemble(version) {
         let mergedCode = `/**\n * File: ${filePath}\n * Role: ${chunkList[0].role}\n * Aggregated from ${chunkList.length} chunks\n */\n\n`;
 
         if (headers.size > 0) {
+            mergedCode += `/* CASCADE HELPERS (De-duplicated) */\n`;
             mergedCode += `if (!globalThis.__CASCADE_HELPERS_LOADED) {\n`;
             mergedCode += Array.from(headers).join('\n') + '\n';
             mergedCode += `  globalThis.__CASCADE_HELPERS_LOADED = true;\n}\n\n`;
@@ -351,7 +339,9 @@ async function assemble(version) {
 
         for (const { meta, code } of finalChunks) {
             mergedCode += `// --- Chunk: ${meta.name} (Original lines: ${meta.startLine}-${meta.endLine}) ---\n`;
-            mergedCode += (code || '// (Empty or missing code)') + "\n\n";
+            if (code && code.trim()) {
+                mergedCode += code + "\n\n";
+            }
         }
 
         fs.writeFileSync(fullOutputPath, mergedCode);
