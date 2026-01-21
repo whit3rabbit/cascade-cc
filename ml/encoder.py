@@ -14,7 +14,13 @@ class TransformerCodeEncoder(nn.Module):
         self.pos_encoder = nn.Parameter(torch.zeros(1, max_nodes + 1, embed_dim)) 
         
         encoder_layers = nn.TransformerEncoderLayer(embed_dim, nhead, dim_feedforward=hidden_dim, batch_first=True)
-        self.transformer = nn.TransformerEncoder(encoder_layers, num_layers)
+        # Disable nested tensor path for broader backend support (e.g., MPS).
+        try:
+            self.transformer = nn.TransformerEncoder(
+                encoder_layers, num_layers, enable_nested_tensor=False
+            )
+        except TypeError:
+            self.transformer = nn.TransformerEncoder(encoder_layers, num_layers)
         self.fc = nn.Linear(embed_dim, 64)
 
     def forward(self, x):
