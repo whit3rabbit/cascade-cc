@@ -213,12 +213,14 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
                 hints = []
                 category = None
                 role = None
+                proposed_path = None
             else:
                 ast_root = chunk_data.get("ast")
                 kb_info = chunk_data.get("kb_info")
                 hints = chunk_data.get("hints", [])
                 category = chunk_data.get("category")
                 role = chunk_data.get("role")
+                proposed_path = chunk_data.get("proposedPath")
 
             sequence = []
             symbols = []
@@ -255,7 +257,8 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
                 "kb_info": kb_info,
                 "hints": hints,
                 "category": category,
-                "role": role
+                "role": role,
+                "proposedPath": proposed_path
             })
 
     # Vocabulary health check

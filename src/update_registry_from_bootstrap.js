@@ -86,7 +86,8 @@ async function updateRegistryFromBootstrap() {
                 vector: chunk.vector,
                 symbols: chunk.symbols,
                 resolved_variables: variables,
-                resolved_properties: properties
+                resolved_properties: properties,
+                proposedPath: chunk.proposedPath || null
             };
             totalEntries++;
         }

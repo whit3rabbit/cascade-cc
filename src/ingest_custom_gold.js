@@ -57,6 +57,15 @@ function ingest() {
     fs.writeFileSync(outputPath, JSON.stringify(goldAsts, null, 2));
     console.log(`[+] Saved ${Object.keys(goldAsts).length} custom logic patterns to ${outputPath}`);
 
+    // NEW: Emit simplified_asts.json for vectorization/registry build
+    const registryMetaDir = path.join('./cascade_graph_analysis/bootstrap/custom_claude_gold', 'metadata');
+    if (!fs.existsSync(registryMetaDir)) {
+        fs.mkdirSync(registryMetaDir, { recursive: true });
+    }
+    const simplifiedAstsPath = path.join(registryMetaDir, 'simplified_asts.json');
+    fs.writeFileSync(simplifiedAstsPath, JSON.stringify(goldAsts, null, 2));
+    console.log(`[+] Wrote simplified ASTs to ${simplifiedAstsPath}`);
+
     // NEW: Sync to cascade_graph_analysis/bootstrap for vectorization/registry sync
     const REGISTRY_BOOTSTRAP_DIR = './cascade_graph_analysis/bootstrap/custom_claude_gold';
     if (!fs.existsSync(REGISTRY_BOOTSTRAP_DIR)) {

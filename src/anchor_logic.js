@@ -263,7 +263,8 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     bestMatch.similarity >= lockThreshold ? { lockConfidence } : {}
                 );
 
-                const isLibraryLabel = bestMatch.label.includes('_') || bestMatch.label.includes('-v');
+                const isCustomGoldLabel = bestMatch.label.includes('custom_claude_gold');
+                const isLibraryLabel = !isCustomGoldLabel && (bestMatch.label.includes('_') || bestMatch.label.includes('-v'));
                 const libraryThreshold = parseFloat(process.env.LIBRARY_MATCH_THRESHOLD) || 0.95;
                 const isLibraryMatch = isLibraryLabel && bestMatch.similarity >= libraryThreshold;
 
@@ -277,6 +278,14 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     targetChunk.isGoldenMatch = true;
                     // Propose a file path based on the library structure
                     targetChunk.proposedPath = `src/vendor/${libName}/${targetChunk.name}.ts`;
+                }
+                if (isCustomGoldLabel && bestMatch.ref && bestMatch.ref.proposedPath) {
+                    targetChunk.category = 'founder';
+                    targetChunk.label = 'CUSTOM_GOLD_MATCH';
+                    targetChunk.isGoldenMatch = true;
+                    if (!targetChunk.proposedPath) {
+                        targetChunk.proposedPath = bestMatch.ref.proposedPath;
+                    }
                 }
 
                 if (!targetMapping.matches) targetMapping.matches = {};
