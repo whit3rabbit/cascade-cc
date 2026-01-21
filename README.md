@@ -1,278 +1,134 @@
-# Claude Code Cascade Analyzer
+# Cascade-CC
 
-Pre-processor for CASCADE-style analysis of Claude Code bundles. 
+A high-performance deobfuscation engine for Claude Code bundles using **Hybrid Differential Deobfuscation**.
+This project is very loosely based on the Cascade JS Deobfuscator.
 
-Using a **Hybrid Differential Deobfuscation** approach (Graph Theory + Neural Net Fingerprinting using Transformers + LLM Deobfuscation).
-
-### Workflow
-
-1. Bootstrap Library DNA - Download the libraries Claude depends on (Zod, React, etc.) and extract their structural fingerprints. Mangles and minifies the libraries to simulate real-world obfuscation. We train the neural network on this data. ```npm run bootstrap && npm run train```
-2. Analyze & Anchor Claude - Analyze a real Claude bundle, then anchor and re-run analyze to apply library/vendor classification from anchor metadata. ```npm run analyze && npm run anchor -- <version> && npm run analyze -- claude-analysis/<version>/cli.js --version <version>```
-3. Classify Architecture - Assign roles and proposed paths for each chunk before LLM naming. ```node src/classify_logic.js```
-4. Deobfuscate (LLM Phase) - Process the proprietary "Founder" logic using the LLM. ```npm run deobfuscate -- <version>```
-5. Assemble Final Codebase - Organize deobfuscated chunks into a coherent file structure based on inferred roles. ```npm run assemble -- <version>```
-6. LLM Refinement Pass - Perform final logic reconstruction on the assembled codebase to restore original control flow and readability. ```npm run refine -- <version>```
-7. Interactive Visualization - View the dependency graph and Markov centrality scores. ```npm run visualize```
-
-> [!TIP]
-> **Pro-Tip**: Use the `--device auto` flag with `npm run train` or `npm run anchor` to let the system choose between CUDA, MPS (Metal), or CPU automatically.
+The system combines **Graph Theory** (Markov Centrality), **Neural Fingerprinting** (Siamese Transformer Networks), and **LLM Semantic Inference** to reconstruct minified code into its original, human-readable source structure.
 
 ---
 
-## TL;DR
+## Quick Start (Just Cloned?)
 
-Install prerequisites below. Then run the following commands:
+Follow these steps to set up the environment and initialize the pre-trained "Brain."
 
-### One Time Set Up
-
+### 1. Environment Setup
 ```bash
+# Install Node dependencies
 npm install
+
+# Setup Python environment
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env 
-# You must fill in LLM API Key in .env to either OpenRouter or Gemini if you want to run deobfuscation
+
+# Configure API Keys (OpenRouter or Gemini)
+cp .env.example .env
 ```
 
-Setting up bootstrap data
-
+### 2. Initialize the Pre-Trained Registry
+Since the repo includes a pre-trained `ml/model.pth`, you just need to generate the logic vectors for the standard libraries:
 ```bash
 npm run sync-vocab
 npm run bootstrap
-node src/update_registry_from_bootstrap.js
+./sync_registry.sh
 ```
 
-### Typical Analysis Workflow
+---
+
+## Standard Analysis Workflow
+
+Once initialized, use this sequence to analyze any new version of Claude:
 
 ```bash
 # 1. Fetch and chunk the latest Claude bundle
 npm run analyze 
 
-# 2. Identify libraries using the pre-trained Brain (Replace <version> with output from step 1)
-# Requires ml/model.pth; run training if it's missing.
-# npm run resync-registry # Troubleshooting if anchor fails with zero matches
-npm run anchor -- <version> 
+# 2. Anchor against known libraries (Replace <version> with output from step 1)
+npm run anchor -- <version> --device auto
 
-# 3. Role & Folder hinting
-node src/classify_logic.js
+# 3. Apply roles and propose folder structures
+node src/classify_logic.js <version>
 
-# 4. Use LLM to name proprietary logic (Requires API Key in .env)
+# 4. LLM Deobfuscation (Focuses only on proprietary "Founder" logic)
 npm run deobfuscate -- <version> --skip-vendor
 
-# 5. Assemble chunks into a final file structure
+# 5. Assemble into a structured codebase
 npm run assemble -- <version>
 
-# 6. (Recommended) Restore original logic flow and readability via LLM
+# 6. (Optional) Final Logic Refinement Pass
 npm run refine -- <version>
 ```
 
-## Training the "Brain" (Transformer Encoder)
+---
 
-If you have just cloned this repo, you can skip and use the pre-trained model in `ml/model.pth`.
-Vectorization requires `ml/model.pth` to exist; training does not load it unless you pass `--finetune`.
+## Improving Results with "Custom Gold" Code
 
-Here are instructions for building your own model if you don't want to use the pre-trained model.
+If you have manually deobfuscated a file, you can "teach" the Neural Network to recognize it. This turns your manual work into a template that will **automatically deobfuscate** that logic in all future versions.
 
-### Hardware-Aware Auto-Scaling (New)
+### How to add your custom code:
+1.  **Drop** your deobfuscated `.ts` or `.js` files into `ml/custom_gold/` (maintain logical folders).
+2.  **Ingest & Sync**:
+    ```bash
+    # Prepares the files for the registry
+    node src/ingest_custom_gold.js
+    
+    # Vectorizes your code using the Brain and updates the registry
+    ./sync_registry.sh
+    ```
+3.  **Result**: The next time you run `npm run anchor`, the system will identify your proprietary logic with `1.0` confidence and auto-rename variables/functions before the LLM pass.
 
-The ML pipeline is now hardware-aware. It dynamically adjusts the **Context Window** (`MAX_NODES`) based on your detected VRAM to prevent Out-of-Memory (OOM) errors while maximizing performance on high-end hardware.
-
-| Environment | Detected Hardware | Default Window | Recommendation |
-| :--- | :--- | :--- | :--- |
-| **Google Colab** | A100 / H100 (>15GB VRAM) | **2048 nodes** | Best for large-scale training. |
-| **Standard GPU** | RTX 3080 / T4 (>7GB VRAM) | **1024 nodes** | Balanced performance. |
-| **Mac (MPS)** | Apple Silicon (M1/M2/M3) | **256 nodes** | Optimized for unified memory. |
-| **CPU Only** | Any | **512 nodes** | Safe fallback. |
-
-#### Manual Overrides
-You can manually override the auto-scaling using the `--max_nodes` flag:
-```bash
-# Force a massive window on a high-end server
-npm run train -- --max_nodes 4096 --device cuda
-
-# Force a tiny window for quick local testing
-npm run train -- --max_nodes 128 --device cpu
-```
-
-### Realistic Logic Topology (Structural Noise)
-The training process uses **Synthetic Mangling** with structural noise to ensure the model learns *logic* rather than just *syntax*.
-- **IfStatement Swapping**: Negates and swaps `if/else` branches.
-- **Commutative Swapping**: Reorders operands in `a + b` or `a && b`.
-- **List Shuffling**: Reorders non-dependent statements in blocks.
-
-### Step 1: Bootstrap Library DNA
-
-This downloads the libraries Claude depends on (Zod, React, etc.) and extracts their structural fingerprints. It loads libraries into `ml/bootstrap_data` and creates a logic registry in `cascade_graph_analysis/bootstrap`.
-
-```bash
-npm run bootstrap
-```
-
-### Step 2: Train the Neural Network (Optional)
-
-This teaches the model to recognize the DNA of those libraries even when they are mangled/minified. This is optional and I have included a pre-trained model in the repository.
-
-#### Basic Training
-```bash
-npm run train -- --epochs 50 --batch_size 64 --device auto
-```
-Add `--finetune` if you want to resume from an existing `ml/model.pth`.
-
-#### Hyperparameter Sweeps
-If you want to find the absolute best settings for your hardware:
-```bash
-npm run train -- --sweep --epochs 3
-```
-*This will test multiple combinations of margin/learning-rate/embedding-dims and save the best model.*
-*Output: `ml/model.pth`. Your analyzer is now "primed" to recognize standard code.*
-
-
-### Step 3: Analyze & Anchor Claude
-
-Now, analyze a real Claude bundle. This is a three-step process: **Structural Analysis** (JavaScript), **Neural Anchoring** (Python), then **Re-Analyze** to apply anchor metadata to classifications.
-
-```bash
-# 1. Analyze (JavaScript Phase)
-# Fetches, de-proxies, and chunks the latest Claude version.
-npm run analyze
-
-# 2. Anchor (Python/NN Phase)
-# Runs the Neural Network (ml/vectorize.py) to identify libraries using the "Brain".
-# (Replace '2.1.7' with the version reported by the analyze step)
-npm run anchor -- 2.1.7 --device auto
-
-# 3. Re-Analyze (Apply Anchor Metadata)
-# Uses the local bundle to avoid re-downloading.
-npm run analyze -- claude-analysis/2.1.7/cli.js --version 2.1.7
-
-# 4. Classify Architecture
-node src/classify_logic.js
-
-# 5. Deobfuscate (LLM Phase)
-# Processes the proprietary "Founder" logic using the LLM.
-npm run deobfuscate -- 2.1.7 --skip-vendor
-```
+> [!IMPORTANT]
+> If you add a significant amount of new code, consider **retraining from scratch** (see below) to help the model learn the unique structural "DNA" of the new logic.
 
 ---
 
-## 5. Post-Processing & Reference
+## Training the "Brain" (Optional)
 
-### Assemble Final Codebase
+The model in `ml/model.pth` is a specialized Transformer Encoder trained to be "name-blind"—it learns logic topology rather than syntax.
 
-Organize deobfuscated chunks into a coherent file structure based on inferred roles.
+### Hardware-Aware Auto-Scaling
+The training pipeline automatically adjusts the **Context Window** (`MAX_NODES`) based on your VRAM:
 
-```bash
-npm run assemble -- 2.1.7
-```
-
-### LLM Refinement Pass
-
-Perform final logic reconstruction on the fully assembled codebase. This stage restores clean control flow (if/else), groups related functions, and removes any remaining obfuscation artifacts.
-
-```bash
-npm run refine -- 2.1.7
-```
-
-*Output: Refined source code is saved in `cascade_graph_analysis/2.1.7/refined_assemble/`.*
-
-### Interactive Visualization
-
-View the dependency graph and Markov centrality scores.
-
-```bash
-npm run visualize
-# Open http://localhost:3000/visualizer/
-```
-
-### Project Architecture
-
-- `src/`: JavaScript core (Babel renaming, Chunking, Orchestration).
-- `ml/`: Python ML core (Triplet Loss training, Vectorization).
-- `cascade_graph_analysis/`: Project metadata, Logic DB, and mappings.
-- `claude_analysis/`: Source bundles.
-- `docs/`: [Architecture](docs/ARCHITECTURE.md), [NN Internals](docs/NN.md), [Schema](docs/SCHEMA.md), and [Environment](docs/ENVIRONMENT.md).
-
----
-
-## Architecture: Training vs. Reference
-
-The `npm run bootstrap` command populates two different directories. They represent two different sides of the same coin: **Training** vs. **Reference**.
-
-### 1. `ml/bootstrap_data` (The Training Lab)
-
-**Purpose:** Input for the Neural Network's **Training Phase**. Holds `*_gold_asts.json` clean library patterns.
-
-### 2. `cascade_graph_analysis/bootstrap` (The Logic Registry)
-
-**Purpose:** Output of the analysis tool, used for the **Anchoring Phase**. Acts as a lookup table of known structural vectors.
-
-| Feature | `ml/bootstrap_data` | `cascade_graph_analysis/bootstrap` |
+| Environment | Hardware | Default Window |
 | :--- | :--- | :--- |
-| **Role** | **Input** for Training | **Output** of Analysis |
-| **User** | Python NN (`train.py`) | JS Anchoring (`anchor_logic.js`) |
-| **Key File** | `zod_gold_asts.json` | `logic_db.json` |
+| **High-End GPU** | A100 / H100 (>15GB VRAM) | **2048 nodes** |
+| **Standard GPU** | RTX 3080 / T4 (>7GB VRAM) | **1024 nodes** |
+| **Apple Silicon** | Mac M1/M2/M3 (MPS) | **256 nodes** |
+| **CPU Only** | Any | **512 nodes** |
 
-### Why do we need both?
+### Retraining Instructions:
+```bash
+# Retrain from scratch to incorporate Custom Gold logic
+npm run train -- --epochs 100 --batch_size 24 --device auto
 
-The **NN** identifies that two pieces of code are structurally similar. The **Registry** provides the human-readable names assigned to those structures in the clean, non-obfuscated version.
+# IMPORTANT: Always re-sync the registry after training a new model
+./sync_registry.sh
+```
 
 ---
 
-## Structural DNA & Version Drift
+## Key Concepts
 
-The Neural Network produce **Vector Embeddings** (comparable patterns) rather than simple hashes. This allows it to handle version drift and minification through **Structural DNA**.
-
-### 1. Vectors vs. Hashes
-
-If one character changes, a **Hash** breaks. If logic changes slightly, a **Vector** simply moves a fraction in vector space.
-*   **Minor Updates (e.g., Zod 4.3.4 -> 4.3.5):** The "backbone" remains the same. The resulting vector maintains **~98-99% similarity**.
-*   **Synthetic Mangling:** In `ml/train.py`, we intentionally rename variables to nonsense during training. The NN learns to ignore **"Surface Noise"** and focus on **"Logic Topology"**.
-
-### 2. Guardrails & Safety
-
-In `src/anchor_logic.js`, we use similarity thresholds and symbol alignment to ensure accuracy:
-
-| Similarity | Result | Action |
-| :--- | :--- | :--- |
-| **> 0.95** | High Confidence | Auto-rename everything (Relaxed from 0.98 for Cold Start) |
-| **0.90 - 0.94** | Version Drift | Flag for LLM/Partial anchor |
-| **< 0.85** | New Logic | Send to LLM |
+### Founder vs. Vendor Code
+*   **Vendor**: Standard libraries (React, Zod, Lodash). The NN identifies these with ~98% accuracy.
+*   **Founder**: Claude's proprietary logic. If the NN hasn't seen it, the **Architectural Classifier** identifies it as "Founder Core" based on its centrality in the graph and sends it to the LLM.
 
 ### The "Cold Start" Advantage
+Because the NN is trained on structural patterns, it can identify library versions it has **never seen before**, provided they follow similar architectural patterns to other libraries in the training set.
 
-By training on many libraries, the NN learns what **"Library-ness"** looks like. It can categorize vendor code even if it has never seen that specific version before, allowing the LLM to focus purely on the proprietary "Founder" logic.
-
----
-
-## 7. Incremental Knowledge Transfer (Upgrading Versions)
-
-When Claude releases a new version (e.g., `2.1.7` -> `2.1.9`), much of the underlying logic remains identical. You can "upgrade" your analysis and transfer deobfuscation knowledge from an earlier version to a new one.
-
-### How to Upgrade
-
-If you have already deobfuscated version `2.1.7` and want to analyze `2.1.9`, run:
-
+### Incremental Knowledge Transfer
+When Claude releases a new version (e.g., `2.1.7` -> `2.1.9`), you can transfer deobfuscation knowledge from the old version to the new one:
 ```bash
-# 1. Analyze the new version (downloads latest if not present)
-npm run analyze
-
-# 2. If you already have the bundle locally, you can re-run analyze without re-downloading
-npm run analyze -- claude-analysis/2.1.9/cli.js --version 2.1.9
-
-# 3. Transfer knowledge from the old version
+# Anchor the new version using the old one as a reference
 node run anchor 2.1.9 2.1.7
 ```
 
-### How Knowledge Transfer Works
+---
 
-The `anchor` command performs a direct version-to-version comparison:
+## Project Architecture
 
-1.  **Vectorization:** Both the new version (`2.1.9`) and the reference version (`2.1.7`) are vectorized.
-2.  **Structural Matching:** The tool looks for high-similarity matches (>90%) between chunks. Because vectors focus on "Logic Topology," minor code shifts (renamed variables or reordered statements) don't break the match.
-3.  **Symbol Alignment:** When a match is found, the tool uses **Structural Keys** (AST-based fingerprints) to align symbols between versions.
-4.  **Mapping Injection:** Resolved names from the `2.1.7` `mapping.json` are injected into the `2.1.9` `mapping.json`.
-
-**Benefits:**
-*   **Token Savings:** Already deobfuscated logic is skipped in the next LLM pass.
-*   **Consistency:** Maintains naming conventions across versions.
-*   **Speed:** Only new or significantly changed logic needs fresh deobfuscation.
+- `src/`: JavaScript core (Babel renaming, Chunking, Orchestration).
+- `ml/`: Python ML core (Siamese Transformer training, Vectorization).
+- `cascade_graph_analysis/`: Project metadata, Logic DB, and mappings.
+- `docs/`: [Architecture](docs/ARCHITECTURE.md), [NN Internals](docs/NN.md), [Schema](docs/SCHEMA.md).
+- `visualizer/`: D3.js-based interactive dependency graph (`npm run visualize`).

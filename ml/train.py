@@ -303,6 +303,8 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
                 lib_stats["rr_sum"] += 1.0 / rank
                 lib_stats["rr_count"] += 1
     
+    if total == 0:
+        print("[!] Warning: Evaluation found no valid negatives; check val batching or library masking.")
     avg_pos = total_pos_dist / count if count > 0 else 0
     avg_neg = total_neg_dist / count if count > 0 else 0
     mrr = total_rr / rr_count if rr_count > 0 else 0
@@ -415,7 +417,8 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
 
     use_cuda = device.type == 'cuda'
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=use_cuda)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=use_cuda)
+    # Shuffle val batches when masking same-library to ensure cross-lib negatives exist.
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=len(val_libraries) > 1, pin_memory=use_cuda)
 
     model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, max_nodes=effective_max_nodes).to(device)
     
