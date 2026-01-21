@@ -76,6 +76,15 @@ function getLatestVersion(baseDir) {
     return semverDirs[0];
 }
 
+function isChunkyPath(candidatePath, chunkNames = []) {
+    if (!candidatePath || typeof candidatePath !== 'string') return false;
+    const base = path.basename(candidatePath, path.extname(candidatePath)).toLowerCase();
+    if (/^chunk\d+$/.test(base)) return true;
+    if (/chunk\d+/i.test(base)) return true;
+    if (chunkNames.some(n => base === String(n).toLowerCase())) return true;
+    return false;
+}
+
 function extractIdentifiers(code) {
     try {
         const ast = parser.parse(code, {
@@ -472,10 +481,22 @@ async function run() {
                         code = "";
                     }
                 }
+                const neighbors = (c.outbound || []).slice(0, 5).map(n => {
+                    const neighborMeta = graphData.find(m => m.name === n);
+                    return {
+                        name: neighborMeta?.displayName || neighborMeta?.name || n,
+                        path: neighborMeta?.suggestedPath || neighborMeta?.proposedPath || neighborMeta?.kb_info?.suggested_path || null
+                    };
+                });
                 return {
                     name: c.name,
                     preview: code ? code.slice(0, 300).replace(/\n/g, ' ') : "",
-                    vars: (code.match(/var\s+([a-zA-Z0-9_$]+)/g) || []).slice(0, 5).join(', ')
+                    vars: (code.match(/var\s+([a-zA-Z0-9_$]+)/g) || []).slice(0, 5).join(', '),
+                    role: c.role || null,
+                    category: c.category || null,
+                    kbPath: c.kb_info?.suggested_path || null,
+                    parentHintPath: c.parentHintPath || null,
+                    neighbors
                 };
             });
 
@@ -492,10 +513,15 @@ ${JSON.stringify(groupMeta, null, 2)}
 Existing Hints:
 ${group.map(c => c.kb_info ? `- ${c.name}: KB suggests ${c.kb_info.suggested_path}` : '').join('\n')}
 
+Project Structure Reference:
+${KB && KB.project_structure ? JSON.stringify(KB.project_structure, null, 2) : 'Structure not available.'}
+
 Instructions:
 1. Analyze the variable scope continuity and logic.
 2. Propose a single unified file path (e.g. "src/services/sessionManager.ts") that contains all these chunks.
 3. Assign "part" numbers to each chunk (1, 2, 3...).
+4. Do NOT use chunk IDs (e.g. "chunk002") in the filename.
+5. Prefer directories hinted by parentHintPath, neighbor paths, or KB suggestions. If uncertain, use a descriptive filename based on semantics, not chunk IDs.
 
 Response JSON:
 {
@@ -514,6 +540,11 @@ Response JSON:
                 if (cleaned) {
                     const result = JSON.parse(cleaned);
                     if (result.unifiedPath) {
+                        const groupNames = group.map(c => c.name);
+                        if (isChunkyPath(result.unifiedPath, groupNames)) {
+                            console.warn(`    [!] Consolidation path looks generic: ${result.unifiedPath}. Skipping proposedPath.`);
+                            return;
+                        }
                         console.log(`    [+] Consolidated ${group.length} chunks into ${result.unifiedPath}`);
                         group.forEach(c => {
                             c.proposedPath = result.unifiedPath;
@@ -747,6 +778,7 @@ INSTRUCTIONS:
    - Priority 1: If a neighbor is already in a specific folder (see NEIGHBOR CONTEXT), prefer placing this file in the same directory or a sub-directory unless it crosses an architectural boundary.
    - Priority 2: Use the PROJECT STRUCTURE REFERENCE.
    - Example: "src/utils/stringHelpers.js" NOT just "stringHelpers"
+   - Never use chunk IDs (e.g. "chunk002") in the filename.
 5. Output valid JSON only.
 
 RESPONSE FORMAT (JSON ONLY):
@@ -855,20 +887,28 @@ RESPONSE FORMAT (JSON ONLY):
                             }
                         }
                         if (responseData.suggestedPath) {
-                            chunkMeta.suggestedPath = responseData.suggestedPath;
-                            // Also populate suggestedFilename for backward compatibility
-                            chunkMeta.suggestedFilename = path.basename(responseData.suggestedPath, path.extname(responseData.suggestedPath));
+                            if (isChunkyPath(responseData.suggestedPath, [chunkMeta.name])) {
+                                console.warn(`    [!] Ignoring generic suggestedPath for ${chunkMeta.name}: ${responseData.suggestedPath}`);
+                            } else {
+                                chunkMeta.suggestedPath = responseData.suggestedPath;
+                                // Also populate suggestedFilename for backward compatibility
+                                chunkMeta.suggestedFilename = path.basename(responseData.suggestedPath, path.extname(responseData.suggestedPath));
 
-                            // Proactive Hinting: Tell neighbors about this decision
-                            const neighborNames = [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])];
-                            neighborNames.forEach(nName => {
-                                const neighbor = sortedChunks.find(m => m.name === nName); // Look up in sortedChunks which references the graph objects
-                                if (neighbor && !neighbor.suggestedPath) {
-                                    neighbor.parentHintPath = path.dirname(responseData.suggestedPath);
-                                }
-                            });
+                                // Proactive Hinting: Tell neighbors about this decision
+                                const neighborNames = [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])];
+                                neighborNames.forEach(nName => {
+                                    const neighbor = sortedChunks.find(m => m.name === nName); // Look up in sortedChunks which references the graph objects
+                                    if (neighbor && !neighbor.suggestedPath) {
+                                        neighbor.parentHintPath = path.dirname(responseData.suggestedPath);
+                                    }
+                                });
+                            }
                         } else if (responseData.suggestedFilename) {
-                            chunkMeta.suggestedFilename = responseData.suggestedFilename;
+                            if (isChunkyPath(`${responseData.suggestedFilename}.js`, [chunkMeta.name])) {
+                                console.warn(`    [!] Ignoring generic suggestedFilename for ${chunkMeta.name}: ${responseData.suggestedFilename}`);
+                            } else {
+                                chunkMeta.suggestedFilename = responseData.suggestedFilename;
+                            }
                         }
 
                         console.log(`    [+] Mapped identifiers in ${file} (Sub-pass)`);
