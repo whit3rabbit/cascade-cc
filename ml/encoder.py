@@ -25,7 +25,7 @@ class TransformerCodeEncoder(nn.Module):
 
     def forward(self, x):
         # x: (batch, seq_len)
-        pad_mask = x == 0
+        pad_mask = (x == 0).to(torch.bool)
         x = self.embedding(x) + self.pos_encoder[:, :x.size(1), :]
         x = self.transformer(x, src_key_padding_mask=pad_mask)
         

@@ -21,6 +21,29 @@ def get_auto_max_nodes(device):
         return 256 # Conservative for shared memory architectures
     return 512 # Safe default for CPU
 
+def resolve_max_nodes(device, max_nodes_override=None, checkpoint_path=None):
+    if max_nodes_override:
+        return max_nodes_override, "Manual override"
+    env_override = os.getenv("ML_MAX_NODES")
+    if env_override:
+        try:
+            env_value = int(env_override)
+            if env_value > 0:
+                return env_value, "ML_MAX_NODES"
+        except ValueError:
+            pass
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location="cpu")
+            for key in ("transformer_encoder.pos_encoder", "pos_encoder"):
+                if key in checkpoint:
+                    max_nodes = checkpoint[key].shape[1] - 1
+                    if max_nodes > 0:
+                        return max_nodes, "Checkpoint"
+        except Exception:
+            pass
+    return get_auto_max_nodes(device), f"Auto-detected for {device.type}"
+
 from encoder import TransformerCodeEncoder
 
 class CodeFingerprinter(nn.Module):
@@ -131,9 +154,12 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
     else:
         device = torch.device(device_name)
     
+    model_path = os.path.join(os.path.dirname(__file__), "model.pth")
+
     # Dynamic Context Window Adjustment
-    effective_max_nodes = max_nodes_override if max_nodes_override else get_auto_max_nodes(device)
-    source = "Manual override" if max_nodes_override else f"Auto-detected for {device.type}"
+    effective_max_nodes, source = resolve_max_nodes(
+        device, max_nodes_override=max_nodes_override, checkpoint_path=model_path
+    )
     print(f"[*] Context Window: {effective_max_nodes} nodes ({source})")
 
     node_type_count = len(NODE_TYPES)
@@ -142,7 +168,6 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
         sys.exit(1)
     current_vocab_size = node_type_count + 5
     model = CodeFingerprinter(vocab_size=current_vocab_size, max_nodes=effective_max_nodes).to(device)
-    model_path = os.path.join(os.path.dirname(__file__), "model.pth")
     
     if os.path.exists(model_path):
         print(f"[*] Loading pre-trained weights from {model_path} onto {device}")

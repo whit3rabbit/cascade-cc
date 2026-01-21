@@ -9,7 +9,7 @@ import random
 import argparse
 import warnings
 from torch.utils.data import Dataset, DataLoader, Subset, random_split
-from vectorize import CodeFingerprinter, flatten_ast, get_auto_max_nodes
+from vectorize import CodeFingerprinter, flatten_ast, resolve_max_nodes
 from constants import NODE_TYPES, MAX_NODES, MAX_LITERALS
 # removed get_auto_max_nodes definition (imported from vectorize)
 
@@ -348,9 +348,11 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     
     if not is_sweep: print(f"[*] Training on device: {device}")
 
-    effective_max_nodes = max_nodes_override if max_nodes_override else get_auto_max_nodes(device)
+    model_path = os.path.join(os.path.dirname(__file__), "model.pth") if load_checkpoint else None
+    effective_max_nodes, source = resolve_max_nodes(
+        device, max_nodes_override=max_nodes_override, checkpoint_path=model_path
+    )
     if not is_sweep:
-        source = "Manual override" if max_nodes_override else f"Auto-detected for {device.type}"
         print(f"[*] Context Window: {effective_max_nodes} nodes ({source})")
 
     node_type_count = len(NODE_TYPES)
