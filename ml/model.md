@@ -23,6 +23,7 @@ The **Cascade-CC Structural DNA Model** is a specialized Transformer-based Siame
 *   **Augmentation:** Synthetic structural mangling including Statement Shuffling, If-Statement swapping, and constant unfolding.
 *   **Mining Strategy:** **Library-Aware Hard Negative Mining**. The model was forbidden from using negatives from the same library as the anchor, forcing it to learn cross-library logic discrimination.
 *   **Validation:** Leave-One-Library-Out (LOLO) cross-validation.
+*   **Latest Training Run:** `node run train --epochs 100 --batch_size 24 --device auto` on `mps` with context window auto-detected at 256 nodes; LOLO target was `tree-sitter-typescript_vlatest` across 5,063 chunks.
 
 ## 4. Performance Metrics
 
@@ -34,6 +35,13 @@ Validated against complex recursive logic (e.g., `ajv`, `micromatch`) and shallo
 | **MRR (Mean Reciprocal Rank)** | **1.0000** | Correct logic is consistently the #1 match. |
 | **Similarity Margin** | **1.0092** | Massive separation (Distance ~1.0 in normalized space). |
 | **Inference Latency** | **< 2ms** | Optimized for real-time bundle anchoring. |
+
+**Latest Run Snapshot (Epochs 1-4):**
+- Epoch 1: Loss 0.2025, Match Accuracy 100.00%, MRR 1.0000, Pos/Neg Dist 0.1507/1.4578
+- Epoch 2: Loss 0.1453, Match Accuracy 100.00%, MRR 1.0000, Pos/Neg Dist 0.2426/1.3061
+- Epoch 3: Loss 0.1197, Match Accuracy 100.00%, MRR 1.0000, Pos/Neg Dist 0.4773/1.4118
+- Epoch 4: Loss 0.1215, Match Accuracy 66.67%, MRR 0.6667, Pos/Neg Dist 1.0138/1.3747
+- Early stopping triggered after 3 stagnant epochs.
 
 ## 5. Intended Use
 
