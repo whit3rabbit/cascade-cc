@@ -1,5 +1,7 @@
 # Cascade-CC
 
+Example output code download (see what the final output looks like): https://github.com/whit3rabbit/cascade-cc/releases/download/2.1.14/2.1.14.zip (release: https://github.com/whit3rabbit/cascade-cc/releases/tag/2.1.14)
+
 A high-performance deobfuscation engine for Claude Code bundles using **Hybrid Differential Deobfuscation**.
 This project is very loosely based on the Cascade JS Deobfuscator.
 
