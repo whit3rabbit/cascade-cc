@@ -13,8 +13,6 @@ else
     PYTHON_BIN="python3"
 fi
 
-fi
-
 echo "[*] Ingesting Custom Gold..."
 node src/ingest_custom_gold.js
 

@@ -19,9 +19,66 @@ const BOOTSTRAP_DIR = path.resolve('./ml/bootstrap_data');
 const ANALYSIS_OUTPUT = path.resolve('./cascade_graph_analysis');
 
 async function bootstrap() {
-    const isCI = process.env.CI === 'true' || process.argv.includes('--yes');
+    const shouldPrompt = process.argv.includes('--prompt');
+    const shouldForce = process.argv.includes('--force');
+    const isVerbose = process.argv.includes('--verbose');
+    const includeNative = process.argv.includes('--include-native');
 
-    if (!isCI) {
+    const readPackageJson = (pkgJsonPath) => {
+        try {
+            return JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+        } catch {
+            return null;
+        }
+    };
+
+    const getEntryCandidates = (pkgJson) => {
+        const candidates = [];
+        const exportsField = pkgJson && pkgJson.exports;
+        const rootExport = exportsField && typeof exportsField === 'object'
+            ? (exportsField['.'] || exportsField)
+            : (typeof exportsField === 'string' ? exportsField : null);
+
+        if (rootExport) {
+            if (typeof rootExport === 'string') {
+                candidates.push(rootExport);
+            } else if (typeof rootExport === 'object') {
+                if (typeof rootExport.import === 'string') candidates.push(rootExport.import);
+                if (typeof rootExport.require === 'string') candidates.push(rootExport.require);
+                if (typeof rootExport.default === 'string') candidates.push(rootExport.default);
+            }
+        }
+
+        if (pkgJson && typeof pkgJson.module === 'string') candidates.push(pkgJson.module);
+        if (pkgJson && typeof pkgJson.main === 'string') candidates.push(pkgJson.main);
+        candidates.push('index.js');
+        return candidates;
+    };
+
+    const findExistingEntry = (pkgPath, pkgJson) => {
+        const candidates = getEntryCandidates(pkgJson);
+        for (const candidate of candidates) {
+            const normalized = candidate.replace(/^\.\//, '');
+            const entryPath = path.join(pkgPath, normalized);
+            if (fs.existsSync(entryPath)) return { entryPath, candidate };
+        }
+        return null;
+    };
+
+    const isNativeModule = (pkgJson) => {
+        if (!pkgJson) return false;
+        if (pkgJson.gypfile) return true;
+        if (pkgJson.binary) return true;
+        const files = Array.isArray(pkgJson.files) ? pkgJson.files : [];
+        if (files.some(file => file.includes('prebuilds'))) return true;
+        const deps = pkgJson.dependencies || {};
+        if (deps['node-gyp-build'] || deps['node-addon-api']) return true;
+        const scripts = pkgJson.scripts || {};
+        if (typeof scripts.install === 'string' && scripts.install.includes('node-gyp')) return true;
+        return false;
+    };
+
+    if (shouldPrompt) {
         const rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout
@@ -45,17 +102,57 @@ async function bootstrap() {
     for (const lib of LIBS) {
         const libSafeName = `${lib.name.replace(/[@\/]/g, '_')}_v${lib.version.replace(/\./g, '_')}`;
         const libWorkDir = path.join(BOOTSTRAP_DIR, libSafeName);
+        const targetStore = path.join(BOOTSTRAP_DIR, `${libSafeName}_gold_asts.json`);
+        const nodeModulesDir = path.join(libWorkDir, 'node_modules');
 
         console.log(`\n[${lib.name.toUpperCase()} @ ${lib.version}]`);
         if (!fs.existsSync(libWorkDir)) fs.mkdirSync(libWorkDir, { recursive: true });
 
         try {
+            if (fs.existsSync(targetStore) && !shouldForce) {
+                if (isVerbose) {
+                    console.log(`  [SKIP] Found existing fingerprints (${path.basename(targetStore)}).`);
+                }
+                continue;
+            }
+
             // 1. Isolated Install for this specific version
-            console.log(`  [+] Installing ${lib.name}@${lib.version}...`);
-            const installCmd = `npm install ${lib.name}@${lib.version} ${lib.peerDeps ? lib.peerDeps.join(' ') : ''} --no-save --prefix "${libWorkDir}" --legacy-peer-deps --install-links`;
-            execSync(installCmd, { stdio: 'ignore' });
+            const pkgPath = path.join(nodeModulesDir, ...lib.name.split('/'));
+            const pkgJsonPath = path.join(pkgPath, 'package.json');
+            let hasInstalled = fs.existsSync(pkgJsonPath);
+            let matchesVersion = false;
+            let existingEntry = null;
+            if (hasInstalled) {
+                try {
+                    const pkgJson = readPackageJson(pkgJsonPath);
+                    const installedVersion = pkgJson && pkgJson.version;
+                    matchesVersion = lib.version === 'latest' || installedVersion === lib.version;
+                    existingEntry = pkgJson ? findExistingEntry(pkgPath, pkgJson) : null;
+                } catch {
+                    matchesVersion = false;
+                }
+            }
+
+            if (shouldForce || !hasInstalled || !matchesVersion || !existingEntry) {
+                console.log(`  [+] Installing ${lib.name}@${lib.version}...`);
+                const installCmd = `npm install ${lib.name}@${lib.version} ${lib.peerDeps ? lib.peerDeps.join(' ') : ''} --no-save --prefix "${libWorkDir}" --legacy-peer-deps --install-links`;
+                execSync(installCmd, { stdio: 'ignore' });
+                const pkgJson = readPackageJson(pkgJsonPath);
+                existingEntry = pkgJson ? findExistingEntry(pkgPath, pkgJson) : null;
+                if (!existingEntry) {
+                    console.warn(`  [WARN] Missing entry files after install for ${lib.name}@${lib.version}. Skipping.`);
+                    continue;
+                }
+            } else if (isVerbose) {
+                console.log(`  [SKIP] Existing node_modules match ${lib.name}@${lib.version}.`);
+            }
 
             // 2. Create Entry Point (mimic bundling)
+            const pkgJson = readPackageJson(pkgJsonPath);
+            if (isNativeModule(pkgJson) && !includeNative) {
+                console.warn(`  [WARN] Native module detected for ${lib.name}@${lib.version}. Skipping bundle.`);
+                continue;
+            }
             const entryFile = path.join(libWorkDir, 'entry.js');
             let importCode = '';
             if (lib.imports) {
@@ -86,6 +183,20 @@ async function bootstrap() {
                 '@opentelemetry/sdk-trace-node'
             ];
 
+            const hasMissingEsmEntry = () => {
+                const pkgJson = readPackageJson(pkgJsonPath);
+                const exportsField = pkgJson && pkgJson.exports;
+                const rootExport = exportsField && typeof exportsField === 'object'
+                    ? (exportsField['.'] || exportsField)
+                    : (typeof exportsField === 'string' ? exportsField : null);
+                const importTarget = rootExport && typeof rootExport === 'object' && typeof rootExport.import === 'string'
+                    ? rootExport.import
+                    : null;
+                if (!importTarget) return false;
+                const candidate = path.join(pkgPath, importTarget.replace(/^\.\//, ''));
+                return !fs.existsSync(candidate);
+            };
+
             const getPackageName = (spec) => {
                 if (!spec) return spec;
                 if (spec.startsWith('@')) {
@@ -100,7 +211,10 @@ async function bootstrap() {
                 .filter(ext => ext !== lib.name && !lib.name.startsWith(`${ext}/`));
 
             const externalFlags = externals.map(ext => `--external:${ext}`).join(' ');
-            execSync(`NODE_PATH="${nodePath}" npx -y esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" --loader:.node=empty --loader:.png=empty ${externalFlags}`, { stdio: 'inherit' });
+            const nodeNativeExternal = '--external:*.node';
+            const useCjsConditions = hasMissingEsmEntry();
+            const conditionsFlags = useCjsConditions ? '--conditions=default,require --main-fields=main' : '';
+            execSync(`NODE_PATH="${nodePath}" npx -y esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" --loader:.node=empty --loader:.png=empty ${nodeNativeExternal} ${conditionsFlags} ${externalFlags}`, { stdio: 'inherit' });
 
             // 4. Run Analysis
             console.log(`  [+] Fingerprinting structural ASTs (Bootstrap Mode)...`);
@@ -110,7 +224,6 @@ async function bootstrap() {
             const resultPath = path.join(ANALYSIS_OUTPUT, 'bootstrap', libSafeName, 'metadata', 'simplified_asts.json');
 
             if (fs.existsSync(resultPath)) {
-                const targetStore = path.join(BOOTSTRAP_DIR, `${libSafeName}_gold_asts.json`);
                 fs.copyFileSync(resultPath, targetStore);
                 console.log(`  [OK] Saved ${lib.name} logic fingerprints to ${path.basename(targetStore)}`);
             }
