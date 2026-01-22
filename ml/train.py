@@ -222,6 +222,7 @@ class TripletDataset(Dataset):
 
 def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
     model.eval()
+    base_dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
     correct = 0
     total = 0
     
@@ -245,7 +246,7 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
             sims = torch.matmul(a_vec, a_vec.T)
             
             for i in range(len(anchors)):
-                anchor_hash = dataset.structural_hashes[anchor_keys[i]]
+                anchor_hash = base_dataset.structural_hashes[anchor_keys[i]]
                 anchor_lib = anchor_keys[i].split("_", 1)[0] if mask_same_library else None
                 positive_lib = anchor_lib
                 
@@ -257,7 +258,7 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
                 for j in range(len(anchors)):
                     candidate_key = anchor_keys[j]
                     candidate_lib = candidate_key.split("_", 1)[0] if mask_same_library else None
-                    if dataset.structural_hashes[candidate_key] == anchor_hash:
+                    if base_dataset.structural_hashes[candidate_key] == anchor_hash:
                         batch_sims[j] = -2
                     elif mask_same_library and candidate_lib == anchor_lib:
                         batch_sims[j] = -2
