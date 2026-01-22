@@ -450,6 +450,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=use_cuda)
     # Shuffle val batches when masking same-library to ensure cross-lib negatives exist.
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=len(val_libraries) > 1, pin_memory=use_cuda)
+    train_base_dataset = train_dataset.dataset if isinstance(train_dataset, Subset) else train_dataset
 
     model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, max_nodes=effective_max_nodes).to(device)
     
@@ -532,12 +533,12 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
                 batch_sims = sims[i].clone()
                 batch_sims[i] = -2  # Mask self
                 
-                anchor_hash = train_dataset.structural_hashes[anchor_keys[i]]
+                anchor_hash = train_base_dataset.structural_hashes[anchor_keys[i]]
                 anchor_lib = anchor_keys[i].split("_", 1)[0]
                 for j in range(len(anchors)):
                     candidate_key = anchor_keys[j]
                     candidate_lib = candidate_key.split("_", 1)[0]
-                    if train_dataset.structural_hashes[candidate_key] == anchor_hash or candidate_lib == anchor_lib:
+                    if train_base_dataset.structural_hashes[candidate_key] == anchor_hash or candidate_lib == anchor_lib:
                         batch_sims[j] = -2 # Mask isomorphs
                 
                 hardest_idx = torch.argmax(batch_sims)
@@ -552,7 +553,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
                         candidate_lib = candidate_key.split("_", 1)[0]
                         if candidate_lib == anchor_lib:
                             continue
-                        if train_dataset.structural_hashes[candidate_key] == anchor_hash:
+                        if train_base_dataset.structural_hashes[candidate_key] == anchor_hash:
                             continue
                         fallback_idx = j
                         break
