@@ -350,7 +350,7 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
         avg_lib_mrr,
     )
 
-def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_lib_count=3, val_split=0.0, val_max_chunks=None, load_checkpoint=False):
+def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_lib_count=3, val_split=0.0, val_max_chunks=None, load_checkpoint=False, checkpoint_interval=0):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -379,6 +379,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
         print(f"    - Margin: {margin}")
         print(f"    - Embed Dim: {embed_dim}")
         print(f"    - Hidden Dim: {hidden_dim}")
+        print(f"    - Checkpoint Interval: {checkpoint_interval}")
         print(f"    - Finetune: {'yes' if load_checkpoint else 'no'}")
 
     node_type_count = len(NODE_TYPES)
@@ -556,6 +557,11 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     early_stop_min_delta = 0.01
     early_stop_bad_epochs = 0
 
+    checkpoint_dir = None
+    if checkpoint_interval and checkpoint_interval > 0 and not is_sweep:
+        checkpoint_dir = os.path.join(os.path.dirname(__file__), "checkpoints")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
     print(f"[*] Starting training loop for {epochs} epochs...")
     for epoch in range(epochs):
         model.train()
@@ -634,6 +640,10 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             if mask_same_library and per_lib_mrr:
                 print(f"    Validation Min-Library MRR: {min_lib_mrr:.4f}")
                 print(f"    Validation Avg-Library MRR: {avg_lib_mrr:.4f}")
+            if checkpoint_dir and (epoch + 1) % checkpoint_interval == 0:
+                checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch+1}.pth")
+                torch.save(model.state_dict(), checkpoint_path)
+                print(f"    [*] Saved checkpoint: {checkpoint_path}")
         
         # Optimize for margin during training; sweep scoring happens in run_sweep.
         if val_margin > best_val_margin:
@@ -765,6 +775,7 @@ if __name__ == "__main__":
     parser.add_argument("--margin", type=float, default=float(os.getenv("ML_TRAIN_MARGIN", "0.5")), help="Triplet margin")
     parser.add_argument("--embed_dim", type=int, default=int(os.getenv("ML_TRAIN_EMBED_DIM", "32")), help="Embedding dimension")
     parser.add_argument("--hidden_dim", type=int, default=int(os.getenv("ML_TRAIN_HIDDEN_DIM", "128")), help="Hidden dimension")
+    parser.add_argument("--checkpoint_interval", type=int, default=int(os.getenv("ML_TRAIN_CHECKPOINT_INTERVAL", "0")), help="Save checkpoints every N epochs (0 disables)")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
     parser.add_argument("--finetune", action="store_true", help="Load existing model.pth to continue training")
@@ -812,6 +823,7 @@ if __name__ == "__main__":
             device_name=args.device,
             max_nodes_override=m_nodes,
             load_checkpoint=args.finetune,
+            checkpoint_interval=args.checkpoint_interval,
             val_library=val_library,
             val_lib_count=args.val_lib_count,
             val_split=val_split,
