@@ -756,7 +756,7 @@ if __name__ == "__main__":
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
     parser.add_argument("--finetune", action="store_true", help="Load existing model.pth to continue training")
     parser.add_argument("--max_nodes", type=int, default=0, help="Override context window size (0 for auto)")
-    parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, mps, cpu, or auto")
+    parser.add_argument("--device", type=str, default="auto", help="Device: cuda, mps, cpu, or auto")
     parser.add_argument("--val_library", action="append", help="Validation library name(s). Repeat or comma-separate.")
     parser.add_argument("--val_lib_count", type=int, default=int(os.getenv("ML_VAL_LIB_COUNT", "3")), help="How many libraries to hold out when val_library is not set")
     parser.add_argument("--val_split", type=float, default=float(os.getenv("ML_VAL_SPLIT", "0")), help="Use random split for validation (0 disables)")
