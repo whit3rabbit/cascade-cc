@@ -381,11 +381,13 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
 
     # 4. Validation strategy: split or leave-library-out (single or multiple libraries).
     val_libraries = []
+    val_is_split = False
     if val_split and val_split > 0:
         full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
         val_size = max(1, int(val_split * len(full_dataset)))
         train_size = len(full_dataset) - val_size
         train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+        val_is_split = True
         if not is_sweep:
             print(f"[*] Split Validation: {val_size} samples ({val_split:.2f} of dataset)")
         if val_max_chunks and val_size > val_max_chunks:
@@ -423,6 +425,8 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             train_size = int(0.8 * len(full_dataset))
             val_size = len(full_dataset) - train_size
             train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+            val_libraries = []
+            val_is_split = True
             if val_max_chunks and val_size > val_max_chunks:
                 rng = random.Random(42)
                 val_indices = rng.sample(range(val_size), val_max_chunks)
@@ -442,6 +446,8 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
         train_size = int(0.8 * len(full_dataset))
         val_size = len(full_dataset) - train_size
         train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+        val_libraries = []
+        val_is_split = True
         if val_max_chunks and val_size > val_max_chunks:
             rng = random.Random(42)
             val_indices = rng.sample(range(val_size), val_max_chunks)
@@ -450,7 +456,8 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     use_cuda = device.type == 'cuda'
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=use_cuda)
     # Shuffle val batches when masking same-library to ensure cross-lib negatives exist.
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=len(val_libraries) > 1, pin_memory=use_cuda)
+    val_shuffle = val_is_split or len(val_libraries) > 1
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=val_shuffle, pin_memory=use_cuda)
     train_base_dataset = train_dataset.dataset if isinstance(train_dataset, Subset) else train_dataset
 
     model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, max_nodes=effective_max_nodes).to(device)
