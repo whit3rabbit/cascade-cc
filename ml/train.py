@@ -233,7 +233,7 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
     rr_count = 0
     per_lib_stats = {}
 
-    def score_candidates(ignore_isomorphs):
+    def score_candidates(ignore_isomorphs, force_any_negative=False):
         nonlocal correct, total, total_pos_dist, total_neg_dist, count, total_rr, rr_count, per_lib_stats
         correct = 0
         total = 0
@@ -254,13 +254,14 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
             row_sims = sims[i].clone()
             row_sims[i] = -2
 
-            for j in range(len(all_keys)):
-                candidate_key = all_keys[j]
-                candidate_lib = candidate_key.split("_", 1)[0] if mask_same_library else None
-                if not ignore_isomorphs and base_dataset.structural_hashes[candidate_key] == anchor_hash:
-                    row_sims[j] = -2
-                elif mask_same_library and candidate_lib == anchor_lib:
-                    row_sims[j] = -2
+            if not force_any_negative:
+                for j in range(len(all_keys)):
+                    candidate_key = all_keys[j]
+                    candidate_lib = candidate_key.split("_", 1)[0] if mask_same_library else None
+                    if not ignore_isomorphs and base_dataset.structural_hashes[candidate_key] == anchor_hash:
+                        row_sims[j] = -2
+                    elif mask_same_library and candidate_lib == anchor_lib:
+                        row_sims[j] = -2
 
             hardest_idx = torch.argmax(row_sims)
             if row_sims[hardest_idx] == -2:
@@ -332,6 +333,10 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
             score_candidates(ignore_isomorphs=True)
             if total > 0:
                 print("[!] Warning: Evaluation found no valid negatives; relaxing isomorph mask.")
+            else:
+                score_candidates(ignore_isomorphs=True, force_any_negative=True)
+                if total > 0:
+                    print("[!] Warning: Evaluation found no valid negatives; relaxing library/isomorph masks.")
     
     if total == 0:
         print("[!] Warning: Evaluation found no valid negatives; check val batching or library masking.")
