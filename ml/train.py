@@ -750,8 +750,12 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the Code Fingerprinting Neural Network")
     parser.add_argument("bootstrap_dir", nargs="?", default="./ml/bootstrap_data", help="Directory containing gold ASTs")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size for training")
+    parser.add_argument("--epochs", type=int, default=int(os.getenv("ML_TRAIN_EPOCHS", "50")), help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=int(os.getenv("ML_TRAIN_BATCH_SIZE", "64")), help="Batch size for training")
+    parser.add_argument("--lr", type=float, default=float(os.getenv("ML_TRAIN_LR", "0.001")), help="Learning rate")
+    parser.add_argument("--margin", type=float, default=float(os.getenv("ML_TRAIN_MARGIN", "0.5")), help="Triplet margin")
+    parser.add_argument("--embed_dim", type=int, default=int(os.getenv("ML_TRAIN_EMBED_DIM", "32")), help="Embedding dimension")
+    parser.add_argument("--hidden_dim", type=int, default=int(os.getenv("ML_TRAIN_HIDDEN_DIM", "128")), help="Hidden dimension")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
     parser.add_argument("--finetune", action="store_true", help="Load existing model.pth to continue training")
@@ -792,6 +796,10 @@ if __name__ == "__main__":
             epochs=args.epochs,
             batch_size=args.batch_size,
             force=args.force,
+            lr=args.lr,
+            margin=args.margin,
+            embed_dim=args.embed_dim,
+            hidden_dim=args.hidden_dim,
             device_name=args.device,
             max_nodes_override=m_nodes,
             load_checkpoint=args.finetune,
