@@ -223,164 +223,100 @@ class TripletDataset(Dataset):
 def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
     model.eval()
     base_dataset = dataset.dataset if isinstance(dataset, Subset) else dataset
-    correct = 0
-    total = 0
-    
-    total_pos_dist = 0
-    total_neg_dist = 0
-    count = 0
-    total_rr = 0.0
-    rr_count = 0
-    per_lib_stats = {}
-
-    def score_candidates(ignore_isomorphs, force_any_negative=False):
-        nonlocal correct, total, total_pos_dist, total_neg_dist, count, total_rr, rr_count, per_lib_stats
-
-        # Temp counters for this pass
-        p_correct, p_total = 0, 0
-        p_pos_d, p_neg_d = 0.0, 0.0
-        p_count = 0
-
-        for i in range(len(all_keys)):
-            anchor_key = all_keys[i]
-            anchor_hash = base_dataset.structural_hashes[anchor_key]
-            anchor_lib = anchor_key.split("_", 1)[0]
-
-            row_sims = sims[i].clone()
-            row_sims[i] = -10  # Aggressively mask self
-
-            # If not forcing, apply safety masks
-            if not force_any_negative:
-                for j in range(len(all_keys)):
-                    if i == j:
-                        continue
-                    candidate_key = all_keys[j]
-                    candidate_lib = candidate_key.split("_", 1)[0]
-
-                    # Mask identical structures
-                    if not ignore_isomorphs and base_dataset.structural_hashes[candidate_key] == anchor_hash:
-                        row_sims[j] = -10
-                    # Mask same library
-                    elif mask_same_library and candidate_lib == anchor_lib:
-                        row_sims[j] = -10
-
-            hardest_idx = torch.argmax(row_sims)
-
-            # If we found a valid negative (similarity > -10)
-            if row_sims[hardest_idx] > -9:
-                n_vec = a_vecs[hardest_idx]
-                d_pos = torch.norm(a_vecs[i] - p_vecs[i], p=2)
-                d_neg = torch.norm(a_vecs[i] - n_vec, p=2)
-
-                if d_pos < d_neg:
-                    p_correct += 1
-                p_total += 1
-                p_pos_d += d_pos.item()
-                p_neg_d += d_neg.item()
-                p_count += 1
-
-                # Update MRR only on the best possible pass
-                if not force_any_negative:
-                    pos_dists = torch.norm(a_vecs[i].unsqueeze(0) - p_vecs, p=2, dim=1)
-                    # If masking, distance to same-lib should be infinity for ranking
-                    if mask_same_library:
-                        for j in range(len(all_keys)):
-                            if i != j and all_keys[j].split("_", 1)[0] == anchor_lib:
-                                pos_dists[j] = 1e9
-
-                    rank = int(torch.argsort(pos_dists).tolist().index(i)) + 1
-                    total_rr += 1.0 / rank
-                    rr_count += 1
-
-                    lib_stats = per_lib_stats.setdefault(
-                        anchor_lib,
-                        {"pos_sum": 0.0, "neg_sum": 0.0, "count": 0, "rr_sum": 0.0, "rr_count": 0},
-                    )
-                    lib_stats["rr_sum"] += 1.0 / rank
-                    lib_stats["rr_count"] += 1
-                else:
-                    lib_stats = per_lib_stats.setdefault(
-                        anchor_lib,
-                        {"pos_sum": 0.0, "neg_sum": 0.0, "count": 0, "rr_sum": 0.0, "rr_count": 0},
-                    )
-
-                # Update per-lib stats
-                lib_stats["pos_sum"] += d_pos.item()
-                lib_stats["neg_sum"] += d_neg.item()
-                lib_stats["count"] += 1
-
-        # Push temp counters to nonlocal scope
-        correct, total, total_pos_dist, total_neg_dist, count = (
-            p_correct,
-            p_total,
-            p_pos_d,
-            p_neg_d,
-            p_count,
-        )
-
+    all_keys, a_vecs, p_vecs = [], [], []
     with torch.no_grad():
-        all_keys = []
-        a_vecs = []
-        p_vecs = []
-
         for anchors, a_lits, positives, p_lits, anchor_keys in dataloader:
             anchors, a_lits = anchors.to(device), a_lits.to(device)
             positives, p_lits = positives.to(device), p_lits.to(device)
-
-            a_vec = model(anchors, a_lits)
-            p_vec = model(positives, p_lits)
-
-            a_vecs.append(a_vec)
-            p_vecs.append(p_vec)
+            a_vecs.append(model(anchors, a_lits))
+            p_vecs.append(model(positives, p_lits))
             all_keys.extend(anchor_keys)
 
-        if not a_vecs:
-            return 0, 0, 0, 0, {}, {}, 0, 0
+    if not a_vecs:
+        return 0, 0, 0, 0, {}, {}, 0, 0
 
-        a_vecs = torch.cat(a_vecs, dim=0)
-        p_vecs = torch.cat(p_vecs, dim=0)
+    a_vecs = torch.cat(a_vecs, dim=0)
+    p_vecs = torch.cat(p_vecs, dim=0)
+    # Cosine similarity matrix
+    sims = torch.matmul(a_vecs, a_vecs.T)
 
-        # Similarity matrix uses cosine similarity because embeddings are L2-normalized.
-        sims = torch.matmul(a_vecs, a_vecs.T)
-        score_candidates(ignore_isomorphs=False)
-        if total == 0:
-            score_candidates(ignore_isomorphs=True)
-            if total > 0:
-                print("[!] Warning: Evaluation found no valid negatives; relaxing isomorph mask.")
-            else:
-                score_candidates(ignore_isomorphs=True, force_any_negative=True)
-                if total > 0:
-                    print("[!] Warning: Evaluation found no valid negatives; relaxing library/isomorph masks.")
-    
-    if total == 0:
-        print("[!] Warning: Evaluation found no valid negatives; check val batching or library masking.")
-    avg_pos = total_pos_dist / count if count > 0 else 0
-    avg_neg = total_neg_dist / count if count > 0 else 0
+    correct, total = 0, 0
+    total_pos_dist, total_neg_dist = 0.0, 0.0
+    total_rr, rr_count = 0.0, 0
+    per_lib_stats = {}
+
+    for i in range(len(all_keys)):
+        anchor_key = all_keys[i]
+        anchor_lib = anchor_key.split("_", 1)[0]
+        anchor_hash = base_dataset.structural_hashes[anchor_key]
+
+        # Logic for negative selection
+        row_sims = sims[i].clone()
+        row_sims[i] = -2  # Mask self
+
+        # Mask all structural isomorphs to force the model to find a DIFFERENT logic block
+        for j in range(len(all_keys)):
+            if base_dataset.structural_hashes[all_keys[j]] == anchor_hash:
+                row_sims[j] = -2
+            elif mask_same_library and all_keys[j].split("_", 1)[0] == anchor_lib:
+                row_sims[j] = -2
+
+        hardest_idx = torch.argmax(row_sims)
+        if row_sims[hardest_idx] < -1:
+            continue  # Skip if no valid non-isomorph negative exists in this batch
+
+        d_pos = torch.norm(a_vecs[i] - p_vecs[i], p=2).item()
+        d_neg = torch.norm(a_vecs[i] - a_vecs[hardest_idx], p=2).item()
+
+        # Only count as correct if the positive is strictly closer than the hardest distinct logic block
+        if d_pos < d_neg:
+            correct += 1
+        total += 1
+
+        total_pos_dist += d_pos
+        total_neg_dist += d_neg
+
+        # MRR Calculation: Filter out isomorphs to find the real rank
+        p_dists = torch.norm(a_vecs[i].unsqueeze(0) - p_vecs, p=2, dim=1)
+        for j in range(len(all_keys)):
+            if i != j and base_dataset.structural_hashes[all_keys[j]] == anchor_hash:
+                p_dists[j] = 1e9
+
+        rank = int(torch.argsort(p_dists).tolist().index(i)) + 1
+        total_rr += 1.0 / rank
+        rr_count += 1
+
+        lib_stats = per_lib_stats.setdefault(
+            anchor_lib,
+            {"pos_sum": 0.0, "neg_sum": 0.0, "count": 0, "rr_sum": 0.0, "rr_count": 0},
+        )
+        lib_stats["pos_sum"] += d_pos
+        lib_stats["neg_sum"] += d_neg
+        lib_stats["count"] += 1
+        lib_stats["rr_sum"] += 1.0 / rank
+        lib_stats["rr_count"] += 1
+
+    acc = (correct / total * 100) if total > 0 else 0
+    avg_pos = total_pos_dist / total if total > 0 else 0
+    avg_neg = total_neg_dist / total if total > 0 else 0
     mrr = total_rr / rr_count if rr_count > 0 else 0
-    per_lib_margins = {}
-    per_lib_mrr = {}
-    for lib, stats in per_lib_stats.items():
-        if stats["count"] > 0:
-            avg_pos_lib = stats["pos_sum"] / stats["count"]
-            avg_neg_lib = stats["neg_sum"] / stats["count"]
-            per_lib_margins[lib] = avg_neg_lib - avg_pos_lib
-        if stats["rr_count"] > 0:
-            per_lib_mrr[lib] = stats["rr_sum"] / stats["rr_count"]
-    
+
+    per_lib_margins = {
+        l: (s["neg_sum"] / s["count"]) - (s["pos_sum"] / s["count"])
+        for l, s in per_lib_stats.items()
+        if s["count"] > 0
+    }
+    per_lib_mrr = {
+        l: s["rr_sum"] / s["rr_count"]
+        for l, s in per_lib_stats.items()
+        if s["rr_count"] > 0
+    }
+
     # Worst-case (min) and average MRR across libraries to measure generalization.
     min_lib_mrr = min(per_lib_mrr.values()) if per_lib_mrr else 0
     avg_lib_mrr = sum(per_lib_mrr.values()) / len(per_lib_mrr) if per_lib_mrr else 0
-    
-    return (
-        (correct / total) * 100 if total > 0 else 0,
-        avg_pos,
-        avg_neg,
-        mrr,
-        per_lib_margins,
-        per_lib_mrr,
-        min_lib_mrr,
-        avg_lib_mrr,
-    )
+
+    return acc, avg_pos, avg_neg, mrr, per_lib_margins, per_lib_mrr, min_lib_mrr, avg_lib_mrr
 
 def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_lib_count=3, val_split=0.0, val_max_chunks=None, load_checkpoint=False):
     # Device discovery (CUDA -> MPS -> CPU)
