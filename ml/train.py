@@ -233,30 +233,16 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
     rr_count = 0
     per_lib_stats = {}
 
-    with torch.no_grad():
-        all_keys = []
-        a_vecs = []
-        p_vecs = []
-
-        for anchors, a_lits, positives, p_lits, anchor_keys in dataloader:
-            anchors, a_lits = anchors.to(device), a_lits.to(device)
-            positives, p_lits = positives.to(device), p_lits.to(device)
-
-            a_vec = model(anchors, a_lits)
-            p_vec = model(positives, p_lits)
-
-            a_vecs.append(a_vec)
-            p_vecs.append(p_vec)
-            all_keys.extend(anchor_keys)
-
-        if not a_vecs:
-            return 0, 0, 0, 0, {}, {}, 0, 0
-
-        a_vecs = torch.cat(a_vecs, dim=0)
-        p_vecs = torch.cat(p_vecs, dim=0)
-
-        # Similarity matrix uses cosine similarity because embeddings are L2-normalized.
-        sims = torch.matmul(a_vecs, a_vecs.T)
+    def score_candidates(ignore_isomorphs):
+        nonlocal correct, total, total_pos_dist, total_neg_dist, count, total_rr, rr_count, per_lib_stats
+        correct = 0
+        total = 0
+        total_pos_dist = 0
+        total_neg_dist = 0
+        count = 0
+        total_rr = 0.0
+        rr_count = 0
+        per_lib_stats = {}
 
         for i in range(len(all_keys)):
             anchor_key = all_keys[i]
@@ -264,14 +250,14 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
             anchor_lib = anchor_key.split("_", 1)[0] if mask_same_library else None
             positive_lib = anchor_lib
 
-            # Mask out self and isomorphs; optionally mask same-library candidates.
+            # Mask out self and optionally isomorphs/same-library candidates.
             row_sims = sims[i].clone()
             row_sims[i] = -2
 
             for j in range(len(all_keys)):
                 candidate_key = all_keys[j]
                 candidate_lib = candidate_key.split("_", 1)[0] if mask_same_library else None
-                if base_dataset.structural_hashes[candidate_key] == anchor_hash:
+                if not ignore_isomorphs and base_dataset.structural_hashes[candidate_key] == anchor_hash:
                     row_sims[j] = -2
                 elif mask_same_library and candidate_lib == anchor_lib:
                     row_sims[j] = -2
@@ -316,6 +302,36 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
             lib_stats["count"] += 1
             lib_stats["rr_sum"] += 1.0 / rank
             lib_stats["rr_count"] += 1
+
+    with torch.no_grad():
+        all_keys = []
+        a_vecs = []
+        p_vecs = []
+
+        for anchors, a_lits, positives, p_lits, anchor_keys in dataloader:
+            anchors, a_lits = anchors.to(device), a_lits.to(device)
+            positives, p_lits = positives.to(device), p_lits.to(device)
+
+            a_vec = model(anchors, a_lits)
+            p_vec = model(positives, p_lits)
+
+            a_vecs.append(a_vec)
+            p_vecs.append(p_vec)
+            all_keys.extend(anchor_keys)
+
+        if not a_vecs:
+            return 0, 0, 0, 0, {}, {}, 0, 0
+
+        a_vecs = torch.cat(a_vecs, dim=0)
+        p_vecs = torch.cat(p_vecs, dim=0)
+
+        # Similarity matrix uses cosine similarity because embeddings are L2-normalized.
+        sims = torch.matmul(a_vecs, a_vecs.T)
+        score_candidates(ignore_isomorphs=False)
+        if total == 0:
+            score_candidates(ignore_isomorphs=True)
+            if total > 0:
+                print("[!] Warning: Evaluation found no valid negatives; relaxing isomorph mask.")
     
     if total == 0:
         print("[!] Warning: Evaluation found no valid negatives; check val batching or library masking.")
