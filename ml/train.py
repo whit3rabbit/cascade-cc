@@ -391,9 +391,20 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
         lib_name = f_name.replace('_gold_asts.json', '')
         libraries.add(lib_name)
         with open(os.path.join(bootstrap_dir, f_name), 'r') as f:
-            data = json.load(f)
-            for chunk_name, ast in data.items():
-                patterns[f"{lib_name}_{chunk_name}"] = ast
+            try:
+                data = json.load(f)
+                for chunk_name, chunk_data in data.items():
+                    # Handle both legacy AST lists and metadata-wrapped dicts.
+                    ast_root = (
+                        chunk_data.get("ast")
+                        if isinstance(chunk_data, dict) and "ast" in chunk_data
+                        else chunk_data
+                    )
+                    if not ast_root:
+                        continue
+                    patterns[f"{lib_name}_{chunk_name}"] = ast_root
+            except Exception as e:
+                print(f"[!] Error loading {f_name}: {e}")
 
     # 4. Validation strategy: split or leave-library-out (single or multiple libraries).
     val_libraries = []
