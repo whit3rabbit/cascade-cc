@@ -577,33 +577,11 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
                         batch_sims[j] = -2 # Mask isomorphs
                 
                 hardest_idx = torch.argmax(batch_sims)
-                if batch_sims[hardest_idx] == -2:
-                    # Fallback: prefer a different library, then any other item.
-                    anchor_lib = anchor_keys[i].split("_", 1)[0]
-                    fallback_idx = None
-                    for j in range(len(anchors)):
-                        if j == i:
-                            continue
-                        candidate_key = anchor_keys[j]
-                        candidate_lib = candidate_key.split("_", 1)[0]
-                        if candidate_lib == anchor_lib:
-                            continue
-                        if train_base_dataset.structural_hashes[candidate_key] == anchor_hash:
-                            continue
-                        fallback_idx = j
-                        break
-                    if fallback_idx is None:
-                        for j in range(len(anchors)):
-                            if j == i:
-                                continue
-                            candidate_key = anchor_keys[j]
-                            candidate_lib = candidate_key.split("_", 1)[0]
-                            if candidate_lib != anchor_lib:
-                                fallback_idx = j
-                                break
-                    if fallback_idx is None:
-                        fallback_idx = (i + 1) % len(anchors)
-                    hardest_idx = fallback_idx
+                if batch_sims[hardest_idx] <= -2:
+                    # Fallback: use any non-self negative if all candidates were masked.
+                    batch_sims = sims[i].clone()
+                    batch_sims[i] = -2
+                    hardest_idx = torch.argmax(batch_sims)
                     
                 negatives.append(anchors[hardest_idx])
                 neg_lits.append(a_lits[hardest_idx])
