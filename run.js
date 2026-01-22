@@ -111,6 +111,10 @@ if (!command || !scripts[command]) {
     console.log('  --device <cuda|mps|cpu|auto>');
     console.log('  --max_nodes <int>');
     console.log('  --batch_size <int>');
+    console.log('  --lr <float>');
+    console.log('  --margin <float>');
+    console.log('  --embed_dim <int>');
+    console.log('  --hidden_dim <int>');
     console.log('  --epochs <int>');
     console.log('  --sweep');
     console.log('  --finetune');

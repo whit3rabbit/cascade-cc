@@ -363,7 +363,8 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     else:
         device = torch.device(device_name)
     
-    if not is_sweep: print(f"[*] Training on device: {device}")
+    if not is_sweep:
+        print(f"[*] Training on device: {device}")
 
     model_path = os.path.join(os.path.dirname(__file__), "model.pth") if load_checkpoint else None
     effective_max_nodes, source = resolve_max_nodes(
@@ -371,6 +372,14 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     )
     if not is_sweep:
         print(f"[*] Context Window: {effective_max_nodes} nodes ({source})")
+        print("[*] Training Config:")
+        print(f"    - Epochs: {epochs}")
+        print(f"    - Batch Size: {batch_size}")
+        print(f"    - LR: {lr}")
+        print(f"    - Margin: {margin}")
+        print(f"    - Embed Dim: {embed_dim}")
+        print(f"    - Hidden Dim: {hidden_dim}")
+        print(f"    - Finetune: {'yes' if load_checkpoint else 'no'}")
 
     node_type_count = len(NODE_TYPES)
     if node_type_count < 2:
