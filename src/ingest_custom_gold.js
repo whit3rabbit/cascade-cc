@@ -28,6 +28,15 @@ function getVersionRoots() {
         }));
     }
 
+    const srcDir = path.join(CUSTOM_GOLD_DIR, 'src');
+    if (fs.existsSync(srcDir) && fs.statSync(srcDir).isDirectory()) {
+        return [{
+            version: null,
+            dir: srcDir,
+            label: 'custom_claude_gold'
+        }];
+    }
+
     return [{
         version: null,
         dir: CUSTOM_GOLD_DIR,
