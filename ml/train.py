@@ -234,75 +234,88 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
     per_lib_stats = {}
 
     with torch.no_grad():
+        all_keys = []
+        a_vecs = []
+        p_vecs = []
+
         for anchors, a_lits, positives, p_lits, anchor_keys in dataloader:
             anchors, a_lits = anchors.to(device), a_lits.to(device)
             positives, p_lits = positives.to(device), p_lits.to(device)
-            
+
             a_vec = model(anchors, a_lits)
             p_vec = model(positives, p_lits)
-            
-            # Vectorized hard-negative selection for evaluation.
-            # Similarity matrix uses cosine similarity because embeddings are L2-normalized.
-            sims = torch.matmul(a_vec, a_vec.T)
-            
-            for i in range(len(anchors)):
-                anchor_hash = base_dataset.structural_hashes[anchor_keys[i]]
-                anchor_lib = anchor_keys[i].split("_", 1)[0] if mask_same_library else None
-                positive_lib = anchor_lib
-                
-                # Mask out self and isomorphs; optionally mask same-library candidates
-                # when evaluating across multiple libraries.
-                batch_sims = sims[i].clone()
-                batch_sims[i] = -2 # Lower than any possible cosine sim
-                
-                for j in range(len(anchors)):
-                    candidate_key = anchor_keys[j]
-                    candidate_lib = candidate_key.split("_", 1)[0] if mask_same_library else None
-                    if base_dataset.structural_hashes[candidate_key] == anchor_hash:
-                        batch_sims[j] = -2
-                    elif mask_same_library and candidate_lib == anchor_lib:
-                        batch_sims[j] = -2
-                
-                hardest_idx = torch.argmax(batch_sims)
-                if batch_sims[hardest_idx] == -2:
-                    continue # No valid negative in batch
-                
-                n_vec = a_vec[hardest_idx]
-                
-                d_pos = torch.norm(a_vec[i] - p_vec[i], p=2)
-                d_neg = torch.norm(a_vec[i] - n_vec, p=2)
-                
-                if d_pos < d_neg:
-                    correct += 1
-                total += 1
-                
-                total_pos_dist += d_pos.item()
-                total_neg_dist += d_neg.item()
-                count += 1
 
-                # Mean Reciprocal Rank (MRR): how high the correct match ranks.
-                pos_dists = torch.norm(a_vec[i].unsqueeze(0) - p_vec, p=2, dim=1)
-                if mask_same_library:
-                    for j in range(len(anchor_keys)):
-                        if j == i:
-                            continue
-                        candidate_lib = anchor_keys[j].split("_", 1)[0]
-                        if candidate_lib == positive_lib:
-                            pos_dists[j] = float("inf")
-                rank = int(torch.argsort(pos_dists).tolist().index(i)) + 1
-                total_rr += 1.0 / rank
-                rr_count += 1
+            a_vecs.append(a_vec)
+            p_vecs.append(p_vec)
+            all_keys.extend(anchor_keys)
 
-                lib_key = anchor_keys[i].split("_", 1)[0]
-                lib_stats = per_lib_stats.setdefault(
-                    lib_key,
-                    {"pos_sum": 0.0, "neg_sum": 0.0, "count": 0, "rr_sum": 0.0, "rr_count": 0},
-                )
-                lib_stats["pos_sum"] += d_pos.item()
-                lib_stats["neg_sum"] += d_neg.item()
-                lib_stats["count"] += 1
-                lib_stats["rr_sum"] += 1.0 / rank
-                lib_stats["rr_count"] += 1
+        if not a_vecs:
+            return 0, 0, 0, 0, {}, {}, 0, 0
+
+        a_vecs = torch.cat(a_vecs, dim=0)
+        p_vecs = torch.cat(p_vecs, dim=0)
+
+        # Similarity matrix uses cosine similarity because embeddings are L2-normalized.
+        sims = torch.matmul(a_vecs, a_vecs.T)
+
+        for i in range(len(all_keys)):
+            anchor_key = all_keys[i]
+            anchor_hash = base_dataset.structural_hashes[anchor_key]
+            anchor_lib = anchor_key.split("_", 1)[0] if mask_same_library else None
+            positive_lib = anchor_lib
+
+            # Mask out self and isomorphs; optionally mask same-library candidates.
+            row_sims = sims[i].clone()
+            row_sims[i] = -2
+
+            for j in range(len(all_keys)):
+                candidate_key = all_keys[j]
+                candidate_lib = candidate_key.split("_", 1)[0] if mask_same_library else None
+                if base_dataset.structural_hashes[candidate_key] == anchor_hash:
+                    row_sims[j] = -2
+                elif mask_same_library and candidate_lib == anchor_lib:
+                    row_sims[j] = -2
+
+            hardest_idx = torch.argmax(row_sims)
+            if row_sims[hardest_idx] == -2:
+                continue
+
+            n_vec = a_vecs[hardest_idx]
+
+            d_pos = torch.norm(a_vecs[i] - p_vecs[i], p=2)
+            d_neg = torch.norm(a_vecs[i] - n_vec, p=2)
+
+            if d_pos < d_neg:
+                correct += 1
+            total += 1
+
+            total_pos_dist += d_pos.item()
+            total_neg_dist += d_neg.item()
+            count += 1
+
+            # Mean Reciprocal Rank (MRR): how high the correct match ranks.
+            pos_dists = torch.norm(a_vecs[i].unsqueeze(0) - p_vecs, p=2, dim=1)
+            if mask_same_library:
+                for j in range(len(all_keys)):
+                    if j == i:
+                        continue
+                    candidate_lib = all_keys[j].split("_", 1)[0]
+                    if candidate_lib == positive_lib:
+                        pos_dists[j] = float("inf")
+            rank = int(torch.argsort(pos_dists).tolist().index(i)) + 1
+            total_rr += 1.0 / rank
+            rr_count += 1
+
+            lib_key = anchor_key.split("_", 1)[0]
+            lib_stats = per_lib_stats.setdefault(
+                lib_key,
+                {"pos_sum": 0.0, "neg_sum": 0.0, "count": 0, "rr_sum": 0.0, "rr_count": 0},
+            )
+            lib_stats["pos_sum"] += d_pos.item()
+            lib_stats["neg_sum"] += d_neg.item()
+            lib_stats["count"] += 1
+            lib_stats["rr_sum"] += 1.0 / rank
+            lib_stats["rr_count"] += 1
     
     if total == 0:
         print("[!] Warning: Evaluation found no valid negatives; check val batching or library masking.")
