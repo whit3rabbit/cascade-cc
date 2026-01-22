@@ -199,6 +199,9 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         let existingMatchedCount = 0;
         let totalSimilarity = 0;
         let highSimCount = 0;
+        const bestSims = [];
+        const bestBoostedSims = [];
+        const lockedBoostedSims = [];
 
         const lockThreshold = parseFloat(process.env.ANCHOR_LOCK_THRESHOLD) || 0.98;
         const lockConfidence = parseFloat(process.env.ANCHOR_LOCK_CONFIDENCE) || 0.99;
@@ -243,12 +246,16 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
             // Lowered global threshold for better coverage (0.85 default instead of 0.9)
             const effectiveThreshold = parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.80;
 
+            bestSims.push(bestMatch.originalSim);
+            bestBoostedSims.push(bestMatch.similarity);
+
             if (bestMatch.similarity > effectiveThreshold) {
                 const isNewChunk = !targetMapping.processed_chunks.includes(targetChunk.name);
                 const logPrefix = isNewChunk ? '[ANCHOR/REGISTRY] NEW MATCH' : '[ANCHOR/REGISTRY] EXISTING';
 
                 totalSimilarity += bestMatch.originalSim; // Use real sim for stats
                 highSimCount++;
+                if (bestMatch.similarity >= lockThreshold) lockedBoostedSims.push(bestMatch.similarity);
 
                 const boostTag = (bestMatch.similarity > bestMatch.originalSim) ? `[BOOSTED]` : '';
                 console.log(`    ${logPrefix}: ${targetChunk.name} -> ${bestMatch.label} (${(bestMatch.originalSim * 100).toFixed(2)}% ${boostTag} => ${(bestMatch.similarity * 100).toFixed(2)}%)`);
@@ -344,6 +351,20 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
             fs.writeFileSync(graphMapPath, JSON.stringify(graphMapRaw, null, 2));
         }
         const avgSim = highSimCount > 0 ? (totalSimilarity / highSimCount * 100).toFixed(2) : 0;
+        const lockRate = highSimCount > 0 ? ((lockedBoostedSims.length / highSimCount) * 100).toFixed(2) : 0;
+        const overallLockRate = bestBoostedSims.length > 0 ? ((lockedBoostedSims.length / bestBoostedSims.length) * 100).toFixed(2) : 0;
+        const bins = [
+            { label: "<0.70", min: -Infinity, max: 0.7 },
+            { label: "0.70-0.80", min: 0.7, max: 0.8 },
+            { label: "0.80-0.90", min: 0.8, max: 0.9 },
+            { label: "0.90-0.95", min: 0.9, max: 0.95 },
+            { label: "0.95-0.98", min: 0.95, max: 0.98 },
+            { label: ">=0.98", min: 0.98, max: Infinity },
+        ];
+        const hist = bins.map((bin) => {
+            const count = bestBoostedSims.filter((s) => s >= bin.min && s < bin.max).length;
+            return `${bin.label}: ${count}`;
+        });
 
         console.log(`\n[+] Registry Anchoring complete.`);
         console.log(`    - Average Match Similarity: ${avgSim}%`);
@@ -352,6 +373,9 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         console.log(`    - Chunks Matched (Already): ${existingMatchedCount}`);
         console.log(`    - Total Aligned Symbols:    ${Object.keys(targetMapping.variables).length + Object.keys(targetMapping.properties).length}`);
         console.log(`    - New Symbols Added:        ${totalNamesAnchored}`);
+        console.log(`    - Lock Rate (matched):      ${lockRate}% (>= ${lockThreshold})`);
+        console.log(`    - Lock Rate (overall):      ${overallLockRate}% (>= ${lockThreshold})`);
+        console.log(`    - Similarity Histogram:     ${hist.join(', ')}`);
 
     } else {
         // Mode: Version-to-version anchoring (Legacy/Direct)

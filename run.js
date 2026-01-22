@@ -116,7 +116,10 @@ if (!command || !scripts[command]) {
     console.log('  --embed_dim <int>');
     console.log('  --hidden_dim <int>');
     console.log('  --epochs <int>');
+    console.log('  --preset <name>');
     console.log('  --checkpoint_interval <int>');
+    console.log('  --lr_decay_epoch <int>');
+    console.log('  --lr_decay_factor <float>');
     console.log('  --sweep');
     console.log('  --finetune');
     console.log('  --val_library <name>[,<name>...] (repeatable)');

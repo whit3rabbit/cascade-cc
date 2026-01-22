@@ -350,7 +350,7 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
         avg_lib_mrr,
     )
 
-def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_lib_count=3, val_split=0.0, val_max_chunks=None, load_checkpoint=False, checkpoint_interval=0):
+def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_lib_count=3, val_split=0.0, val_max_chunks=None, load_checkpoint=False, checkpoint_interval=0, lr_decay_epoch=0, lr_decay_factor=1.0, preset_name=None):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -380,6 +380,10 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
         print(f"    - Embed Dim: {embed_dim}")
         print(f"    - Hidden Dim: {hidden_dim}")
         print(f"    - Checkpoint Interval: {checkpoint_interval}")
+        if preset_name:
+            print(f"    - Preset: {preset_name}")
+        if lr_decay_epoch and lr_decay_factor and lr_decay_factor != 1.0:
+            print(f"    - LR Decay: epoch {lr_decay_epoch}, factor {lr_decay_factor}")
         print(f"    - Finetune: {'yes' if load_checkpoint else 'no'}")
 
     node_type_count = len(NODE_TYPES)
@@ -562,6 +566,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
         checkpoint_dir = os.path.join(os.path.dirname(__file__), "checkpoints")
         os.makedirs(checkpoint_dir, exist_ok=True)
 
+    lr_decay_applied = False
     print(f"[*] Starting training loop for {epochs} epochs...")
     for epoch in range(epochs):
         model.train()
@@ -659,6 +664,14 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             early_stop_bad_epochs = 0
         elif val_margin <= best_val_margin + early_stop_min_delta:
             early_stop_bad_epochs += 1
+
+        if not lr_decay_applied and lr_decay_epoch and lr_decay_factor and lr_decay_factor > 0 and (epoch + 1) >= lr_decay_epoch:
+            lr = lr * lr_decay_factor
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = lr
+            lr_decay_applied = True
+            if not is_sweep:
+                print(f"    [*] Applied LR decay: {lr:.6f}")
 
         if early_stop_bad_epochs >= early_stop_patience:
             if not is_sweep:
@@ -775,6 +788,9 @@ if __name__ == "__main__":
     parser.add_argument("--margin", type=float, default=float(os.getenv("ML_TRAIN_MARGIN", "0.5")), help="Triplet margin")
     parser.add_argument("--embed_dim", type=int, default=int(os.getenv("ML_TRAIN_EMBED_DIM", "32")), help="Embedding dimension")
     parser.add_argument("--hidden_dim", type=int, default=int(os.getenv("ML_TRAIN_HIDDEN_DIM", "128")), help="Hidden dimension")
+    parser.add_argument("--preset", type=str, default=os.getenv("ML_TRAIN_PRESET", ""), help="Training preset (e.g., production)")
+    parser.add_argument("--lr_decay_epoch", type=int, default=int(os.getenv("ML_TRAIN_LR_DECAY_EPOCH", "0")), help="Apply LR decay at this epoch (0 disables)")
+    parser.add_argument("--lr_decay_factor", type=float, default=float(os.getenv("ML_TRAIN_LR_DECAY_FACTOR", "1.0")), help="LR decay multiplier (e.g., 0.1)")
     parser.add_argument("--checkpoint_interval", type=int, default=int(os.getenv("ML_TRAIN_CHECKPOINT_INTERVAL", "0")), help="Save checkpoints every N epochs (0 disables)")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
@@ -788,6 +804,29 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    preset_name = (args.preset or "").strip()
+    if preset_name:
+        preset_key = preset_name.lower()
+        presets = {
+            "production": {
+                "margin": 0.8,
+                "lr": 0.001,
+                "embed_dim": 32,
+                "hidden_dim": 256,
+            }
+        }
+        preset = presets.get(preset_key)
+        if preset:
+            args.margin = preset["margin"]
+            args.lr = preset["lr"]
+            args.embed_dim = preset["embed_dim"]
+            args.hidden_dim = preset["hidden_dim"]
+        else:
+            print(f"[!] Unknown preset '{preset_name}'. Proceeding without preset overrides.")
+            preset_name = None
+    else:
+        preset_name = None
+
     # Handle max_nodes override
     m_nodes = args.max_nodes if args.max_nodes > 0 else None
     val_max_chunks = args.val_max_chunks if args.val_max_chunks > 0 else None
@@ -824,6 +863,9 @@ if __name__ == "__main__":
             max_nodes_override=m_nodes,
             load_checkpoint=args.finetune,
             checkpoint_interval=args.checkpoint_interval,
+            lr_decay_epoch=args.lr_decay_epoch,
+            lr_decay_factor=args.lr_decay_factor,
+            preset_name=preset_name,
             val_library=val_library,
             val_lib_count=args.val_lib_count,
             val_split=val_split,
