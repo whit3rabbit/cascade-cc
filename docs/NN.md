@@ -56,6 +56,11 @@ Recent sweeps prioritize cross-library generalization and robust ranking metrics
 | `--batch_size` | `64` | Number of triplets per optimization step. |
 | `--finetune` | `false` | Load `ml/model.pth` to continue training. |
 | `--force` | `False` | Force loading a model even if the vocabulary size mismatches. |
+| `--val_library` | (unset) | Validation library name(s). Repeat or comma-separate. |
+| `--val_lib_count` | `3` | Number of libraries to hold out when `--val_library` is not set. |
+| `--val_split` | `0` | Use random split for validation (0 disables; overrides leave-library-out). |
+| `--val_max_chunks` | `0` | Cap validation chunks (0 disables). |
+| `--max_nodes` | `0` | Override context window size (0 = auto; can also use `ML_MAX_NODES`). |
 
 ---
 
@@ -93,7 +98,8 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
 *   **Sweep batch size**: Sweeps use a fixed batch size of `64` inside `ml/train.py` regardless of CLI defaults.
 *   **Early stopping**: Training stops after several stagnant epochs on margin improvement.
 *   **Evaluation metrics**: Margin and MRR are tracked; sweeps select on minimum library MRR.
-*   **Leave-multi-library-out validation**: The training script can hold out multiple libraries at once to stress cross-library generalization.
+*   **Leave-multi-library-out validation**: The training script holds out multiple libraries by default to improve validation diversity.
+*   **Validation split override**: Use `--val_split` (or `ML_VAL_SPLIT`) to switch to a random split across all libraries.
 
 ---
 
@@ -123,6 +129,17 @@ The training script only loads a checkpoint when `--finetune` is passed. When en
 - Warns if the current vocabulary (defined in `ml/constants.py`) differs.
 - Partially loads weights and resizes the embedding layer to allow resuming training despite vocabulary changes.
 - Exits with an error if `--finetune` is set but `ml/model.pth` is missing.
+
+### Environment Overrides
+
+Training supports several optional environment variables for defaults:
+
+| Variable | Description |
+| :--- | :--- |
+| `ML_MAX_NODES` | Override context window size when `--max_nodes` is not set. |
+| `ML_VAL_LIB_COUNT` | Default number of held-out libraries for validation. |
+| `ML_VAL_SPLIT` | Default random split size (0 disables). |
+| `ML_VAL_MAX_CHUNKS` | Default validation chunk cap (0 disables). |
 
 ---
 

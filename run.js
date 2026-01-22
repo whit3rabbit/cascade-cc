@@ -107,6 +107,17 @@ if (!command || !scripts[command]) {
     Object.entries(scripts).forEach(([name, cfg]) => {
         console.log(`  ${name.padEnd(12)} - ${cfg.desc}`);
     });
+    console.log('\nTrain args (pass after --):');
+    console.log('  --device <cuda|mps|cpu|auto>');
+    console.log('  --max_nodes <int>');
+    console.log('  --batch_size <int>');
+    console.log('  --epochs <int>');
+    console.log('  --sweep');
+    console.log('  --finetune');
+    console.log('  --val_library <name>[,<name>...] (repeatable)');
+    console.log('  --val_lib_count <int>');
+    console.log('  --val_split <float>');
+    console.log('  --val_max_chunks <int>');
     process.exit(1);
 }
 
@@ -171,6 +182,10 @@ switch (command) {
         const bootstrapDir = './ml/bootstrap_data';
 
         console.log(`[*] Initiating Model Training on Gold Standards...`);
+        if (args.includes('--help') || args.includes('-h')) {
+            spawnSync(PYTHON_BIN, ['ml/train.py', '--help'], { stdio: 'inherit', shell: true });
+            process.exit(0);
+        }
         const child = spawn(PYTHON_BIN, ['ml/train.py', bootstrapDir, ...args], {
             stdio: 'inherit',
             shell: true
@@ -208,4 +223,3 @@ if (command === 'visualize') {
         }
     }, 2000);
 }
-

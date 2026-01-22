@@ -333,7 +333,7 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
         avg_lib_mrr,
     )
 
-def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_max_chunks=None, load_checkpoint=False):
+def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_lib_count=3, val_split=0.0, val_max_chunks=None, load_checkpoint=False):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -378,33 +378,65 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             for chunk_name, ast in data.items():
                 patterns[f"{lib_name}_{chunk_name}"] = ast
 
-    # 4. Leave-Library-Out Validation (single or multiple libraries).
-    # Multiple validation libraries allow same-library masking during eval.
-    if val_library:
-        if isinstance(val_library, (list, tuple, set)):
-            val_libraries = list(dict.fromkeys(val_library))
-        else:
-            val_libraries = [val_library]
-    else:
-        val_libraries = [random.choice(list(libraries))]
+    # 4. Validation strategy: split or leave-library-out (single or multiple libraries).
+    val_libraries = []
+    if val_split and val_split > 0:
+        full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
+        val_size = max(1, int(val_split * len(full_dataset)))
+        train_size = len(full_dataset) - val_size
+        train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
         if not is_sweep:
-            print(f"[*] Leave-One-Library-Out: Validating on '{val_libraries[0]}'")
+            print(f"[*] Split Validation: {val_size} samples ({val_split:.2f} of dataset)")
+        if val_max_chunks and val_size > val_max_chunks:
+            rng = random.Random(42)
+            val_indices = rng.sample(range(val_size), val_max_chunks)
+            val_dataset = Subset(val_dataset, val_indices)
+    else:
+        if val_library:
+            if isinstance(val_library, (list, tuple, set)):
+                val_libraries = list(dict.fromkeys(val_library))
+            else:
+                val_libraries = [val_library]
+        else:
+            lib_count = max(1, min(val_lib_count, len(libraries)))
+            val_libraries = random.sample(list(libraries), lib_count)
+            if not is_sweep:
+                if len(val_libraries) == 1:
+                    print(f"[*] Leave-One-Library-Out: Validating on '{val_libraries[0]}'")
+                else:
+                    joined_libs = ", ".join(val_libraries)
+                    print(f"[*] Leave-Multi-Library-Out: Validating on [{joined_libs}]")
 
-    if not is_sweep and len(val_libraries) > 1:
-        joined_libs = ", ".join(val_libraries)
-        print(f"[*] Leave-Multi-Library-Out: Validating on [{joined_libs}]")
+        val_prefixes = tuple(f"{lib}_" for lib in val_libraries)
+        train_patterns = {k: v for k, v in patterns.items() if not k.startswith(val_prefixes)}
+        val_patterns = {k: v for k, v in patterns.items() if k.startswith(val_prefixes)}
 
-    val_prefixes = tuple(f"{lib}_" for lib in val_libraries)
-    train_patterns = {k: v for k, v in patterns.items() if not k.startswith(val_prefixes)}
-    val_patterns = {k: v for k, v in patterns.items() if k.startswith(val_prefixes)}
+        if val_max_chunks and len(val_patterns) > val_max_chunks:
+            rng = random.Random(42)
+            val_keys = rng.sample(list(val_patterns.keys()), val_max_chunks)
+            val_patterns = {k: val_patterns[k] for k in val_keys}
 
-    if val_max_chunks and len(val_patterns) > val_max_chunks:
-        rng = random.Random(42)
-        val_keys = rng.sample(list(val_patterns.keys()), val_max_chunks)
-        val_patterns = {k: val_patterns[k] for k in val_keys}
+        if not val_patterns:
+            print(f"[!] Warning: Validation libraries {val_libraries} have no patterns. Falling back to 80/20 split.")
+            full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
+            train_size = int(0.8 * len(full_dataset))
+            val_size = len(full_dataset) - train_size
+            train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+            if val_max_chunks and val_size > val_max_chunks:
+                rng = random.Random(42)
+                val_indices = rng.sample(range(val_size), val_max_chunks)
+                val_dataset = Subset(val_dataset, val_indices)
+        else:
+            train_dataset = TripletDataset(train_patterns, max_nodes=effective_max_nodes)
+            val_dataset = TripletDataset(val_patterns, max_nodes=effective_max_nodes)
 
-    if not val_patterns:
-        print(f"[!] Warning: Validation libraries {val_libraries} have no patterns. Falling back to 80/20 split.")
+    # Ensure validation has at least two distinct structures for negatives.
+    if isinstance(val_dataset, Subset):
+        val_hashes = [val_dataset.dataset.structural_hashes[val_dataset.dataset.keys[i]] for i in val_dataset.indices]
+    else:
+        val_hashes = list(val_dataset.structural_hashes.values())
+    if len(set(val_hashes)) < 2:
+        print("[!] Warning: Validation set lacks structural diversity; falling back to 80/20 split.")
         full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
         train_size = int(0.8 * len(full_dataset))
         val_size = len(full_dataset) - train_size
@@ -413,9 +445,6 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             rng = random.Random(42)
             val_indices = rng.sample(range(val_size), val_max_chunks)
             val_dataset = Subset(val_dataset, val_indices)
-    else:
-        train_dataset = TripletDataset(train_patterns, max_nodes=effective_max_nodes)
-        val_dataset = TripletDataset(val_patterns, max_nodes=effective_max_nodes)
 
     use_cuda = device.type == 'cuda'
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=use_cuda)
@@ -560,11 +589,12 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
                 print(f"      Batch {batch_idx}/{len(train_loader)} - Loss: {loss.item():.4f}")
 
         mask_same_library = len(val_libraries) > 1
+        eval_dataset = val_dataset.dataset if isinstance(val_dataset, Subset) else val_dataset
         val_acc, avg_pos, avg_neg, val_mrr, per_lib_margins, per_lib_mrr, min_lib_mrr, avg_lib_mrr = evaluate_model(
             model,
             val_loader,
             device,
-            val_dataset,
+            eval_dataset,
             mask_same_library=mask_same_library,
         )
         val_margin = avg_neg - avg_pos
@@ -603,7 +633,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
 
     return (best_val_margin, best_val_acc, best_val_mrr, best_val_min_lib_margin, best_val_min_lib_mrr, best_val_avg_lib_mrr), best_state
 
-def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=None):
+def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=None, val_lib_count=3, val_split=0.0, val_max_chunks=None):
     print("[*] Starting Hyperparameter Sweep (Targeting Maximal Margin)...")
     results = []
     
@@ -620,8 +650,8 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
         print("[!] Error: No gold ASTs found. Run 'npm run bootstrap' first.")
         return
     libraries = [f.replace("_gold_asts.json", "") for f in ast_files]
-    # Use up to 3 validation libraries to stress generalization.
-    val_lib_count = min(3, len(libraries))
+    # Use up to N validation libraries to stress generalization.
+    val_lib_count = min(max(1, val_lib_count), len(libraries))
     fixed_val_libs = random.sample(libraries, val_lib_count) if libraries else []
     if fixed_val_libs:
         joined_libs = ", ".join(fixed_val_libs)
@@ -649,6 +679,8 @@ def run_sweep(bootstrap_dir, epochs=5, device_name="auto", max_nodes_override=No
                         device_name=device_name,
                         max_nodes_override=max_nodes_override,
                         val_library=fixed_val_libs if fixed_val_libs else None,
+                        val_lib_count=val_lib_count,
+                        val_split=val_split,
                         val_max_chunks=val_max_chunks,
                     )
                     val_margin, val_acc, val_mrr, min_lib_margin, min_lib_mrr, avg_lib_mrr = result
@@ -710,14 +742,35 @@ if __name__ == "__main__":
     parser.add_argument("--finetune", action="store_true", help="Load existing model.pth to continue training")
     parser.add_argument("--max_nodes", type=int, default=0, help="Override context window size (0 for auto)")
     parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, mps, cpu, or auto")
+    parser.add_argument("--val_library", action="append", help="Validation library name(s). Repeat or comma-separate.")
+    parser.add_argument("--val_lib_count", type=int, default=int(os.getenv("ML_VAL_LIB_COUNT", "3")), help="How many libraries to hold out when val_library is not set")
+    parser.add_argument("--val_split", type=float, default=float(os.getenv("ML_VAL_SPLIT", "0")), help="Use random split for validation (0 disables)")
+    parser.add_argument("--val_max_chunks", type=int, default=int(os.getenv("ML_VAL_MAX_CHUNKS", "0")), help="Max validation chunks (0 for no limit)")
     
     args = parser.parse_args()
     
     # Handle max_nodes override
     m_nodes = args.max_nodes if args.max_nodes > 0 else None
+    val_max_chunks = args.val_max_chunks if args.val_max_chunks > 0 else None
+    val_split = args.val_split if args.val_split > 0 else 0.0
+    val_library = None
+    if args.val_library:
+        libs = []
+        for entry in args.val_library:
+            libs.extend([item.strip() for item in entry.split(",") if item.strip()])
+        if libs:
+            val_library = libs
 
     if args.sweep:
-        run_sweep(args.bootstrap_dir, epochs=args.epochs, device_name=args.device, max_nodes_override=m_nodes)
+        run_sweep(
+            args.bootstrap_dir,
+            epochs=args.epochs,
+            device_name=args.device,
+            max_nodes_override=m_nodes,
+            val_lib_count=args.val_lib_count,
+            val_split=val_split,
+            val_max_chunks=val_max_chunks,
+        )
     else:
         train_brain(
             args.bootstrap_dir,
@@ -727,4 +780,8 @@ if __name__ == "__main__":
             device_name=args.device,
             max_nodes_override=m_nodes,
             load_checkpoint=args.finetune,
+            val_library=val_library,
+            val_lib_count=args.val_lib_count,
+            val_split=val_split,
+            val_max_chunks=val_max_chunks,
         )
