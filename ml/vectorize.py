@@ -302,7 +302,7 @@ if __name__ == "__main__":
     parser.add_argument("version_path", help="Path to the version directory (e.g., claude-analysis/v3.5)")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--max_nodes", type=int, default=0, help="Override context window size (0 for auto)")
-    parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, mps, cpu, or auto")
+    parser.add_argument("--device", type=str, default="auto", help="Device: cuda, mps, cpu, or auto")
     args = parser.parse_args()
 
     m_nodes = args.max_nodes if args.max_nodes > 0 else None
