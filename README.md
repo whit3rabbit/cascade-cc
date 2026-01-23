@@ -46,11 +46,8 @@ Once initialized, use this sequence to analyze any new version of Claude:
 npm run analyze
 #npm run analyze -- --version <version>
 
-# 2. Anchor against known libraries (Replace <version> with output from step 1)
-npm run anchor -- <version> --device auto
-
-# 3. Apply roles and propose folder structures
-node src/classify_logic.js <version>
+# 2. Anchor and classify roles (Replace <version> with output from step 1)
+npm run anchor-classify -- <version>
 
 # 4. LLM Deobfuscation (Focuses only on proprietary "Founder" logic)
 npm run deobfuscate -- <version> --skip-vendor
@@ -81,6 +78,21 @@ If you have manually deobfuscated a file, you can "teach" the Neural Network to 
     ./sync_registry.sh
     ```
 3.  **Result**: The next time you run `npm run anchor`, the system will identify your proprietary logic with `1.0` confidence and auto-rename variables/functions before the LLM pass.
+4.  **Update KB hints** (optional): regenerate `knowledge_base.json` from your custom gold sources.
+    ```bash
+    # Backs up knowledge_base.json to knowledge_base.json.bak, then generates a new KB
+    node scripts/generate_kb_from_gold.js
+    ```
+
+### Generate Knowledge Base From Custom Gold
+If you want KB hints (file anchors, name hints, error anchors) derived from your `ml/custom_gold` sources:
+```bash
+# Backs up knowledge_base.json to knowledge_base.json.bak, then generates a new KB
+node scripts/generate_kb_from_gold.js
+```
+Notes:
+- The generator preserves `known_packages` and `structural_anchors` from the backup so import refinement keeps working.
+- `project_structure` is auto-built from the gold folder tree; descriptions are generic.
 
 > [!IMPORTANT]
 > If you add a significant amount of new code, consider **retraining from scratch** (see below) to help the model learn the unique structural "DNA" of the new logic.

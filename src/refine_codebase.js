@@ -170,12 +170,59 @@ function isKnownPackage(spec, knownPackages) {
     return knownPackages.includes(root);
 }
 
-async function refineFile(filePath, relPath, internalIndex, pathIndex, goldIndex) {
+const MAX_REFINE_CHARS = Number.parseInt(process.env.REFINE_CONTEXT_LIMIT || '400000', 10) || 400000;
+const STATUS_FILE = 'refine_status.json';
+
+function loadStatus(statusPath) {
+    if (!fs.existsSync(statusPath)) {
+        return { files: {}, updatedAt: null, limitChars: MAX_REFINE_CHARS };
+    }
+    try {
+        const parsed = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+        if (!parsed || typeof parsed !== 'object') return { files: {} };
+        if (!parsed.files || typeof parsed.files !== 'object') parsed.files = {};
+        return parsed;
+    } catch (err) {
+        console.warn(`[!] Failed to read status file ${statusPath}: ${err.message}`);
+        return { files: {}, updatedAt: null, limitChars: MAX_REFINE_CHARS };
+    }
+}
+
+function createStatusWriter(statusPath, status) {
+    let writeChain = Promise.resolve();
+    return function persistStatus() {
+        const snapshot = {
+            ...status,
+            updatedAt: new Date().toISOString(),
+            limitChars: MAX_REFINE_CHARS,
+        };
+        writeChain = writeChain.then(() => {
+            fs.writeFileSync(statusPath, JSON.stringify(snapshot, null, 2));
+        });
+        return writeChain;
+    };
+}
+
+function updateStatus(status, relPath, entry) {
+    status.files[relPath] = {
+        ...entry,
+        updatedAt: new Date().toISOString(),
+    };
+}
+
+async function refineFile(filePath, relPath, refinedRoot, internalIndex, pathIndex, goldIndex, status, persistStatus) {
     const code = fs.readFileSync(filePath, 'utf8');
 
     // Skip very large files or vendor files if needed, but for now let's try all
-    if (code.length > 100000) {
-        console.warn(`[!] Skipping ${relPath} (too large: ${code.length} chars)`);
+    if (code.length > MAX_REFINE_CHARS) {
+        console.warn(`[!] Skipping ${relPath} (too large: ${code.length} chars, limit: ${MAX_REFINE_CHARS})`);
+        updateStatus(status, relPath, {
+            status: 'skipped',
+            reason: 'too_large',
+            sizeChars: code.length,
+            limitChars: MAX_REFINE_CHARS,
+        });
+        await persistStatus();
         return;
     }
 
@@ -285,14 +332,26 @@ Output ONLY the refined JavaScript code. Do not include markdown blocks or pream
             cleaned = cleaned.replace(/^```\n/, '').replace(/\n```$/, '');
         }
 
-        const refinedPath = filePath.replace('/assemble/', '/refined_assemble/');
+        const refinedPath = path.join(refinedRoot, relPath);
         const refinedDir = path.dirname(refinedPath);
         if (!fs.existsSync(refinedDir)) fs.mkdirSync(refinedDir, { recursive: true });
 
         fs.writeFileSync(refinedPath, cleaned);
         console.log(`[+] Saved refined version: ${refinedPath}`);
+        updateStatus(status, relPath, {
+            status: 'done',
+            sizeChars: code.length,
+            refinedPath: toPosixPath(path.relative(OUTPUT_ROOT, refinedPath)),
+        });
+        await persistStatus();
     } catch (err) {
         console.error(`[!] Error refining ${relPath}: ${err.message}`);
+        updateStatus(status, relPath, {
+            status: 'error',
+            reason: err.message,
+            sizeChars: code.length,
+        });
+        await persistStatus();
     }
 }
 
@@ -308,6 +367,11 @@ async function run() {
         console.error(`[!] Assemble directory not found: ${assembleDir}`);
         process.exit(1);
     }
+    const refinedRoot = path.join(OUTPUT_ROOT, version, 'refined_assemble');
+    if (!fs.existsSync(refinedRoot)) fs.mkdirSync(refinedRoot, { recursive: true });
+    const statusPath = path.join(refinedRoot, STATUS_FILE);
+    const status = loadStatus(statusPath);
+    const persistStatus = createStatusWriter(statusPath, status);
 
     const isValid = await validateKey();
     if (!isValid) process.exit(1);
@@ -338,9 +402,29 @@ async function run() {
         console.warn(`[!] No bootstrap gold directory found at ${BOOTSTRAP_ROOT}`);
     }
     const limit = pLimit(PROVIDER === 'gemini' ? 2 : 2); // Conservative limit for all providers to avoid timeouts
-    const tasks = files.map(file => limit(() => refineFile(file, path.relative(assembleDir, file), internalIndex, pathIndex, goldIndex)));
+    const tasks = files.map(file => {
+        const relPath = path.relative(assembleDir, file);
+        const refinedPath = path.join(refinedRoot, relPath);
+        const existing = status.files[relPath];
+        if (fs.existsSync(refinedPath)) {
+            if (!existing || existing.status !== 'done') {
+                updateStatus(status, relPath, {
+                    status: 'done',
+                    reason: 'existing_refined',
+                    refinedPath: toPosixPath(path.relative(OUTPUT_ROOT, refinedPath)),
+                });
+                persistStatus();
+            }
+            return null;
+        }
+        if (existing && existing.status === 'done') {
+            return null;
+        }
+        return limit(() => refineFile(file, relPath, refinedRoot, internalIndex, pathIndex, goldIndex, status, persistStatus));
+    }).filter(Boolean);
 
     await Promise.all(tasks);
+    await persistStatus();
     console.log(`[*] Refinement complete.`);
 }
 
