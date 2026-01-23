@@ -44,7 +44,8 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
     try {
         const ast = parser.parse(code, {
             sourceType: 'module',
-            plugins: ['jsx']
+            plugins: ['jsx'],
+            allowUndeclaredExports: true
         });
 
         const renamedBindings = new Set();

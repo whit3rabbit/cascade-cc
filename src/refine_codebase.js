@@ -6,6 +6,7 @@ const pLimit = require('p-limit');
 
 const OUTPUT_ROOT = './cascade_graph_analysis';
 const KB_PATH = './knowledge_base.json';
+const BOOTSTRAP_ROOT = path.join(OUTPUT_ROOT, 'bootstrap');
 let KNOWN_PACKAGES = [];
 
 if (fs.existsSync(KB_PATH)) {
@@ -41,6 +42,66 @@ function buildInternalIndex(rootDir) {
     walk(rootDir);
     files.sort();
     return files;
+}
+
+function stripExtension(p) {
+    return p.replace(/\.[^.]+$/, '');
+}
+
+function getLatestBootstrapDir(rootDir) {
+    if (!fs.existsSync(rootDir)) return null;
+    const entries = fs.readdirSync(rootDir)
+        .map(name => path.join(rootDir, name))
+        .filter(p => fs.statSync(p).isDirectory());
+    if (entries.length === 0) return null;
+    entries.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+    return entries[0];
+}
+
+function buildGoldIndex(rootDir) {
+    const files = [];
+    function walk(dir) {
+        fs.readdirSync(dir).forEach(file => {
+            const fullPath = path.join(dir, file);
+            if (fs.statSync(fullPath).isDirectory()) {
+                walk(fullPath);
+            } else if (file.endsWith('.js') || file.endsWith('.ts')) {
+                files.push(fullPath);
+            }
+        });
+    }
+    walk(rootDir);
+
+    const byPath = new Map();
+    const byBase = new Map();
+    files.forEach(fullPath => {
+        const relPath = toPosixPath(path.relative(rootDir, fullPath));
+        const relNoExt = stripExtension(relPath);
+        byPath.set(relNoExt, fullPath);
+        const base = path.posix.basename(relNoExt);
+        if (!byBase.has(base)) byBase.set(base, []);
+        byBase.get(base).push(fullPath);
+    });
+
+    return { rootDir, byPath, byBase };
+}
+
+function resolveGoldMatch(relPathPosix, goldIndex) {
+    if (!goldIndex) return null;
+    const relNoExt = stripExtension(relPathPosix);
+    if (goldIndex.byPath.has(relNoExt)) {
+        return goldIndex.byPath.get(relNoExt);
+    }
+    const base = path.posix.basename(relNoExt);
+    const matches = goldIndex.byBase.get(base);
+    if (matches && matches.length === 1) return matches[0];
+    return null;
+}
+
+function truncateGold(code, maxChars = 8000) {
+    if (!code) return '';
+    if (code.length <= maxChars) return code;
+    return `${code.slice(0, maxChars)}\n/* ...truncated gold reference... */`;
 }
 
 function buildPathIndex(internalIndex) {
@@ -109,7 +170,7 @@ function isKnownPackage(spec, knownPackages) {
     return knownPackages.includes(root);
 }
 
-async function refineFile(filePath, relPath, internalIndex, pathIndex) {
+async function refineFile(filePath, relPath, internalIndex, pathIndex, goldIndex) {
     const code = fs.readFileSync(filePath, 'utf8');
 
     // Skip very large files or vendor files if needed, but for now let's try all
@@ -155,6 +216,16 @@ async function refineFile(filePath, relPath, internalIndex, pathIndex) {
         }
     });
 
+    const goldMatchPath = resolveGoldMatch(relPathPosix, goldIndex);
+    let goldReference = '';
+    if (goldMatchPath) {
+        try {
+            goldReference = truncateGold(fs.readFileSync(goldMatchPath, 'utf8'));
+        } catch (err) {
+            console.warn(`[!] Failed reading gold match for ${relPathPosix}: ${err.message}`);
+        }
+    }
+
     const prompt = `
 Role: Senior Staff Software Engineer / Reverse Engineer
 Task: Source Code Reconstruction & Logic Refinement
@@ -163,6 +234,15 @@ I have an assembled JavaScript file that was deobfuscated from a minified bundle
 The identifiers names are mostly correct, but the logic structure might still be "minified" (e.g., flattened loops, complex ternary chains, inlined constants, dead code branches).
 
 GOAL: Reconstruct this file into what the ORIGINAL source code likely looked like.
+
+${goldReference ? `GOLD REFERENCE (Latest Bootstrap Match):
+Use this file as a high-confidence reference for naming and structure when it clearly aligns.
+Do not copy unless it matches the assembled file's logic.
+
+\`\`\`javascript
+${goldReference}
+\`\`\`
+` : ''}
 
 IMPORT RESOLUTION CONTEXT:
 - Known internal module paths (same folder): ${localPaths.length > 0 ? `\n${localPaths.map(p => `  - ${p}`).join('\n')}` : 'None'}
@@ -250,8 +330,15 @@ async function run() {
     const internalIndex = buildInternalIndex(assembleDir);
 
     const pathIndex = buildPathIndex(internalIndex);
+    const latestBootstrapDir = getLatestBootstrapDir(BOOTSTRAP_ROOT);
+    const goldIndex = latestBootstrapDir ? buildGoldIndex(latestBootstrapDir) : null;
+    if (latestBootstrapDir) {
+        console.log(`[*] Using latest bootstrap gold: ${toPosixPath(path.relative(OUTPUT_ROOT, latestBootstrapDir))}`);
+    } else {
+        console.warn(`[!] No bootstrap gold directory found at ${BOOTSTRAP_ROOT}`);
+    }
     const limit = pLimit(PROVIDER === 'gemini' ? 2 : 2); // Conservative limit for all providers to avoid timeouts
-    const tasks = files.map(file => limit(() => refineFile(file, path.relative(assembleDir, file), internalIndex, pathIndex)));
+    const tasks = files.map(file => limit(() => refineFile(file, path.relative(assembleDir, file), internalIndex, pathIndex, goldIndex)));
 
     await Promise.all(tasks);
     console.log(`[*] Refinement complete.`);

@@ -81,12 +81,15 @@ async function assemble(version) {
     // Previous logic relied on 'startsWithImport', but now we trust the LLM/Classifier's 'suggestedPath'
     const modulesMap = new Map(); // path -> Array<chunk>
 
+    const getChunkRole = chunk => (typeof chunk.role === 'string' ? chunk.role : '');
+
     chunks.forEach(chunk => {
         let logicalPath = null;
 
         // Priority 1: Proven Vendor
         if (chunk.category === 'vendor') {
-            const folder = chunk.role.replace(/[:\s]/g, '_').replace(/VENDOR_/g, '').toLowerCase();
+            const role = getChunkRole(chunk) || 'vendor_misc';
+            const folder = role.replace(/[:\s]/g, '_').replace(/VENDOR_/g, '').toLowerCase();
             const fileName = chunk.suggestedFilename || chunk.name;
             logicalPath = `src/vendor/${folder}/${fileName}.js`;
         }
@@ -111,7 +114,7 @@ async function assemble(version) {
             }
         } else {
             // Fallback: Group by Role/Folder
-            const folder = (chunk.role || 'misc').toLowerCase().replace(/[^a-z0-9]/g, '-');
+            const folder = (getChunkRole(chunk) || 'misc').toLowerCase().replace(/[^a-z0-9]/g, '-');
             const fileName = chunk.suggestedFilename || chunk.name;
             logicalPath = `src/services/${folder}/${fileName}.js`;
         }
@@ -154,8 +157,8 @@ async function assemble(version) {
 
     const coreChunks = Array.from(finalChunksToAssemble).filter(c =>
         c.category !== 'vendor' &&
-        !c.role.startsWith('LIB:') &&
-        !c.role.toLowerCase().startsWith('lib:') &&
+        !getChunkRole(c).startsWith('LIB:') &&
+        !getChunkRole(c).toLowerCase().startsWith('lib:') &&
         !c.matchIsLibrary &&
         !(c.finalPath && (c.finalPath.includes('/vendor/') || c.finalPath.includes('/third_party/'))) &&
         !(c.proposedPath && (c.proposedPath.includes('/vendor/') || c.proposedPath.includes('/third_party/')))
@@ -333,7 +336,7 @@ async function assemble(version) {
             }
         }
 
-        let mergedCode = `/**\n * File: ${filePath}\n * Role: ${chunkList[0].role}\n * Aggregated from ${chunkList.length} chunks\n */\n\n`;
+        let mergedCode = `/**\n * File: ${filePath}\n * Role: ${getChunkRole(chunkList[0]) || 'unknown'}\n * Aggregated from ${chunkList.length} chunks\n */\n\n`;
 
         if (headers.size > 0) {
             mergedCode += `/* CASCADE HELPERS (De-duplicated) */\n`;
@@ -372,7 +375,7 @@ async function assemble(version) {
             mapContent += `- **${chunk.name}**\n`;
             mapContent += `  - Original File: \`${originalFileName}\`\n`;
             mapContent += `  - Lines: ${chunk.startLine}-${chunk.endLine}\n`;
-            mapContent += `  - Role: ${chunk.role}\n`;
+            mapContent += `  - Role: ${getChunkRole(chunk) || 'unknown'}\n`;
         }
         mapContent += `\n`;
     }
@@ -387,4 +390,3 @@ async function assemble(version) {
 
 const version = process.argv[2];
 assemble(version);
-

@@ -51,7 +51,7 @@ const PYTHON_BIN = findPython();
 const command = process.argv[2];
 const args = process.argv.slice(3).map(arg => arg.replace(/[^a-zA-Z0-9.\-_=:/]/g, ''));
 
-const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'train', 'bootstrap', 'clean', 'refine'];
+const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'anchor-classify', 'train', 'bootstrap', 'clean', 'refine'];
 
 const scripts = {
     'analyze': {
@@ -83,6 +83,11 @@ const scripts = {
         cmd: 'node',
         args: ['src/anchor_logic.js', ...args],
         desc: 'Run anchoring logic to compare two versions'
+    },
+    'anchor-classify': {
+        cmd: 'node',
+        args: ['src/anchor_logic.js', ...args],
+        desc: 'Run anchoring, then classify roles and propose folder structures'
     },
     'train': {
         cmd: 'node',
@@ -152,6 +157,56 @@ switch (command) {
         });
         child.on('exit', (code) => {
             process.exit(code);
+        });
+        break;
+    }
+
+    case 'anchor-classify': {
+        const extractTargetVersion = (argv) => {
+            const versionIdx = argv.indexOf('--version');
+            const nonFlagArgs = [];
+            for (let i = 0; i < argv.length; i++) {
+                const arg = argv[i];
+                if (arg === '--version') {
+                    i += 1;
+                    continue;
+                }
+                if (arg.startsWith('--')) continue;
+                nonFlagArgs.push(arg);
+            }
+
+            let targetVersion = versionIdx !== -1 ? argv[versionIdx + 1] : nonFlagArgs[0];
+            if (targetVersion) return targetVersion;
+
+            const baseDir = './cascade_graph_analysis';
+            if (!fs.existsSync(baseDir)) return null;
+            const dirs = fs.readdirSync(baseDir).filter(d => {
+                return fs.statSync(path.join(baseDir, d)).isDirectory() && d !== 'bootstrap';
+            }).sort().reverse();
+            return dirs.length > 0 ? dirs[0] : null;
+        };
+
+        const targetVersion = extractTargetVersion(args);
+        if (!targetVersion) {
+            console.log('Usage: node run anchor-classify <target_version> [reference_version]');
+            process.exit(1);
+        }
+
+        const anchorChild = spawn('node', ['src/anchor_logic.js', ...args], {
+            stdio: 'inherit',
+            shell: true,
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+        });
+        anchorChild.on('exit', (code) => {
+            if (code !== 0) process.exit(code);
+            const classifyChild = spawn('node', ['src/classify_logic.js', targetVersion], {
+                stdio: 'inherit',
+                shell: true,
+                env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+            });
+            classifyChild.on('exit', (classifyCode) => {
+                process.exit(classifyCode);
+            });
         });
         break;
     }
