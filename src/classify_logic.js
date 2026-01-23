@@ -202,7 +202,17 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
 
 if (require.main === module) {
     const args = process.argv.slice(2);
-    let targetVersion = args[0];
+    const versionIdx = args.indexOf('--version');
+    let targetVersion = null;
+    if (versionIdx !== -1) {
+        targetVersion = args[versionIdx + 1];
+    } else {
+        for (const arg of args) {
+            if (arg.startsWith('--')) continue;
+            targetVersion = arg;
+            break;
+        }
+    }
 
     if (!targetVersion) {
         const baseDir = './cascade_graph_analysis';

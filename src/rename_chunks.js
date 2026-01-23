@@ -265,11 +265,33 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
 const crypto = require('crypto');
 
 async function main() {
-    let versionDir = process.argv[2];
+    const args = process.argv.slice(2);
+    const baseDir = './cascade_graph_analysis';
+    const versionIdx = args.indexOf('--version');
+    let versionDir = null;
+
+    if (versionIdx !== -1) {
+        const version = args[versionIdx + 1];
+        if (version) {
+            versionDir = path.join(baseDir, version);
+        }
+    } else {
+        for (const arg of args) {
+            if (arg.startsWith('--')) continue;
+            versionDir = arg;
+            break;
+        }
+    }
+
+    if (versionDir && !fs.existsSync(versionDir)) {
+        const candidate = path.join(baseDir, versionDir);
+        if (fs.existsSync(candidate)) {
+            versionDir = candidate;
+        }
+    }
 
     if (!versionDir) {
         // Auto-detect the latest version from cascade_graph_analysis
-        const baseDir = './cascade_graph_analysis';
         const dirs = fs.readdirSync(baseDir).filter(d => {
             return fs.statSync(path.join(baseDir, d)).isDirectory() && d !== 'bootstrap';
         }).sort().reverse();
@@ -281,6 +303,11 @@ async function main() {
             console.log("Usage: node src/rename_chunks.js <version_dir>");
             process.exit(1);
         }
+    }
+
+    if (!fs.existsSync(versionDir)) {
+        console.error(`[!] Version directory not found: ${versionDir}`);
+        process.exit(1);
     }
 
     const chunksDir = path.join(versionDir, 'chunks');

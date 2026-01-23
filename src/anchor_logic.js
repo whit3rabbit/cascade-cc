@@ -473,7 +473,20 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
 
 if (require.main === module) {
     const args = process.argv.slice(2);
-    let targetVersion = args[0];
+    const versionIdx = args.indexOf('--version');
+    const nonFlagArgs = [];
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === '--version') {
+            i += 1;
+            continue;
+        }
+        if (arg.startsWith('--')) continue;
+        nonFlagArgs.push(arg);
+    }
+
+    let targetVersion = versionIdx !== -1 ? args[versionIdx + 1] : nonFlagArgs[0];
+    const referenceVersion = versionIdx !== -1 ? nonFlagArgs[0] : nonFlagArgs[1];
 
     if (!targetVersion) {
         // Auto-detect the latest version from cascade_graph_analysis
@@ -491,7 +504,7 @@ if (require.main === module) {
         }
     }
 
-    anchorLogic(targetVersion, args[1]).catch(console.error);
+    anchorLogic(targetVersion, referenceVersion).catch(console.error);
 }
 
 module.exports = { anchorLogic };

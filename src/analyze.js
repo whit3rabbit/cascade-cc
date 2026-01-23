@@ -31,14 +31,27 @@ const GLOBAL_VARS = ['console', 'window', 'document', 'process', 'module', 'requ
 function ensureTargetExists() {
     let targetFile = null;
     let version = 'unknown';
+    const versionIdx = process.argv.indexOf('--version');
+    const versionArg = versionIdx !== -1 ? process.argv[versionIdx + 1] : null;
+    const rawArgs = process.argv.slice(2);
+    const nonFlagArgs = [];
+    for (let i = 0; i < rawArgs.length; i++) {
+        const arg = rawArgs[i];
+        if (arg === '--version') {
+            i += 1;
+            continue;
+        }
+        if (arg.startsWith('--')) continue;
+        nonFlagArgs.push(arg);
+    }
+    const targetArg = nonFlagArgs[0];
 
     // 1. Check command line argument
-    if (process.argv[2]) {
-        targetFile = path.resolve(process.argv[2]);
+    if (targetArg) {
+        targetFile = path.resolve(targetArg);
         // Handle --version flag
-        const versionIdx = process.argv.indexOf('--version');
-        if (versionIdx !== -1 && process.argv[versionIdx + 1]) {
-            version = process.argv[versionIdx + 1];
+        if (versionArg) {
+            version = versionArg;
         } else {
             // Try to infer version from path: claude-analysis/<version>/cli.js or similar
             const match = targetFile.match(/claude-analysis\/([^/]+)\/cli\.js/) || targetFile.match(/([0-9]+\.[0-9]+\.[0-9]+)/);
@@ -54,20 +67,24 @@ function ensureTargetExists() {
         return { targetFile, version };
     }
 
-    // 2. Fetch latest version from NPM
-    console.log(`[*] Checking latest version of ${PACKAGE_NAME}...`);
-    try {
-        version = execSync(`npm view ${PACKAGE_NAME} version`).toString().trim();
-    } catch (err) {
-        console.warn(`[!] Failed to fetch NPM version: ${err.message}`);
-        // Fallback to locally existing if any
-        if (fs.existsSync(ANALYSIS_DIR)) {
-            const versions = fs.readdirSync(ANALYSIS_DIR).filter(v => /^\d+\.\d+\.\d+/.test(v)).sort().reverse();
-            for (const v of versions) {
-                const potentialPath = path.join(ANALYSIS_DIR, v, 'cli.js');
-                if (fs.existsSync(potentialPath)) {
-                    console.log(`[*] Using locally found version: ${v} (NPM check failed)`);
-                    return { targetFile: potentialPath, version: v };
+    // 2. Use explicit --version if provided, otherwise fetch latest from NPM
+    if (versionArg) {
+        version = versionArg;
+    } else {
+        console.log(`[*] Checking latest version of ${PACKAGE_NAME}...`);
+        try {
+            version = execSync(`npm view ${PACKAGE_NAME} version`).toString().trim();
+        } catch (err) {
+            console.warn(`[!] Failed to fetch NPM version: ${err.message}`);
+            // Fallback to locally existing if any
+            if (fs.existsSync(ANALYSIS_DIR)) {
+                const versions = fs.readdirSync(ANALYSIS_DIR).filter(v => /^\d+\.\d+\.\d+/.test(v)).sort().reverse();
+                for (const v of versions) {
+                    const potentialPath = path.join(ANALYSIS_DIR, v, 'cli.js');
+                    if (fs.existsSync(potentialPath)) {
+                        console.log(`[*] Using locally found version: ${v} (NPM check failed)`);
+                        return { targetFile: potentialPath, version: v };
+                    }
                 }
             }
         }
@@ -76,8 +93,12 @@ function ensureTargetExists() {
     // 3. Check if versioned folder already exists
     if (version !== 'unknown') {
         const versionPath = path.join(ANALYSIS_DIR, version);
-        const potentialPath = path.join(versionPath, 'cli.js');
-        if (fs.existsSync(potentialPath)) {
+        const candidates = [
+            path.join(versionPath, 'cli.js'),
+            path.join(versionPath, 'cli.mjs')
+        ];
+        const potentialPath = candidates.find(p => fs.existsSync(p));
+        if (potentialPath) {
             console.log(`[*] Version ${version} already present. Skipping download.`);
             return { targetFile: potentialPath, version };
         }
@@ -102,8 +123,12 @@ function ensureTargetExists() {
                 if (pkg.version) version = pkg.version;
             }
 
-            const downloadedCli = path.join(versionPath, 'cli.js');
-            if (fs.existsSync(downloadedCli)) {
+            const candidates = [
+                path.join(versionPath, 'cli.js'),
+                path.join(versionPath, 'cli.mjs')
+            ];
+            const downloadedCli = candidates.find(p => fs.existsSync(p));
+            if (downloadedCli) {
                 return { targetFile: downloadedCli, version };
             }
         } catch (err) {

@@ -42,8 +42,9 @@ npm run bootstrap
 Once initialized, use this sequence to analyze any new version of Claude:
 
 ```bash
-# 1. Fetch and chunk the latest Claude bundle
-npm run analyze 
+# 1. Fetch the latest Claude bundle and chunk it
+npm run analyze
+#npm run analyze -- --version <version>
 
 # 2. Anchor against known libraries (Replace <version> with output from step 1)
 npm run anchor -- <version> --device auto
@@ -68,7 +69,9 @@ npm run refine -- <version>
 If you have manually deobfuscated a file, you can "teach" the Neural Network to recognize it. This turns your manual work into a template that will **automatically deobfuscate** that logic in all future versions.
 
 ### How to add your custom code:
-1.  **Drop** your deobfuscated `.ts` or `.js` files into `ml/custom_gold/` (maintain logical folders).
+1.  **Drop** your deobfuscated `.ts` or `.js` files into `ml/custom_gold/`.
+    - You can optionally organize by version: `ml/custom_gold/0.2.8/`, `ml/custom_gold/0.2.9/`, etc.
+    - Folder structure is preserved and used as a path hint during anchoring.
 2.  **Ingest & Sync**:
     ```bash
     # Prepares the files for the registry
