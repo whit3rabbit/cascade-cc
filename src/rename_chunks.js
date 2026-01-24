@@ -49,6 +49,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
         });
 
         const renamedBindings = new Set();
+        const scopeMap = sourceInfo.scopeMap || null;
         const chunkBase = sourceFile ? path.basename(String(sourceFile), '.js') : null;
 
         traverse(ast, {
@@ -83,15 +84,18 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             }
 
                             let newName = null;
+                            if (scopeMap && scopeMap.has(oldName)) {
+                                newName = scopeMap.get(oldName);
+                            }
                             let entryName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
-                            if (Array.isArray(entry)) {
+                            if (!newName && Array.isArray(entry)) {
                                 // Prioritize exact chunk match
                                 const match = entry.find(e => e && (e.source === chunkBase || e.source === sourceFile)) ||
                                     entry.find(e => e && (neighbors.includes(e.source) || neighbors.includes(path.basename(String(e.source), '.js')))) ||
                                     (displayName && entry.find(e => e && e.source && e.source.includes(displayName))) ||
                                     entry[0];
                                 newName = match ? match.name : null;
-                            } else {
+                            } else if (!newName) {
                                 newName = entryName;
                             }
 
@@ -114,6 +118,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                                     p.scope.rename(oldName, distinctName);
                                     renamedBindings.add(oldName); // Track old name as processed
                                     sourceInfo.usedNames.add(distinctName); // Track new name as taken
+                                    if (scopeMap) scopeMap.set(oldName, distinctName);
                                 } catch (err) {
                                     console.warn(`[WARN] Failed to rename variable ${oldName} -> ${distinctName}: ${err.message}`);
                                 }
@@ -369,7 +374,7 @@ async function main() {
     let newCount = 0;
     let updatedCount = 0;
     let unchangedCount = 0;
-    const fileUsedNames = new Map();
+    const fileScopes = new Map();
 
     for (const file of chunkFiles) {
         try {
@@ -406,11 +411,12 @@ async function main() {
             generatedFiles.add(finalName);
 
             const neighbors = chunkMeta ? [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])] : [];
-            const fileKey = chunkMeta?.proposedPath || chunkMeta?.suggestedPath || chunkMeta?.kb_info?.suggested_path || chunkMeta?.displayName || chunkBaseName;
-            let usedNames = fileUsedNames.get(fileKey);
-            if (!usedNames) {
-                usedNames = new Set();
-                fileUsedNames.set(fileKey, usedNames);
+            const rawPathKey = chunkMeta?.proposedPath || chunkMeta?.suggestedPath || chunkMeta?.kb_info?.suggested_path || null;
+            const fileKey = (rawPathKey ? String(rawPathKey).replace(/`/g, '') : null) || chunkMeta?.displayName || chunkBaseName;
+            let scope = fileScopes.get(fileKey);
+            if (!scope) {
+                scope = { usedNames: new Set(), obfToName: new Map() };
+                fileScopes.set(fileKey, scope);
             }
             const renamedCode = renameIdentifiers(code, mapping, {
                 sourceFile: chunkBase,
@@ -418,7 +424,8 @@ async function main() {
                 displayName: chunkMeta?.displayName,
                 suggestedPath: chunkMeta?.proposedPath || chunkMeta?.kb_info?.suggested_path,
                 moduleId: chunkMeta?.moduleId || null,
-                usedNames
+                usedNames: scope.usedNames,
+                scopeMap: scope.obfToName
             });
 
             const finalCodeRaw = renamedCode || code;
