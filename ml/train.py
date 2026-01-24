@@ -518,18 +518,48 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
 
     model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, max_nodes=effective_max_nodes).to(device)
     
+    # Checkpoint directory and resume behavior
+    checkpoint_dir = None
+    if not is_sweep:
+        checkpoint_dir = os.path.join(os.path.dirname(__file__), "checkpoints")
+        if checkpoint_interval and checkpoint_interval > 0:
+            os.makedirs(checkpoint_dir, exist_ok=True)
+
+    def get_latest_checkpoint(checkpoint_dir_path):
+        if not checkpoint_dir_path or not os.path.exists(checkpoint_dir_path):
+            return None, 0
+        latest_epoch = 0
+        latest_path = None
+        for name in os.listdir(checkpoint_dir_path):
+            if not name.startswith("model_epoch_") or not name.endswith(".pth"):
+                continue
+            try:
+                epoch = int(name.replace("model_epoch_", "").replace(".pth", ""))
+            except ValueError:
+                continue
+            if epoch > latest_epoch:
+                latest_epoch = epoch
+                latest_path = os.path.join(checkpoint_dir_path, name)
+        return latest_path, latest_epoch
+
+    start_epoch = 0
+
     # Robust Checkpoint Loading (opt-in, skip during sweeps)
     if not is_sweep and load_checkpoint:
         model_path = os.path.join(os.path.dirname(__file__), "model.pth")
-        if not os.path.exists(model_path):
+        checkpoint_path, checkpoint_epoch = get_latest_checkpoint(checkpoint_dir)
+        load_path = checkpoint_path or (model_path if os.path.exists(model_path) else None)
+        if not load_path:
             print(
                 "[!] Error: --finetune was set but no checkpoint exists at "
-                f"{model_path}. Train from scratch or place a model.pth there."
+                f"{model_path} and no checkpoints were found. Train from scratch or place a model.pth there."
             )
             sys.exit(1)
-        print(f"[*] Found existing model at {model_path}. Attempting to load...")
+        if checkpoint_path:
+            start_epoch = checkpoint_epoch
+        print(f"[*] Found existing model at {load_path}. Attempting to load...")
         try:
-            checkpoint = torch.load(model_path, map_location=device)
+            checkpoint = torch.load(load_path, map_location=device)
             if 'transformer_encoder.embedding.weight' in checkpoint:
                 embedding_key = 'transformer_encoder.embedding.weight'
             elif 'embedding.weight' in checkpoint:
@@ -572,18 +602,21 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     best_val_min_lib_mrr = 0.0
     best_val_avg_lib_mrr = 0.0
     best_state = None
-    early_stop_patience = 3
-    early_stop_min_delta = 0.01
+    early_stop_patience = 10
+    early_stop_min_delta = 0.001
     early_stop_bad_epochs = 0
 
-    checkpoint_dir = None
-    if checkpoint_interval and checkpoint_interval > 0 and not is_sweep:
-        checkpoint_dir = os.path.join(os.path.dirname(__file__), "checkpoints")
-        os.makedirs(checkpoint_dir, exist_ok=True)
-
     lr_decay_applied = False
+    if lr_decay_epoch and lr_decay_factor and lr_decay_factor > 0 and start_epoch >= lr_decay_epoch:
+        lr = lr * lr_decay_factor
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = lr
+        lr_decay_applied = True
+        if not is_sweep:
+            print(f"    [*] Applied LR decay on resume: {lr:.6f}")
     print(f"[*] Starting training loop for {epochs} epochs...")
     for epoch in range(epochs):
+        effective_epoch = epoch + 1 + start_epoch
         model.train()
         total_loss = 0
         
@@ -653,7 +686,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
         min_lib_margin = min(per_lib_margins.values()) if per_lib_margins else 0.0
         
         if not is_sweep:
-            print(f"    Epoch {epoch+1}/{epochs} - Loss: {total_loss/len(train_loader):.4f}")
+            print(f"    Epoch {effective_epoch}/{epochs + start_epoch} - Loss: {total_loss/len(train_loader):.4f}")
             print(f"    Validation Match Accuracy: {val_acc:.2f}%")
             print(f"    Similarity Spread - Pos Dist: {avg_pos:.4f}, Neg Dist: {avg_neg:.4f} (Margin: {val_margin:.4f})")
             print(f"    Validation MRR: {val_mrr:.4f}")
@@ -663,7 +696,8 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
                 print(f"    Validation Min-Library MRR: {min_lib_mrr:.4f}")
                 print(f"    Validation Avg-Library MRR: {avg_lib_mrr:.4f}")
             if checkpoint_dir and (epoch + 1) % checkpoint_interval == 0:
-                checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{epoch+1}.pth")
+                checkpoint_epoch = effective_epoch
+                checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{checkpoint_epoch}.pth")
                 torch.save(model.state_dict(), checkpoint_path)
                 print(f"    [*] Saved checkpoint: {checkpoint_path}")
         
@@ -682,7 +716,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
         elif val_margin <= best_val_margin + early_stop_min_delta:
             early_stop_bad_epochs += 1
 
-        if not lr_decay_applied and lr_decay_epoch and lr_decay_factor and lr_decay_factor > 0 and (epoch + 1) >= lr_decay_epoch:
+        if not lr_decay_applied and lr_decay_epoch and lr_decay_factor and lr_decay_factor > 0 and effective_epoch >= lr_decay_epoch:
             lr = lr * lr_decay_factor
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
