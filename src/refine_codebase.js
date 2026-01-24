@@ -170,7 +170,10 @@ function isKnownPackage(spec, knownPackages) {
     return knownPackages.includes(root);
 }
 
-const MAX_REFINE_CHARS = Number.parseInt(process.env.REFINE_CONTEXT_LIMIT || '400000', 10) || 400000;
+const parsedRefineLimit = process.env.REFINE_CONTEXT_LIMIT !== undefined
+    ? Number.parseInt(process.env.REFINE_CONTEXT_LIMIT, 10)
+    : NaN;
+const MAX_REFINE_CHARS = Number.isNaN(parsedRefineLimit) ? 400000 : parsedRefineLimit;
 const STATUS_FILE = 'refine_status.json';
 
 function loadStatus(statusPath) {
@@ -214,7 +217,7 @@ async function refineFile(filePath, relPath, refinedRoot, internalIndex, pathInd
     const code = fs.readFileSync(filePath, 'utf8');
 
     // Skip very large files or vendor files if needed, but for now let's try all
-    if (code.length > MAX_REFINE_CHARS) {
+    if (MAX_REFINE_CHARS > 0 && code.length > MAX_REFINE_CHARS) {
         console.warn(`[!] Skipping ${relPath} (too large: ${code.length} chars, limit: ${MAX_REFINE_CHARS})`);
         updateStatus(status, relPath, {
             status: 'skipped',

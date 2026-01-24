@@ -610,6 +610,8 @@ Response JSON:
                 return;
             }
 
+            const originalCode = fs.readFileSync(chunkPath, 'utf8');
+
             if (globalMapping.processed_chunks.includes(chunkMeta.name) && !isForce) {
                 // Return existing deobfuscated code as context if available
                 const deobfuscatedPath = path.join(versionPath, 'deobfuscated_chunks', file);
@@ -625,7 +627,6 @@ Response JSON:
                 return originalCode; // Fallback to original code for context
             }
 
-            const originalCode = fs.readFileSync(chunkPath, 'utf8');
             const { variables: origVars, properties: origProps } = extractIdentifiers(originalCode);
 
             // Filter for unknown identifiers using ORIGINAL mangled names

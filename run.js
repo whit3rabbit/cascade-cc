@@ -1,6 +1,7 @@
 const { execSync, spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const semver = require('semver');
 
 const findPython = () => {
     const isWin = process.platform === 'win32';
@@ -51,7 +52,7 @@ const PYTHON_BIN = findPython();
 const command = process.argv[2];
 const args = process.argv.slice(3).map(arg => arg.replace(/[^a-zA-Z0-9.\-_=:/]/g, ''));
 
-const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'anchor-classify', 'train', 'bootstrap', 'clean', 'refine'];
+const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'anchor-classify', 'train', 'bootstrap', 'clean', 'refine', 'full'];
 
 const scripts = {
     'analyze': {
@@ -103,7 +104,22 @@ const scripts = {
         cmd: 'node',
         args: ['src/refine_codebase.js', ...args],
         desc: 'Perform final LLM refinement on the assembled codebase'
+    },
+    'full': {
+        cmd: 'node',
+        args: [],
+        desc: 'Run analyze -> anchor -> deobfuscate -> assemble -> refine for a version'
     }
+};
+
+const getLatestVersion = (outputRoot) => {
+    if (!fs.existsSync(outputRoot)) return null;
+    const versions = fs.readdirSync(outputRoot).filter(f => {
+        const fullPath = path.join(outputRoot, f);
+        return fs.statSync(fullPath).isDirectory() && semver.valid(f);
+    });
+    if (versions.length === 0) return null;
+    return versions.sort(semver.rcompare)[0];
 };
 
 if (!command || !scripts[command]) {
@@ -208,6 +224,59 @@ switch (command) {
                 process.exit(classifyCode);
             });
         });
+        break;
+    }
+
+    case 'full': {
+        const extractTargetVersion = (argv) => {
+            const versionIdx = argv.indexOf('--version');
+            const nonFlagArgs = [];
+            for (let i = 0; i < argv.length; i++) {
+                const arg = argv[i];
+                if (arg === '--version') {
+                    i += 1;
+                    continue;
+                }
+                if (arg.startsWith('--')) continue;
+                nonFlagArgs.push(arg);
+            }
+            const targetVersion = versionIdx !== -1 ? argv[versionIdx + 1] : nonFlagArgs[0];
+            const referenceVersion = nonFlagArgs[1] || null;
+            return { targetVersion, referenceVersion };
+        };
+
+        const { targetVersion, referenceVersion } = extractTargetVersion(args);
+
+        const runStep = (label, cmd, stepArgs) => {
+            console.log(`[*] Running (${label}): ${cmd} ${stepArgs.join(' ')}`);
+            const result = spawnSync(cmd, stepArgs, {
+                stdio: 'inherit',
+                shell: true,
+                env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+            });
+            const code = typeof result.status === 'number' ? result.status : 1;
+            if (code !== 0) process.exit(code);
+        };
+
+        let resolvedVersion = targetVersion || null;
+        const analysisArgs = ['--max-old-space-size=8192', 'src/analyze.js'];
+        if (resolvedVersion) analysisArgs.push('--version', resolvedVersion);
+        runStep('analyze', 'node', analysisArgs);
+
+        if (!resolvedVersion) {
+            resolvedVersion = getLatestVersion('./cascade_graph_analysis');
+            if (!resolvedVersion) {
+                console.log('[!] Could not determine latest version after analyze.');
+                process.exit(1);
+            }
+            console.log(`[*] No version specified. Using latest: ${resolvedVersion}`);
+        }
+
+        runStep('anchor', 'node', ['--max-old-space-size=8192', 'src/anchor_logic.js', resolvedVersion, ...(referenceVersion ? [referenceVersion] : [])]);
+        runStep('deobfuscate', 'node', ['--max-old-space-size=8192', 'src/deobfuscate_pipeline.js', resolvedVersion]);
+        runStep('assemble', 'node', ['--max-old-space-size=8192', 'src/assemble_final.js', resolvedVersion]);
+        runStep('refine', 'node', ['src/refine_codebase.js', resolvedVersion]);
+        process.exit(0);
         break;
     }
 

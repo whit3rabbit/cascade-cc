@@ -19,6 +19,7 @@
     "generate-kb": "node scripts/generate_kb_from_gold.js",
     "sync-vocab": "node src/sync_vocab.js",
     "refine": "node run refine",
+    "full": "node run full",
     "resync-registry": "./sync_registry.sh",
     "execute": "npm run analyze && npm run deobfuscate"
   },

@@ -245,6 +245,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
 
             // Lowered global threshold for better coverage (0.85 default instead of 0.9)
             const effectiveThreshold = parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.80;
+            const customGoldThreshold = parseFloat(process.env.CUSTOM_GOLD_SIMILARITY_THRESHOLD) || 0.98;
 
             bestSims.push(bestMatch.originalSim);
             bestBoostedSims.push(bestMatch.similarity);
@@ -286,7 +287,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     // Propose a file path based on the library structure
                     targetChunk.proposedPath = `src/vendor/${libName}/${targetChunk.name}.ts`;
                 }
-                if (isCustomGoldLabel && bestMatch.ref && bestMatch.ref.proposedPath) {
+                if (isCustomGoldLabel && bestMatch.similarity >= customGoldThreshold && bestMatch.ref && bestMatch.ref.proposedPath) {
                     targetChunk.category = 'founder';
                     targetChunk.label = 'CUSTOM_GOLD_MATCH';
                     targetChunk.isGoldenMatch = true;

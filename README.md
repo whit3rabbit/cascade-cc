@@ -37,7 +37,15 @@ npm run bootstrap
 
 ---
 
-## Standard Analysis Workflow
+## TL;DR
+
+```bash
+npm run full -- <version> [reference_version]
+```
+
+## Full Analysis Workflow
+
+Breakdown of the full pipeline:
 
 Once initialized, use this sequence to analyze any new version of Claude:
 
