@@ -14,17 +14,20 @@ The system employs a **Hybrid Differential Deobfuscation** approach. Instead of 
 
 ---
 
-## 2. System Components
+## 2. System Components & Orchestration
 
-The repository is partitioned into three main layers:
+The repository is managed by a central script, `run.js`, which orchestrates the entire deobfuscation pipeline. The system is partitioned into three main layers:
 
 ### A. Orchestration & AST Processing (Node.js)
+- **`run.js`**: The main entry point for all operations. It provides commands to run individual pipeline stages or the `full` end-to-end workflow.
 - **`src/analyze.js`**: The core analyzer. It uses Babel to chunk large bundles, extract metadata, detected "Module Envelopes" for logical grouping, and calculates Identifier Affinity scores.
 - **`src/anchor_logic.js`**: Bridges Node.js orchestration with Python inference. It handles logic registry synchronization, vectorization commands, and aligns symbols between target and gold-standard chunks.
 - **`src/classify_logic.js`**: Assigns architectural roles and proposed paths based on graph metrics and anchor metadata.
-- **`src/deobfuscate_pipeline.js`**: Manages the multi-stage LLM pass, including the **Consolidation Pass** for grouped chunks and inherited scope mapping.
+- **`src/propagate_names.js`**: Spreads high-confidence names to neighboring chunks in the dependency graph to provide better context for the LLM.
+- **`src/deobfuscate_pipeline.js`**: Manages the multi-stage LLM pass, including the **Consolidation Pass** for grouped chunks and inherited scope mapping. It generates the `mapping.json` file.
 - **`src/rename_chunks.js`**: Consumes `mapping.json` to apply a safe, scope-aware rename pass across the entire AST.
 - **`src/assemble_final.js`**: The reconstruction engine that performs **Deduplicating Merges** to strip module wrappers and reassemble split chunks into clean files.
+- **`src/refine_codebase.js`**: Performs a final LLM pass on the assembled code to improve readability (e.g., converting ternary operators to `if/else` statements).
 
 ### B. Machine Learning Core (Python/PyTorch)
 - **`ml/encoder.py`**: Defines the `TransformerCodeEncoder`. It uses a Transformer Encoder with CLS pooling to generate fixed-size (64-dim) embeddings from AST sequences.
@@ -33,12 +36,14 @@ The repository is partitioned into three main layers:
 
 ### C. Knowledge & Metadata (JSON)
 - **`knowledge_base.json`**: A curated database of known library "anchors" (keywords, error strings, unique patterns).
-- **`logic_registry.json`**: A persistent database mapping structural vectors to confirmed library names and symbols.
-- **`mapping.json`**: The version-specific result of the deobfuscation process, tracking every renamed identifier and its confidence score.
+- **`cascade_graph_analysis/logic_registry.json`**: A persistent database mapping structural vectors to confirmed library names and symbols.
+- **`cascade_graph_analysis/<version>/metadata/mapping.json`**: The version-specific result of the deobfuscation process, tracking every renamed identifier and its confidence score.
 
 ---
 
 ## 3. The AI Workflow (Step-by-Step)
+
+The `run.js` script orchestrates the pipeline via the `full` command.
 
 ```mermaid
 flowchart TD
@@ -52,56 +57,59 @@ flowchart TD
         P1 --> O1[Chunks & Initial Metadata]
     end
 
-    subgraph "Phase 2: Graph Mapping & Centrality"
-        O1 --> P2[analyze.js]
-        P2 --> O2[graph_map.json]
+    subgraph "Phase 2: Graph Mapping & Neural Anchoring"
+        S3 --> P2[anchor_logic.js]
+        O1 --> P2
+        P2 --> O2[mapping.json w/ Anchors]
     end
 
-    subgraph "Phase 3: Neural Anchoring"
-        S3 --> P3[anchor_logic.js]
-        O2 --> P3
-        P3 --> O3[mapping.json]
+    subgraph "Phase 3: Architectural Classification"
+        O2 --> P3[classify_logic.js]
+        P3 --> O3[graph_map.json w/ Roles]
     end
 
-    subgraph "Phase 4: Architectural Classification"
-        O3 --> P4[classify_logic.js]
-        P4 --> O4[graph_map.json (w/ roles)]
-    end
-
-    subgraph "Phase 4.5: Name Propagation"
-        O4 --> P4b[propagate_names.js]
-        P4b --> O4b[mapping.json (neighbor hints)]
+    subgraph "Phase 4: Name Propagation"
+        O3 --> P4[propagate_names.js]
+        P4 --> O4[mapping.json w/ Neighbor Hints]
     end
 
     subgraph "Phase 5: LLM Deobfuscation"
-        O4b --> P5[deobfuscate_pipeline.js]
-        P5 --> O5[mapping.json (w/ LLM names)]
+        O4 --> P5[deobfuscate_pipeline.js]
+        P5 --> O5[mapping.json w/ LLM Names]
     end
 
-    subgraph "Phase 6: Reassembly & Refinement"
-        O5 --> P6_A[assemble_final.js]
-        P6_A --> P6_B[refine_codebase.js]
-        P6_B --> O6[Final Source Code]
+    subgraph "Phase 6: Renaming & Reassembly"
+        O5 --> P6_A[rename_chunks.js]
+        P6_A --> P6_B[assemble_final.js]
+        P6_B --> O6[Deobfuscated Source Code]
+    end
+    
+    subgraph "Phase 7: Refinement"
+        O6 --> P7[refine_codebase.js]
+        P7 --> O7[Final Source Code]
     end
 ```
 
 ### Phase 1: Static Analysis & Chunking (`analyze.js`)
-The target bundle is ingested by `analyze.js`. The script performs initial static analysis to identify module wrappers, hard-coded signals, and potential entry points. It then breaks down the large bundle into small, manageable "chunks" based on token count and syntactic boundaries.
+The target bundle is ingested by `analyze.js`. The script performs initial static analysis to identify module wrappers, hard-coded signals, and potential entry points. It then breaks down the large bundle into small, manageable "chunks" based on token count and syntactic boundaries, creating a dependency graph.
 
-### Phase 2: Graph Mapping & Centrality (`analyze.js`)
-The script builds a dependency graph of all chunks and uses "Identifier Affinity" to create soft links between chunks that likely originated from the same file. Before calculating centrality, it collapses simple proxy nodes to simplify the graph topology. Finally, it calculates **Markov Centrality** (a variant of PageRank) to determine which chunks are the "heart" of the application.
-
-### Phase 3: Neural Anchoring (`anchor_logic.js`)
+### Phase 2: Neural Anchoring (`anchor_logic.js`)
 Every chunk is vectorized by the pre-trained ML model (`ml/model.pth`) to create **structural + literal fingerprints**. These vectors are compared against a registry of known libraries (`logic_registry.json`) using a weighted similarity score. High-similarity matches are "anchored," and their known variable and function names are added to the `mapping.json` file with high confidence.
 
-### Phase 4: Architectural Classification (`classify_logic.js`)
+### Phase 3: Architectural Classification (`classify_logic.js`)
 The classifier script uses the graph metrics (centrality) and anchoring results (library vs. unknown) to assign architectural roles to each chunk (e.g., `VENDOR_LIBRARY`, `APP_LOGIC`, `CORE_MODULE`). This crucial step determines which code is proprietary and requires LLM analysis.
+
+### Phase 4: Name Propagation (`propagate_names.js`)
+This script propagates high-confidence names from anchored chunks to their immediate neighbors in the dependency graph. This provides the LLM with more context for deobfuscating unknown code.
 
 ### Phase 5: LLM Deobfuscation (`deobfuscate_pipeline.js`)
 Chunks identified as "Founder" (proprietary) logic are sent to a Large Language Model. The LLM is prompted with the chunk's code, its neighbors' names, and any partial matches to infer the original, human-readable names for variables and functions.
 
-### Phase 6: Reassembly & Refinement (`assemble_final.js` & `refine_codebase.js`)
-First, `assemble_final.js` uses the completed `mapping.json` to reconstruct the deobfuscated chunks into a clean, new directory structure that mirrors the inferred original codebase. Second, `refine_codebase.js` performs a final LLM-driven pass to restore high-level control flow, converting complex ternary chains back into readable `if/else` blocks and removing other obfuscation artifacts.
+### Phase 6: Renaming & Reassembly (`rename_chunks.js` & `assemble_final.js`)
+First, `rename_chunks.js` applies the renames from `mapping.json` to the chunk files. Then, `assemble_final.js` uses the completed `mapping.json` to reconstruct the deobfuscated chunks into a clean, new directory structure that mirrors the inferred original codebase.
+
+### Phase 7: Refinement (`refine_codebase.js`)
+`refine_codebase.js` performs a final LLM-driven pass to restore high-level control flow, converting complex ternary chains back into readable `if/else` blocks and removing other obfuscation artifacts.
 
 ### Iterative Discovery
 The repository includes a "Frontier Crawler" script (`src/discovery_walk.js`) that allows for iterative analysis. After an initial analysis pass, this script can be run to identify unanalyzed neighboring chunks. It uses outbound connections from known modules and Markov centrality scores to intelligently expand the analysis frontier, guiding the deobfuscation process into previously unexplored parts of the codebase.

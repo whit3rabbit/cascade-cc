@@ -50,6 +50,16 @@ These thresholds are actively used by `src/classify_logic.js` to separate utilit
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `ML_TRAIN_PRESET` | `null` | Allows using named configurations like "production". |
+| `ML_TRAIN_EPOCHS` | `50` | Number of training epochs. |
+| `ML_TRAIN_BATCH_SIZE` | `64` | Batch size for training. |
+| `ML_TRAIN_LR` | `0.001` | Learning rate. |
+| `ML_TRAIN_MARGIN` | `0.5` | Triplet margin. |
+| `ML_TRAIN_EMBED_DIM` | `32` | Embedding dimension. |
+| `ML_TRAIN_HIDDEN_DIM` | `128` | Hidden dimension. |
+| `ML_TRAIN_LR_DECAY_EPOCH` | `0` | Apply LR decay at this epoch (0 disables). |
+| `ML_TRAIN_LR_DECAY_FACTOR`| `1.0` | LR decay multiplier (e.g., 0.1). |
+| `ML_TRAIN_CHECKPOINT_INTERVAL`| `0` | Save checkpoints every N epochs (0 disables). |
+| `ML_CHECKPOINT_DIR` | `''` | Override checkpoint directory. |
 | `ML_VAL_LIB_COUNT` | `3` | Number of libraries to hold out for validation. |
 | `ML_VAL_SPLIT` | `0` | Ratio for random validation split (alternative to leave-library-out). |
 | `ML_VAL_MAX_CHUNKS` | `0` | Cap validation chunks (0 disables). |

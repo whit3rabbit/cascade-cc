@@ -18,7 +18,7 @@ Pre-processor for CASCADE-style analysis and deobfuscation of Claude Code bundle
 ## TL;DR & Quick Start
 1. **Setup**: `npm install` && `python3 -m venv .venv` && `source .venv/bin/activate` && `pip install -r requirements.txt`.
 2. **Initialize**: `npm run sync-vocab` && `npm run bootstrap` && `./sync_registry.sh`.
-3. **Workflow**: `analyze` -> `anchor` -> `deobfuscate` -> `assemble` -> `refine`.
+- **Workflow**: `npm run full` (analyze -> anchor -> classify -> propagate-names -> deobfuscate -> rename -> assemble -> refine)
 
 ## Build, Training, and Development Commands
 - `npm run analyze`: Fetch and chunk the latest Claude bundle.
@@ -31,12 +31,12 @@ Pre-processor for CASCADE-style analysis and deobfuscation of Claude Code bundle
 - `npm run visualize`: Start the local graph visualizer.
 - `npm run sync-vocab`: Sync Babel node types with ML constants.
 - `npm run lint`: Auto-format codebase via Prettier.
-- `npm run execute`: Convenience command to run `analyze` followed by `deobfuscate`.
+- `npm run full`: Run the full deobfuscation pipeline (analyze -> anchor -> classify -> propagate-names -> deobfuscate -> rename -> assemble -> refine).
 
 ## Neural Network (The Brain)
 The system uses a **Transformer Encoder** architecture for structural fingerprinting:
 - **Architecture**: Multi-Channel Siamese Network (Triplet Loss).
-- **Optimal Config**: Embedding Dim: 32, Hidden Dim: 128, Learning Rate: 0.001, Margin: 0.5.
+- **Optimal Config**: Embedding Dim: 32, Hidden Dim: 128, Learning Rate: 0.001, Margin: 0.5 (or use `--preset production` for optimized settings like Hidden Dim: 256, Margin: 0.8).
 - **Context Window**: Hardware-aware scaling (e.g., 256 nodes for Mac MPS, 2048 for A100).
 - **Goal**: Learning **Logic Topology** (Structural DNA) while ignoring "Surface Noise" (mangled names).
 
@@ -48,24 +48,31 @@ The system uses a **Transformer Encoder** architecture for structural fingerprin
 
 ```mermaid
 flowchart TD
-  A[claude-analysis/bundle.js] --> B[src/analyze.js]
-  B --> C[metadata/simplified_asts.json]
-  C --> D[ml/vectorize.py]
-  D --> E[metadata/logic_db.json]
-  E --> F[src/anchor_logic.js]
-  F --> G[metadata/mapping.json]
-  G --> H[src/classify_logic.js]
-  H --> I[metadata/graph_map.json]
-  I --> J[src/propagate_names.js]
-  J --> K[metadata/mapping.json]
-  K --> L[src/deobfuscate_pipeline.js]
-  L --> M[metadata/mapping.json]
-  M --> N[src/rename_chunks.js]
-  N --> O[deobfuscated_chunks/]
-  O --> P[src/assemble_final.js]
-  P --> Q[final_codebase/]
-  Q --> R[src/refine_codebase.js]
-  R --> S[final_codebase/ (refined)]
+  A[Target Bundle] --> P1[src/analyze.js]
+  P1 --> O1[Chunks & Initial Metadata]
+
+  S3[ml/model.pth (Trained Transformer)]
+  O1 --> P2[src/anchor_logic.js]
+  S3 --> P2
+  P2 --> O2[metadata/mapping.json w/ Anchors]
+
+  O2 --> P3[src/classify_logic.js]
+  P3 --> O3[metadata/graph_map.json w/ Roles]
+
+  O3 --> P4[src/propagate_names.js]
+  P4 --> O4[metadata/mapping.json w/ Neighbor Hints]
+
+  O4 --> P5[src/deobfuscate_pipeline.js]
+  P5 --> O5[metadata/mapping.json w/ LLM Names]
+
+  O5 --> P6_A[src/rename_chunks.js]
+  P6_A --> O6[deobfuscated_chunks/]
+
+  O6 --> P7_A[src/assemble_final.js]
+  P7_A --> O7[final_codebase/]
+  
+  O7 --> P8[src/refine_codebase.js]
+  P8 --> S[final_codebase/ (refined)]
 ```
 
 ## Configuration & Security
