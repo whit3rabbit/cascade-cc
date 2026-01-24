@@ -85,6 +85,16 @@ function isChunkyPath(candidatePath, chunkNames = []) {
     return false;
 }
 
+function isGenericProposedPath(candidatePath, chunkMeta) {
+    if (!candidatePath || typeof candidatePath !== 'string') return true;
+    const normalized = candidatePath.replace(/\\/g, '/');
+    const base = path.basename(normalized, path.extname(normalized)).toLowerCase();
+    const chunkName = String(chunkMeta?.name || '').toLowerCase();
+    if (isChunkyPath(candidatePath, chunkName ? [chunkName] : [])) return true;
+    if (normalized.includes('/core/logic/')) return true;
+    return false;
+}
+
 function extractIdentifiers(code) {
     try {
         const ast = parser.parse(code, {
@@ -612,7 +622,9 @@ Response JSON:
 
             const originalCode = fs.readFileSync(chunkPath, 'utf8');
 
-            if (globalMapping.processed_chunks.includes(chunkMeta.name) && !isForce) {
+            const needsPathInference = !chunkMeta.suggestedPath && (!chunkMeta.proposedPath || isGenericProposedPath(chunkMeta.proposedPath, chunkMeta));
+
+            if (globalMapping.processed_chunks.includes(chunkMeta.name) && !isForce && !needsPathInference) {
                 // Return existing deobfuscated code as context if available
                 const deobfuscatedPath = path.join(versionPath, 'deobfuscated_chunks', file);
                 try {
@@ -641,7 +653,7 @@ Response JSON:
                 return !m || (m.confidence || 0) < 0.85 || (m.name && m.name.length <= 2);
             });
 
-            if (unknownVariables.length === 0 && unknownProperties.length === 0 && !isForce) {
+            if (unknownVariables.length === 0 && unknownProperties.length === 0 && !isForce && !needsPathInference) {
                 if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
                     console.log(`    [-] Skipping ${file} (no unknown identifiers)`);
                     globalMapping.processed_chunks.push(chunkMeta.name);
@@ -650,7 +662,11 @@ Response JSON:
                 return;
             }
 
-            console.log(`    [WORKING] ${file} (${unknownVariables.length} vars, ${unknownProperties.length} props unknown)`);
+            if (unknownVariables.length === 0 && unknownProperties.length === 0 && needsPathInference) {
+                console.log(`    [WORKING] ${file} (path-only inference)`);
+            } else {
+                console.log(`    [WORKING] ${file} (${unknownVariables.length} vars, ${unknownProperties.length} props unknown)`);
+            }
 
             // Apply current mappings to the code before sending it to the LLM
             // This makes the code much more 'human-readable' for the engine.
@@ -779,6 +795,7 @@ INSTRUCTIONS:
    - Priority 1: If a neighbor is already in a specific folder (see NEIGHBOR CONTEXT), prefer placing this file in the same directory or a sub-directory unless it crosses an architectural boundary.
    - Priority 2: Use the PROJECT STRUCTURE REFERENCE.
    - Example: "src/utils/stringHelpers.js" NOT just "stringHelpers"
+   - If the intended path looks generic (e.g. "src/core/logic/chunk123.ts"), override it with a more descriptive path.
    - Never use chunk IDs (e.g. "chunk002") in the filename.
 5. Output valid JSON only.
 
@@ -804,22 +821,23 @@ RESPONSE FORMAT (JSON ONLY):
             // Auto-splitting logic
             const VAR_CHUNK_SIZE = 40;
             const PROP_CHUNK_SIZE = 40;
+            const forcePathOnly = needsPathInference && unknownVariables.length === 0 && unknownProperties.length === 0;
 
             // Parallel processing loop (fix for nested loop bug)
-            const varBatches = Math.ceil(unknownVariables.length / VAR_CHUNK_SIZE);
-            const propBatches = Math.ceil(unknownProperties.length / PROP_CHUNK_SIZE);
-            const maxBatches = Math.max(varBatches, propBatches);
+            const varBatches = forcePathOnly ? 1 : Math.ceil(unknownVariables.length / VAR_CHUNK_SIZE);
+            const propBatches = forcePathOnly ? 1 : Math.ceil(unknownProperties.length / PROP_CHUNK_SIZE);
+            const maxBatches = forcePathOnly ? 1 : Math.max(varBatches, propBatches);
 
             for (let i = 0; i < maxBatches; i++) {
                 const vOffset = i * VAR_CHUNK_SIZE;
                 const pOffset = i * PROP_CHUNK_SIZE;
 
-                const varSub = unknownVariables.slice(vOffset, vOffset + VAR_CHUNK_SIZE);
-                const propSub = unknownProperties.slice(pOffset, pOffset + PROP_CHUNK_SIZE);
+                const varSub = forcePathOnly ? [] : unknownVariables.slice(vOffset, vOffset + VAR_CHUNK_SIZE);
+                const propSub = forcePathOnly ? [] : unknownProperties.slice(pOffset, pOffset + PROP_CHUNK_SIZE);
 
-                if (varSub.length === 0 && propSub.length === 0) continue;
+                if (!forcePathOnly && varSub.length === 0 && propSub.length === 0) continue;
 
-                const isFirstBatch = (vOffset === 0 && pOffset === 0);
+                const isFirstBatch = forcePathOnly ? true : (vOffset === 0 && pOffset === 0);
                 const codeToPass = isFirstBatch ? contextCode : skeletonize(contextCode);
                 const prompt = generatePrompt(varSub, propSub, codeToPass, goldReferenceCode, goldSimilarity, precedingContext);
                 const PROMPT_RETRIES = 3;

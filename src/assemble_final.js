@@ -45,6 +45,18 @@ function getDeobfuscatedChunkPath(chunksDir, chunkMeta) {
     return null;
 }
 
+function isGenericProposedPath(candidatePath, chunkMeta) {
+    if (!candidatePath || typeof candidatePath !== 'string') return true;
+    const normalized = candidatePath.replace(/\\/g, '/');
+    const base = path.basename(normalized, path.extname(normalized)).toLowerCase();
+    const chunkName = String(chunkMeta?.name || '').toLowerCase();
+    if (/^chunk\d+$/.test(base)) return true;
+    if (/chunk\d+/i.test(base)) return true;
+    if (chunkName && base === chunkName) return true;
+    if (normalized.includes('/core/logic/')) return true;
+    return false;
+}
+
 async function assemble(version) {
     const outputRoot = './cascade_graph_analysis';
 
@@ -94,14 +106,18 @@ async function assemble(version) {
             logicalPath = `src/vendor/${folder}/${fileName}.js`;
         }
         // Priority 2: Explicit Proposal
-        else if (chunk.proposedPath) {
+        else if (chunk.proposedPath && !isGenericProposedPath(chunk.proposedPath, chunk)) {
             logicalPath = chunk.proposedPath;
         }
         // Priority 3: LLM Suggested Path
         else if (chunk.suggestedPath) {
             logicalPath = chunk.suggestedPath;
         }
-        // Priority 4: KB Legacy
+        // Priority 4: Generic proposal fallback (after suggestedPath)
+        else if (chunk.proposedPath) {
+            logicalPath = chunk.proposedPath;
+        }
+        // Priority 5: KB Legacy
         else if (chunk.kb_info && chunk.kb_info.suggested_path) {
             logicalPath = chunk.kb_info.suggested_path.replace(/`/g, '');
         }
