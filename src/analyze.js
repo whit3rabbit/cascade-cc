@@ -29,6 +29,11 @@ const IS_BOOTSTRAP = process.argv.includes('--is-bootstrap');
 const SIGNAL_KEYWORDS = ['anthropic', 'claude', 'mcp', 'agent', 'terminal', 'prompt', 'session', 'protocol', 'codeloop'];
 const NATIVE_PROPS = ['toString', 'hasOwnProperty', 'constructor', 'prototype', 'call', 'apply', 'bind'];
 const GLOBAL_VARS = ['console', 'window', 'document', 'process', 'module', 'require', 'exports', 'global', 'Buffer', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'];
+const GENERIC_KB_KEYWORDS = new Set([
+    'react', 'react-dom', 'jsx', 'tsx', 'js',
+    'column', 'row', 'flex', 'flex-start', 'flex-end', 'center',
+    'box', 'text', 'div', 'span', 'className', 'style'
+]);
 
 function ensureTargetExists() {
     let targetFile = null;
@@ -593,17 +598,21 @@ class CascadeGraph {
                         let weightedSum = 0;
                         const triggerKeywords = Array.isArray(anchor.trigger_keywords) ? anchor.trigger_keywords : [];
 
+                        let matchedSpecific = false;
                         triggerKeywords.forEach(kwEntry => {
                             const kw = typeof kwEntry === 'string' ? kwEntry : kwEntry.word;
                             const weight = typeof kwEntry === 'string' ? 1 : (kwEntry.weight || 1);
+                            const kwNorm = String(kw).toLowerCase();
+                            if (GENERIC_KB_KEYWORDS.has(kwNorm)) return;
                             if (chunkCode.includes(kw)) {
                                 weightedSum += weight;
+                                matchedSpecific = true;
                             }
                         });
 
                         const threshold = anchor.threshold || Math.max(2, Math.floor(triggerKeywords.length * 0.3));
 
-                        if (weightedSum >= threshold) {
+                        if (weightedSum >= threshold && matchedSpecific) {
                             suggestedName = anchor.suggested_name.replace(/`/g, '');
                             category = 'priority';
                             kbInfo = {

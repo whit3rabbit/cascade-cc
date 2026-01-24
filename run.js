@@ -344,7 +344,11 @@ switch (command) {
         runStep('anchor', 'node', ['--max-old-space-size=8192', 'src/anchor_logic.js', resolvedVersion, ...(referenceVersion ? [referenceVersion] : [])]);
         runStep('classify', 'node', ['src/classify_logic.js', resolvedVersion]);
         runStep('propagate-names', 'node', ['src/propagate_names.js', resolvedVersion]);
-        runStep('deobfuscate', 'node', ['--max-old-space-size=8192', 'src/deobfuscate_pipeline.js', resolvedVersion]);
+        const deobfuscateArgs = ['--max-old-space-size=8192', 'src/deobfuscate_pipeline.js', resolvedVersion];
+        if (!args.includes('--skip-vendor')) {
+            deobfuscateArgs.push('--skip-vendor');
+        }
+        runStep('deobfuscate', 'node', deobfuscateArgs);
         runStep('assemble', 'node', ['--max-old-space-size=8192', 'src/assemble_final.js', resolvedVersion]);
         runStep('refine', 'node', ['src/refine_codebase.js', resolvedVersion]);
         process.exit(0);

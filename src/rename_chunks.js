@@ -40,7 +40,16 @@ const isProtectedProperty = (propName) =>
  * Safely renames identifiers in a piece of code using Babel's scope-aware renaming.
  */
 function renameIdentifiers(code, mapping, sourceInfo = {}) {
-    const { sourceFile = null, neighbors = [], displayName = null, suggestedPath = null, moduleId = null, typeName = null } = sourceInfo;
+    const {
+        sourceFile = null,
+        neighbors = [],
+        displayName = null,
+        suggestedPath = null,
+        moduleId = null,
+        typeName = null,
+        allowLocalRenames = false,
+        localConfidenceThreshold = 0.98
+    } = sourceInfo;
     try {
         const ast = parser.parse(code, {
             sourceType: 'module',
@@ -62,8 +71,9 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                     if (binding) {
                         const isTopLevel = binding.scope.block.type === 'Program';
                         const isGlobalConstant = binding.scope.depth <= 2 && binding.constant;
+                        const isLocal = !isTopLevel && !isGlobalConstant;
 
-                        if (isTopLevel || isGlobalConstant) {
+                        if (!isLocal || allowLocalRenames) {
                             const entry = mapping.variables[oldName];
                             if (!entry) return;
 
@@ -84,10 +94,11 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             }
 
                             let newName = null;
+                            let confidence = 0.8;
+                            let entrySource = null;
                             if (scopeMap && scopeMap.has(oldName)) {
                                 newName = scopeMap.get(oldName);
                             }
-                            let entryName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
                             if (!newName && Array.isArray(entry)) {
                                 // Prioritize exact chunk match
                                 const match = entry.find(e => e && (e.source === chunkBase || e.source === sourceFile)) ||
@@ -95,8 +106,12 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                                     (displayName && entry.find(e => e && e.source && e.source.includes(displayName))) ||
                                     entry[0];
                                 newName = match ? match.name : null;
+                                confidence = match?.confidence || confidence;
+                                entrySource = match?.source || null;
                             } else if (!newName) {
-                                newName = entryName;
+                                newName = typeof entry === 'string' ? entry : (entry ? entry.name : null);
+                                confidence = typeof entry === 'object' && entry ? (entry.confidence || confidence) : confidence;
+                                entrySource = typeof entry === 'object' && entry ? entry.source : null;
                             }
 
                             if (newName) {
@@ -105,6 +120,12 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                                     return;
                                 }
                                 if (RESERVED_GLOBALS.has(newName) || DISALLOWED_VARIABLE_NAMES.has(newName)) return;
+                                if (isLocal) {
+                                    if (confidence < localConfidenceThreshold) return;
+                                    if (!entrySource) return;
+                                    if (!(entrySource === chunkBase || entrySource === sourceFile)) return;
+                                    if (newName.length <= 2) return;
+                                }
 
                                 // Uniqueness Enforcement
                                 let distinctName = newName;
@@ -305,6 +326,7 @@ async function main() {
     const baseDir = './cascade_graph_analysis';
     const versionIdx = args.indexOf('--version');
     let versionDir = null;
+    const allowLocalRenames = args.includes('--rename-locals') || args.includes('--allow-locals');
 
     if (versionIdx !== -1) {
         const version = args[versionIdx + 1];
@@ -425,7 +447,8 @@ async function main() {
                 suggestedPath: chunkMeta?.proposedPath || chunkMeta?.kb_info?.suggested_path,
                 moduleId: chunkMeta?.moduleId || null,
                 usedNames: scope.usedNames,
-                scopeMap: scope.obfToName
+                scopeMap: scope.obfToName,
+                allowLocalRenames
             });
 
             const finalCodeRaw = renamedCode || code;

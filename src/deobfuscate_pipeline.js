@@ -534,6 +534,7 @@ function truncateReference(code) {
 async function run() {
     let version = process.argv.filter((arg, i, arr) => !arg.startsWith('-') && (i === 0 || arr[i - 1] !== '--limit'))[2];
     const isRenameOnly = process.argv.includes('--rename-only') || process.argv.includes('-r');
+    const allowLocalRenames = process.argv.includes('--rename-locals') || process.argv.includes('--allow-locals');
     const skipRationale = process.argv.includes('--no-rationale');
     const isDryRun = process.argv.includes('--dry-run');
     const isForce = process.argv.includes('--force') || process.argv.includes('-f');
@@ -860,7 +861,8 @@ Response JSON:
                     neighbors,
                     displayName: chunkMeta.displayName,
                     suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path,
-                    moduleId: chunkMeta.moduleId || null
+                    moduleId: chunkMeta.moduleId || null,
+                    allowLocalRenames
                 });
                 if (partiallyRenamedCode) {
                     contextCode = partiallyRenamedCode;
@@ -1279,7 +1281,8 @@ RESPONSE FORMAT (JSON ONLY):
 
     if (!isDryRun) {
         console.log(`[*] Starting Stage 2: Applying Mapping & Renaming...`);
-        execSync(`node src/rename_chunks.js "${versionPath}"`, { stdio: 'inherit' });
+        const localRenameFlag = allowLocalRenames ? ' --rename-locals' : '';
+        execSync(`node src/rename_chunks.js "${versionPath}"${localRenameFlag}`, { stdio: 'inherit' });
     }
 }
 
