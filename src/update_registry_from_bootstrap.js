@@ -83,7 +83,8 @@ async function updateRegistryFromBootstrap() {
             registry[registryKey] = {
                 lib,
                 chunk_name: chunk.name,
-                vector: chunk.vector,
+                vector_structural: chunk.vector_structural || chunk.vector || null,
+                vector_literals: chunk.vector_literals || null,
                 symbols: chunk.symbols,
                 resolved_variables: variables,
                 resolved_properties: properties,

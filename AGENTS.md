@@ -61,6 +61,8 @@ flowchart TD
   K --> L[deobfuscated_chunks/]
   L --> M[src/assemble_final.js]
   M --> N[final_codebase/]
+  N --> O[src/refine_codebase.js]
+  O --> P[final_codebase/ (refined)]
 ```
 
 ## Configuration & Security

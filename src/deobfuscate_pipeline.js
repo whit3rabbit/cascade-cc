@@ -293,11 +293,38 @@ function calculateSimilarity(vecA, vecB) {
     return vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
 }
 
-function findBestRegistryMatch(chunkVector) {
-    if (!LOGIC_REGISTRY || !chunkVector) return { label: null, ref: null, similarity: -1 };
+function resolveVectors(entry) {
+    if (!entry) return { structural: null, literals: null };
+    if (entry.vector_structural && entry.vector_literals) {
+        return { structural: entry.vector_structural, literals: entry.vector_literals };
+    }
+    if (entry.vector) {
+        return { structural: entry.vector, literals: null };
+    }
+    return { structural: null, literals: null };
+}
+
+function calculateWeightedSimilarity(aStruct, aLit, bStruct, bLit, structWeight = 0.7, litWeight = 0.3) {
+    if (!aStruct || !bStruct) return 0;
+    const structSim = calculateSimilarity(aStruct, bStruct);
+    if (aLit && bLit) {
+        const litSim = calculateSimilarity(aLit, bLit);
+        return (structWeight * structSim) + (litWeight * litSim);
+    }
+    return structSim;
+}
+
+function findBestRegistryMatch(chunkVectors) {
+    if (!LOGIC_REGISTRY || !chunkVectors || !chunkVectors.structural) return { label: null, ref: null, similarity: -1 };
     let bestMatch = { label: null, ref: null, similarity: -1 };
     for (const [label, refData] of Object.entries(LOGIC_REGISTRY)) {
-        const sim = calculateSimilarity(chunkVector, refData.vector);
+        const refVectors = resolveVectors(refData);
+        const sim = calculateWeightedSimilarity(
+            chunkVectors.structural,
+            chunkVectors.literals,
+            refVectors.structural,
+            refVectors.literals
+        );
         if (sim > bestMatch.similarity) {
             bestMatch = { label, ref: refData, similarity: sim };
         }
@@ -677,7 +704,8 @@ Response JSON:
                     sourceFile: chunkMeta.name,
                     neighbors,
                     displayName: chunkMeta.displayName,
-                    suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path
+                    suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path,
+                    moduleId: chunkMeta.moduleId || null
                 });
                 if (partiallyRenamedCode) {
                     contextCode = partiallyRenamedCode;
@@ -689,8 +717,8 @@ Response JSON:
             const logicMatch = logicDbByName.get(chunkMeta.name);
             const logicLabel = logicMatch?.bestMatchLabel || logicMatch?.label || null;
             const logicSimilarity = logicMatch?.bestMatchSimilarity || logicMatch?.similarity || null;
-            const chunkVector = logicMatch?.vector;
-            const registryMatch = findBestRegistryMatch(chunkVector);
+            const chunkVectors = resolveVectors(logicMatch);
+            const registryMatch = findBestRegistryMatch(chunkVectors);
             const effectiveMatch = logicLabel
                 ? {
                     label: logicLabel,
@@ -738,6 +766,11 @@ ${(chunkMeta.outbound || []).map(n => {
                 const pathHint = neighborMeta?.suggestedPath || neighborMeta?.proposedPath ? ` (Located: ${neighborMeta.suggestedPath || neighborMeta.proposedPath})` : '';
                 return `- ${neighborMeta?.displayName || neighborMeta?.name || n}${pathHint}`;
             }).join('\n')}
+
+NEIGHBOR ANCHOR HINT:
+${globalMapping.neighbor_hints && globalMapping.neighbor_hints[chunkMeta.name]
+                ? `High-confidence neighbor suggests library context: ${globalMapping.neighbor_hints[chunkMeta.name].lib} (Source: ${globalMapping.neighbor_hints[chunkMeta.name].source}, Similarity: ${(globalMapping.neighbor_hints[chunkMeta.name].similarity * 100).toFixed(2)}%)`
+                : 'None'}
 
 MAPPING KNOWLEDGE (High Confidence or Established Guesses):
 The following symbols have already been identified. Use these names in your reasoning.
@@ -978,7 +1011,8 @@ RESPONSE FORMAT (JSON ONLY):
                     sourceFile: chunkMeta.name,
                     neighbors,
                     displayName: chunkMeta.displayName,
-                    suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path
+                    suggestedPath: chunkMeta.proposedPath || chunkMeta.kb_info?.suggested_path,
+                    moduleId: chunkMeta.moduleId || null
                 });
 
                 // Generate Metadata Block

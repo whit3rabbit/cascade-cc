@@ -2,6 +2,7 @@ require('dotenv').config();
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const generate = require('@babel/generator').default;
@@ -217,7 +218,7 @@ function simplifyAST(node) {
 }
 
 function collapseProxyNodes(nodes) {
-    console.log(`[*] Phase 2.5: Collapsing Proxy Nodes (Metadata-Safe)...`);
+    console.log(`[*] Phase 2.2: Collapsing Proxy Nodes (Metadata-Safe)...`);
     let collapsedCount = 0;
 
     const names = Array.from(nodes.keys());
@@ -296,6 +297,11 @@ class CascadeGraph {
         this.internalNameToChunkId = new Map(); // Name -> ChunkName
         this.totalTokens = 0;
         this.runtimeMap = {};
+        this.structuralAstTempPath = path.join(
+            os.tmpdir(),
+            `cascade_simplified_asts_${Date.now()}_${Math.random().toString(16).slice(2)}.jsonl`
+        );
+        fs.writeFileSync(this.structuralAstTempPath, '');
     }
 
     // Phase 0.5: Detect the names of common obfuscated helpers based on their shape
@@ -419,7 +425,7 @@ class CascadeGraph {
 
     // Step A: Initial Pass - Group logical chunks
     identifyNodes(ast, code) {
-        console.log(`[*] Phase 1: Identifying Chunks...`);
+        console.log(`[*] Phase 1: Static Analysis & Chunking...`);
         let statements = ast.program.body;
 
         // --- IIFE UNWRAPPING (Drill-down) ---
@@ -525,7 +531,7 @@ class CascadeGraph {
                             }
                         });
 
-                        const threshold = anchor.threshold || Math.max(2, Math.floor(triggerKeywords.length * 0.6));
+                        const threshold = anchor.threshold || Math.max(2, Math.floor(triggerKeywords.length * 0.3));
 
                         if (weightedSum >= threshold) {
                             suggestedName = anchor.suggested_name.replace(/`/g, '');
@@ -594,6 +600,16 @@ class CascadeGraph {
 
             // Generate structural AST for ML anchoring
             const structuralAST = currentChunkNodes.map(simplifyAST);
+            const astEntry = {
+                name: chunkName,
+                ast: structuralAST,
+                kb_info: kbInfo,
+                hints: hints,
+                category: category,
+                role: null,
+                moduleId: currentModuleId
+            };
+            fs.appendFileSync(this.structuralAstTempPath, `${JSON.stringify(astEntry)}\n`);
 
             this.nodes.set(chunkName, {
                 id: chunkIndex,
@@ -602,7 +618,6 @@ class CascadeGraph {
                 tokens,
                 startLine,
                 endLine,
-                structuralAST, // Store for saveResults
                 neighbors: new Set(),
                 suggestedFilename: suggestedName,
                 kb_info: kbInfo,
@@ -787,9 +802,9 @@ class CascadeGraph {
         finalizeChunk();
     }
 
-    // Step B: Neighbor Detection (The Edges)
+    // Step B: Graph Mapping & Centrality
     detectNeighbors() {
-        console.log(`[*] Phase 2: Neighbor Detection (AST-based Edges)...`);
+        console.log(`[*] Phase 2: Graph Mapping & Centrality...`);
         const internalNamesSet = new Set(this.internalNameToChunkId.keys());
 
         for (const [chunkName, nodeData] of this.nodes) {
@@ -829,9 +844,9 @@ class CascadeGraph {
         }
     }
 
-    // Step B.5: Identifier Affinity (Soft Cohesion Signal)
+    // Phase 2.1: Identifier Affinity (Soft Cohesion Signal)
     calculateAffinity() {
-        console.log(`[*] Phase 2.5: Calculating Identifier Affinity (Soft Signal)...`);
+        console.log(`[*] Phase 2.1: Calculating Identifier Affinity (Soft Signal)...`);
         const chunks = Array.from(this.nodes.values()).sort((a, b) => a.id - b.id);
 
         for (let i = 0; i < chunks.length - 1; i++) {
@@ -848,7 +863,7 @@ class CascadeGraph {
             // Extract defined vars in Current that are used in Next
             const currentDefs = this.extractInternalNames({
                 type: 'VariableDeclaration',
-                declarations: current.structuralAST ? [] : [] // Mocking node structure not needed if we rely on regex/set, but let's use what we have or re-parse
+                declarations: [] // Structural AST is streamed; rely on regex heuristics below
             });
             // Used a simpler approach: Re-use internalName map logic limited to short names
 
@@ -901,9 +916,9 @@ class CascadeGraph {
         }
     }
 
-    // Step C: Markov Chain Analysis
+    // Phase 2.3: Markov Chain Analysis
     applyMarkovAnalysis() {
-        console.log(`[*] Phase 3: Markov Chain Centrality Calculation (Weighted PageRank variant)...`);
+        console.log(`[*] Phase 2.3: Markov Chain Centrality Calculation (Weighted PageRank variant)...`);
         const names = Array.from(this.nodes.keys());
         const size = names.length;
         if (size === 0) return;
@@ -989,138 +1004,6 @@ class CascadeGraph {
             // Centrality + (Out-Degree / (In-Degree + 1)) adjustment
             node.score = scores[i] + (outCount / (inCount + 1)) * 0.01;
         });
-    }
-
-    // Phase 4: Re-classify based on aggregated chunk data (NN + Relational Identity)
-    classify(versionPath) {
-        console.log(`[*] Phase 4: Final Classification (NN + Relational Identity)...`);
-
-        // Load the mapping we just generated in Phase 3.5
-        const mappingPath = path.join(versionPath, 'metadata', 'mapping.json');
-        const nnMapping = fs.existsSync(mappingPath) ? JSON.parse(fs.readFileSync(mappingPath, 'utf8')) : { processed_chunks: [], variables: {} };
-
-        // Optimize variable lookup: map source -> entry
-        const varSourceMap = new Map();
-        if (nnMapping.variables) {
-            for (const entry of Object.values(nnMapping.variables)) {
-                if (entry.source) varSourceMap.set(entry.source, entry);
-            }
-        }
-
-        // 1. Pre-calculate Metrics (In-Degree)
-        const inDegree = new Map();
-        for (const [name, node] of this.nodes) {
-            for (const neighbor of node.neighbors) {
-                inDegree.set(neighbor, (inDegree.get(neighbor) || 0) + 1);
-            }
-        }
-
-        // 2. Identify "Founder Seeds" (Keywords + Async Generators + State DNA)
-        const familySet = new Set();
-        for (const [name, node] of this.nodes) {
-            const code = node.code;
-            const hasTengu = code.toLowerCase().includes('tengu_');
-            const hasGenerator = node.hasGenerator;
-            const isStateMutator = node.hasStateMutator;
-            const hasErrorSignature = !!node.error_signature;
-
-            if (hasTengu || hasGenerator || isStateMutator || hasErrorSignature) {
-                familySet.add(name);
-                node.category = 'founder';
-            }
-        }
-        console.log(`    [+] Identified ${familySet.size} founder chunks.`);
-
-        // 3. Spreading Activation (Tengu Spreading / Neighbor Collision)
-        let changed = true;
-        let iteration = 0;
-        while (changed && iteration < 10) {
-            iteration++;
-            let startSize = familySet.size;
-            for (const [name, node] of this.nodes) {
-                if (familySet.has(name)) continue;
-
-                const neighbors = Array.from(node.neighbors);
-                const familyNeighbors = neighbors.filter(n => familySet.has(n));
-
-                const spreadingRatio = parseFloat(process.env.SPREADING_THRESHOLD_RATIO) || 0.3;
-                const spreadingCount = parseInt(process.env.SPREADING_THRESHOLD_COUNT) || 2;
-
-                if (neighbors.length > 0 && (familyNeighbors.length / neighbors.length >= spreadingRatio || familyNeighbors.length >= spreadingCount)) {
-                    familySet.add(name);
-                }
-            }
-            changed = familySet.size > startSize;
-        }
-        console.log(`    [+] Spreading complete: ${familySet.size} chunks in family set after ${iteration} iterations.`);
-
-        // 4. Role Assignment via Capability & Modularity
-        for (const [name, node] of this.nodes) {
-            const inCount = inDegree.get(name) || 0;
-            const outCount = node.neighbors.size;
-            const isFamily = familySet.has(name);
-            const isAnchored = nnMapping.processed_chunks.includes(name);
-            const matchMeta = nnMapping.matches ? nnMapping.matches[name] : null;
-            const isLibraryMatch = matchMeta ? !!matchMeta.is_library_match : false;
-
-            if (isAnchored && isLibraryMatch) {
-                // Library match confirmed by anchor stage metadata
-                node.category = 'vendor';
-                node.label = 'LIBRARY_MATCH';
-
-                // Try to find the suggested name from anchored variables (Optimized)
-                const matchEntry = varSourceMap.get(name);
-                if (matchEntry) node.role = `LIB: ${matchEntry.name}`;
-
-            } else if (isAnchored && !isLibraryMatch) {
-                if (!node.label) node.label = 'ANCHOR_MATCH';
-                if (matchMeta?.label) node.role = `ANCHOR: ${matchMeta.label}`;
-            } else if (isFamily && node.category !== 'founder') {
-                node.category = 'family';
-            } else if (!isFamily) {
-                node.category = 'vendor';
-            }
-
-            const vendorIn = parseInt(process.env.VENDOR_LIBRARY_IN_DEGREE) || 15;
-            const vendorOut = parseInt(process.env.VENDOR_LIBRARY_OUT_DEGREE) || 5;
-            const coreIn = parseInt(process.env.CORE_ORCHESTRATOR_IN_DEGREE) || 5;
-            const coreOut = parseInt(process.env.CORE_ORCHESTRATOR_OUT_DEGREE) || 5;
-
-            if (!isFamily && inCount > vendorIn && outCount < vendorOut) {
-                node.label = 'VENDOR_LIBRARY';
-            } else if (isFamily && inCount > coreIn && outCount > coreOut) {
-                node.label = 'CORE_ORCHESTRATOR';
-            }
-
-            let role = node.role || 'MODULE';
-
-            if (node.hasGenerator) {
-                role = 'STREAM_ORCHESTRATOR';
-            } else if (node.code.includes('child_process') || node.code.includes('spawn')) {
-                role = 'SHELL_EXECUTOR';
-            } else if (node.code.includes('anthropic-beta') || node.code.includes('https://api.anthropic.com')) {
-                role = 'API_CLIENT';
-            } else if (node.code.includes('statsig')) {
-                role = 'FEATURE_FLAGS';
-            } else if (node.code.includes('Box') || node.code.includes('Text') || node.code.includes('ink')) {
-                role = 'UI_COMPONENT';
-            } else if (node.error_signature) {
-                role = node.error_signature;
-            } else if (isFamily) {
-                role = 'CORE_LOGIC';
-            }
-
-            node.role = role;
-
-            node.state_touchpoints = [];
-            const stateMatches = node.code.match(/INTERNAL_STATE\.(\w+)/g);
-            if (stateMatches) {
-                node.state_touchpoints = [...new Set(stateMatches.map(m => m.split('.')[1]))];
-            }
-
-            if (node.code.includes('totalCostUSD')) node.state_touchpoints.push('FINANCIAL_LOGIC');
-            if (node.code.includes('invokedSkills')) node.state_touchpoints.push('TOOL_DISPATCHER');
-        }
     }
 
     saveResults(versionDir) {
@@ -1225,24 +1108,45 @@ class CascadeGraph {
         );
 
         // Save Structural ASTs for ML anchoring
-        const structuralASTs = {};
-        for (const [name, node] of this.nodes) {
-            structuralASTs[name] = {
-                ast: node.structuralAST,
-                kb_info: node.kb_info,
-                hints: node.hints,
-                category: node.category,
-                role: node.role
+        const astOutputPath = path.join(metadataDir, 'simplified_asts.json');
+        const astLines = fs.existsSync(this.structuralAstTempPath)
+            ? fs.readFileSync(this.structuralAstTempPath, 'utf8').split('\n').filter(Boolean)
+            : [];
+        const astStream = fs.createWriteStream(astOutputPath);
+        astStream.write('{\n');
+        let first = true;
+        for (const line of astLines) {
+            let parsed = null;
+            try {
+                parsed = JSON.parse(line);
+            } catch (err) {
+                console.warn(`[!] Skipping malformed AST line: ${err.message}`);
+                continue;
+            }
+            const name = parsed.name;
+            const node = this.nodes.get(name);
+            const payload = {
+                ast: parsed.ast,
+                kb_info: parsed.kb_info,
+                hints: parsed.hints,
+                category: node?.category || parsed.category,
+                role: node?.role || parsed.role,
+                moduleId: node?.moduleId || parsed.moduleId || null
             };
-            // Optimization: Explicitly clear large temporary structures from the node object 
-            // to free up memory before the next bulky operation (Neural Anchoring).
-            node.code = null;
-            node.structuralAST = null;
+            astStream.write(`${first ? '' : ',\n'}${JSON.stringify(name)}:${JSON.stringify(payload)}`);
+            first = false;
         }
-        fs.writeFileSync(
-            path.join(metadataDir, 'simplified_asts.json'),
-            JSON.stringify(structuralASTs)
-        );
+        astStream.write('\n}\n');
+        astStream.end();
+        if (fs.existsSync(this.structuralAstTempPath)) {
+            fs.unlinkSync(this.structuralAstTempPath);
+        }
+
+        // Optimization: Explicitly clear large temporary structures from the node object 
+        // to free up memory before the next bulky operation (Neural Anchoring).
+        for (const [, node] of this.nodes) {
+            node.code = null;
+        }
     }
 }
 
@@ -1331,7 +1235,7 @@ async function run() {
     graph.saveResults(OUTPUT_BASE);
 
     console.log(`\n[COMPLETE] Static Analysis Phase Done.`);
-    console.log(`Phase 1-3 results saved to: ${OUTPUT_BASE}`);
+    console.log(`Phase 1-2 results saved to: ${OUTPUT_BASE}`);
     return { version, path: OUTPUT_BASE };
 }
 

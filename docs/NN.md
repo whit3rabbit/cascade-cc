@@ -108,14 +108,17 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
 The model's vocabulary is dynamically generated from `@babel/types`.
 
 ### Structure
+The vocabulary is built in a specific order:
 - **Index 0 (`PAD`)**: Used for sequence padding.
 - **Index 1 (`UNKNOWN`)**: Fallback for unrecognized node types.
-- **Indices 2-314**: Standard Babel node types (e.g., `Identifier`, `IfStatement`).
-- **Indices 315-318**: Custom "Built-in" signals detected during flattening:
+- **Standard Babel Types**: The majority of the vocabulary consists of standard Babel AST node types (e.g., `Identifier`, `IfStatement`).
+- **Custom "Built-in" Signals**: At the end of the vocabulary, there are custom signals detected during AST flattening, such as:
     - `Builtin_require`
     - `Builtin_defineProperty`
     - `Builtin_exports`
     - `Builtin_module`
+
+The exact size of the vocabulary is not fixed. It will grow as new versions of Babel add more node types. To ensure the vocabulary used by the model is up-to-date, run `npm run sync-vocab`.
 
 ### Vocabulary Size
 The vocabulary size is dynamic and synced with `@babel/types` via `npm run sync-vocab`. The model still initializes with `VOCAB_SIZE + 5` to provide a safety buffer for future Babel updates without immediately breaking model loading.

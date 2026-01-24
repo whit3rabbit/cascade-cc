@@ -45,7 +45,8 @@ function initRegistry(version) {
             // In a real system, we'd use a unique structural ID or category.
             // For now, we'll just store the vector and the symbol mapping.
             registry[chunk.name] = {
-                vector: chunk.vector,
+                vector_structural: chunk.vector_structural || chunk.vector || null,
+                vector_literals: chunk.vector_literals || null,
                 symbols: chunk.symbols,
                 resolved_variables: variables,
                 resolved_properties: properties

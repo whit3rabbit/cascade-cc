@@ -7,6 +7,15 @@ const VERSION = '2.1.12';
 const SYSTEM_MAP_PATH = path.join(__dirname, '..', 'cascade_graph_analysis', VERSION, 'system_map.v2.json');
 const GRAPH_MAP_PATH = path.join(__dirname, '..', 'cascade_graph_analysis', VERSION, 'metadata', 'graph_map.json');
 const CHUNKS_DIR = path.join(__dirname, '..', 'cascade_graph_analysis', VERSION, 'chunks');
+const NEIGHBOR_BOOSTS_PATH = path.join(__dirname, '..', 'cascade_graph_analysis', VERSION, 'metadata', 'neighbor_boosts.json');
+
+const LIB_HINTS = ['crypto', 'axios', 'lodash', 'zod', 'react', 'ink', 'chalk', 'commander'];
+
+function extractLibHint(input) {
+    if (!input || typeof input !== 'string') return null;
+    const lower = input.toLowerCase();
+    return LIB_HINTS.find(h => lower.includes(h)) || null;
+}
 
 function loadJSON(filePath) {
     if (!fs.existsSync(filePath)) return null;
@@ -29,8 +38,9 @@ function getDiscoveryFrontier() {
 
     // Get all analyzed chunks (normalized to basename)
     const analyzedChunks = new Set();
-    Object.values(systemMap.modules).forEach(mod => {
-        mod.original_chunks.forEach(chunk => {
+    const modules = systemMap.modules || {};
+    Object.values(modules).forEach(mod => {
+        (mod.original_chunks || []).forEach(chunk => {
             analyzedChunks.add(chunk.split('_')[0].replace('.js', ''));
         });
     });
@@ -40,19 +50,49 @@ function getDiscoveryFrontier() {
     const frontier = [];
     const visited = new Set(analyzedChunks);
 
+    const graphChunks = Array.isArray(graphMap) ? graphMap : (graphMap.chunks || []);
+    const chunkByBaseId = new Map();
+    graphChunks.forEach(chunk => {
+        const baseId = chunk.name.split('_')[0];
+        if (!chunkByBaseId.has(baseId)) chunkByBaseId.set(baseId, chunk);
+    });
+
+    const neighborBoosts = new Map();
+    Object.values(modules).forEach(mod => {
+        const confidence = mod.confidence || mod.similarity || mod.matchSimilarity || 0;
+        if (confidence < 0.95) return;
+        const libHint = extractLibHint(mod.path || mod.proposedPath || mod.name || mod.displayName || '');
+        if (!libHint) return;
+        (mod.original_chunks || []).forEach(chunkName => {
+            const baseId = chunkName.split('_')[0].replace('.js', '');
+            const graphChunk = chunkByBaseId.get(baseId);
+            if (!graphChunk) return;
+            (graphChunk.outbound || []).forEach(neighborName => {
+                const neighborId = neighborName.split('_')[0];
+                const prev = neighborBoosts.get(neighborId);
+                if (!prev || prev.confidence < confidence) {
+                    neighborBoosts.set(neighborId, { lib: libHint, confidence, source: baseId });
+                }
+            });
+        });
+    });
+
     // Identify unanalyzed neighbors
-    graphMap.chunks.forEach(chunk => {
+    graphChunks.forEach(chunk => {
         const chunkId = chunk.name.split('_')[0];
         if (analyzedChunks.has(chunkId)) {
             // Find its outbound neighbors that aren't analyzed
             (chunk.outbound || []).forEach(neighbor => {
                 const neighborId = neighbor.split('_')[0];
                 if (!visited.has(neighborId)) {
+                    const boost = neighborBoosts.get(neighborId);
                     frontier.push({
                         id: neighborId,
                         fullName: neighbor,
                         centrality: chunk.centrality || 0, // Simplified: use source's centrality as a proxy if neighbor isn't in top list
-                        inDegree: chunk.inDegree || 0
+                        inDegree: chunk.inDegree || 0,
+                        boostLib: boost ? boost.lib : null,
+                        boostConfidence: boost ? boost.confidence : 0
                     });
                     visited.add(neighborId);
                 }
@@ -61,21 +101,29 @@ function getDiscoveryFrontier() {
     });
 
     // Also include high-centrality chunks that aren't mapped yet (global seeds)
-    graphMap.chunks.forEach(chunk => {
+    graphChunks.forEach(chunk => {
         const chunkId = chunk.name.split('_')[0];
         if (!visited.has(chunkId) && (chunk.centrality > 0.1 || (chunk.outbound && chunk.outbound.length > 5))) {
+            const boost = neighborBoosts.get(chunkId);
             frontier.push({
                 id: chunkId,
                 fullName: chunk.name,
                 centrality: chunk.centrality || 0,
-                inDegree: chunk.inDegree || 0
+                inDegree: chunk.inDegree || 0,
+                boostLib: boost ? boost.lib : null,
+                boostConfidence: boost ? boost.confidence : 0
             });
             visited.add(chunkId);
         }
     });
 
-    // Sort frontier by "importance" (centrality and outbound connections)
-    return frontier.sort((a, b) => b.centrality - a.centrality || b.inDegree - a.inDegree);
+    if (neighborBoosts.size > 0) {
+        fs.mkdirSync(path.dirname(NEIGHBOR_BOOSTS_PATH), { recursive: true });
+        fs.writeFileSync(NEIGHBOR_BOOSTS_PATH, JSON.stringify(Object.fromEntries(neighborBoosts), null, 2));
+    }
+
+    // Sort frontier by "importance" (boosts first, then centrality and outbound connections)
+    return frontier.sort((a, b) => (b.boostConfidence || 0) - (a.boostConfidence || 0) || b.centrality - a.centrality || b.inDegree - a.inDegree);
 }
 
 function runCrawler(batchSize = 20, dryRun = false) {

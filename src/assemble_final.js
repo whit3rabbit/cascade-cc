@@ -1,6 +1,74 @@
 const fs = require('fs');
 const path = require('path');
 const semver = require('semver');
+const parser = require('@babel/parser');
+const traverse = require('@babel/traverse').default;
+const generate = require('@babel/generator').default;
+
+const WRAPPER_NAMES = new Set(['__commonJS', '__lazyInit', '__wrapCommonJS']);
+
+function parseCode(code) {
+    return parser.parse(code, {
+        sourceType: 'module',
+        plugins: ['jsx', 'typescript', 'dynamicImport', 'topLevelAwait', 'classProperties']
+    });
+}
+
+function unwrapModuleWrapper(code) {
+    let ast = null;
+    try {
+        ast = parseCode(code);
+    } catch (err) {
+        return { code, unwrapped: false };
+    }
+
+    const body = ast.program.body;
+    const newBody = [];
+    let unwrapped = false;
+
+    for (const stmt of body) {
+        if (stmt.type === 'VariableDeclaration' && stmt.declarations.length === 1) {
+            const decl = stmt.declarations[0];
+            const init = decl && decl.init;
+            if (init && init.type === 'CallExpression' && init.callee.type === 'Identifier' && WRAPPER_NAMES.has(init.callee.name)) {
+                const arg0 = init.arguments && init.arguments[0];
+                if (arg0 && (arg0.type === 'ArrowFunctionExpression' || arg0.type === 'FunctionExpression') && arg0.body && arg0.body.type === 'BlockStatement') {
+                    newBody.push(...arg0.body.body);
+                    unwrapped = true;
+                    continue;
+                }
+            }
+        }
+        newBody.push(stmt);
+    }
+
+    if (!unwrapped) return { code, unwrapped: false };
+    ast.program.body = newBody;
+    return { code: generate(ast, { retainLines: true }).code, unwrapped: true };
+}
+
+function detectTopLevelImports(code) {
+    let ast = null;
+    try {
+        ast = parseCode(code);
+    } catch (err) {
+        return false;
+    }
+
+    for (const stmt of ast.program.body) {
+        if (stmt.type === 'ImportDeclaration') return true;
+        if (stmt.type === 'VariableDeclaration') {
+            for (const decl of stmt.declarations || []) {
+                const init = decl.init;
+                if (init && init.type === 'CallExpression' && init.callee.type === 'Identifier' && init.callee.name === 'require') {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
 
 function getLatestVersion(outputRoot) {
     if (!fs.existsSync(outputRoot)) return null;
@@ -53,7 +121,7 @@ function isGenericProposedPath(candidatePath, chunkMeta) {
     if (/^chunk\d+$/.test(base)) return true;
     if (/chunk\d+/i.test(base)) return true;
     if (chunkName && base === chunkName) return true;
-    if (normalized.includes('/core/logic/')) return true;
+    if (normalized.includes('/undetermined/') || normalized.includes('/misc/')) return true;
     return false;
 }
 
@@ -95,6 +163,8 @@ async function assemble(version) {
 
     const getChunkRole = chunk => (typeof chunk.role === 'string' ? chunk.role : '');
 
+    const chunkByName = new Map(chunks.map(chunk => [chunk.name, chunk]));
+
     chunks.forEach(chunk => {
         let logicalPath = null;
 
@@ -120,6 +190,19 @@ async function assemble(version) {
         // Priority 5: KB Legacy
         else if (chunk.kb_info && chunk.kb_info.suggested_path) {
             logicalPath = chunk.kb_info.suggested_path.replace(/`/g, '');
+        }
+
+        // Priority 6: Neighbor Inheritance
+        if (!logicalPath) {
+            const neighbors = chunk.outbound || [];
+            for (const neighborName of neighbors) {
+                const neighbor = chunkByName.get(neighborName);
+                if (neighbor && neighbor.proposedPath && !isGenericProposedPath(neighbor.proposedPath, neighbor)) {
+                    const neighborDir = path.dirname(neighbor.proposedPath);
+                    logicalPath = path.join(neighborDir, `${chunk.displayName || chunk.name}.js`);
+                    break;
+                }
+            }
         }
 
         // Clean up path
@@ -275,8 +358,6 @@ async function assemble(version) {
                 const sortedNodesInScc = nodesInScc.sort((aName, bName) => {
                     const a = chunkList.find(c => c.name === aName);
                     const b = chunkList.find(c => c.name === bName);
-                    if (a.startsWithImport && !b.startsWithImport) return -1;
-                    if (!a.startsWithImport && b.startsWithImport) return 1;
                     if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
                     return (a.startLine || 0) - (b.startLine || 0);
                 });
@@ -286,8 +367,6 @@ async function assemble(version) {
         } catch (err) {
             console.warn(`    [!] SCC Topo-sort failed: ${err.message}. Falling back to pure heuristic.`);
             sortedNames = chunkList.slice().sort((a, b) => {
-                if (a.startsWithImport && !b.startsWithImport) return -1;
-                if (!a.startsWithImport && b.startsWithImport) return 1;
                 if (b.outbound && b.outbound.includes(a.name)) return -1;
                 if (a.outbound && a.outbound.includes(b.name)) return 1;
                 if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
@@ -297,26 +376,10 @@ async function assemble(version) {
 
         const sortedChunks = sortedNames.map(name => chunkList.find(c => c.name === name)).filter(Boolean);
 
-        // FORCE IMPORT SORT: Move chunks with imports to the very top
-        // This overrides topological sort because ES import statements must be at the top level
-        // and often our graph analysis might infer a dependency direction that places them later.
-        const importChunks = [];
-        const otherChunks = [];
-        sortedChunks.forEach(c => {
-            if (c.startsWithImport) {
-                importChunks.push(c);
-            } else {
-                otherChunks.push(c);
-            }
-        });
-
-        // Re-assemble with imports first - essentially "hoisting" the module header
-        const finalSortedChunks = [...importChunks, ...otherChunks];
-
         const headers = new Set();
         const finalChunks = [];
 
-        for (const chunkMeta of finalSortedChunks) {
+        for (const chunkMeta of sortedChunks) {
             const chunkFilePath = getDeobfuscatedChunkPath(chunksDir, chunkMeta);
             if (chunkFilePath) {
                 let code = fs.readFileSync(chunkFilePath, 'utf8');
@@ -329,28 +392,23 @@ async function assemble(version) {
                     code = code.replace(helperRegex, '').trim();
                 }
 
-                // Module Wrapper Stripping (Hard Signal)
-                // If this chunk starts a module wrapper (search for __commonJS( or __lazyInit(), strip the envelope
-                const wrapperStartRegex = /var\s+[\w$]+\s*=\s*(?:__commonJS|__lazyInit)\s*\(((?:exports)?\s*=>\s*\{|\s*function\s*\(\w*\)\s*\{)/;
-                if (wrapperStartRegex.test(code)) {
-                    // console.log(`    [i] Stripping module wrapper from ${chunkMeta.name}`);
-                    code = code.replace(wrapperStartRegex, '');
-                }
-
-                // Strip wrapper end
-                const wrapperEndRegex = /\}\);\s*$/;
-                if (wrapperEndRegex.test(code)) {
-                    code = code.replace(wrapperEndRegex, '');
-                }
+                const unwrapResult = unwrapModuleWrapper(code);
+                code = unwrapResult.code;
+                const hasTopLevelImports = detectTopLevelImports(code);
 
                 finalChunks.push({
                     meta: chunkMeta,
-                    code
+                    code,
+                    hasTopLevelImports
                 });
             } else {
                 console.warn(`    [!] Missing deobfuscated chunk: ${chunkMeta.name} (Expected at ${chunksDir})`);
             }
         }
+
+        const importChunks = finalChunks.filter(c => c.hasTopLevelImports);
+        const otherChunks = finalChunks.filter(c => !c.hasTopLevelImports);
+        const finalSortedChunks = [...importChunks, ...otherChunks];
 
         let mergedCode = `/**\n * File: ${filePath}\n * Role: ${getChunkRole(chunkList[0]) || 'unknown'}\n * Aggregated from ${chunkList.length} chunks\n */\n\n`;
 
@@ -361,7 +419,7 @@ async function assemble(version) {
             mergedCode += `  globalThis.__CASCADE_HELPERS_LOADED = true;\n}\n\n`;
         }
 
-        for (const { meta, code } of finalChunks) {
+        for (const { meta, code } of finalSortedChunks) {
             mergedCode += `// --- Chunk: ${meta.name} (Original lines: ${meta.startLine}-${meta.endLine}) ---\n`;
             if (code && code.trim()) {
                 mergedCode += code + "\n\n";

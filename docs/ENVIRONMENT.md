@@ -23,13 +23,11 @@ These variables tune the static analysis and anchoring logic.
 | `LIBRARY_MATCH_THRESHOLD` | `0.95` | Similarity required to auto-label a chunk as a vendor library match. |
 | `ANCHOR_LOCK_THRESHOLD` | `0.98` | Similarity required to lock a match and apply names with high confidence. |
 | `ANCHOR_LOCK_CONFIDENCE` | `0.99` | Confidence score assigned to locked matches. |
+| `CUSTOM_GOLD_SIMILARITY_THRESHOLD` | `0.98` | Similarity required to trigger 1.0 confidence for custom logic. |
 | `MARKOV_DAMPING_FACTOR`| `0.85` | Used in the PageRank-style Centrality algorithm. Higher values increase the influence of long-range connections. |
 | `CHUNKING_TOKEN_THRESHOLD` | `2000` | The target number of tokens per code chunk during analysis. |
 | `SPREADING_THRESHOLD_RATIO` | `0.3` | Threshold for property spreading activation. |
 | `SPREADING_THRESHOLD_COUNT` | `2` | Minimum number of hits for property name propagation. |
-| `ML_LITERAL_DROPOUT` | `0.5` | Training regularization: probability of masking literal features. |
-| `ML_NODE_MASKING` | `0.15` | Training regularization: probability of masking node types. |
-| `ML_SEQ_JITTER` | `0.3` | Training regularization: probability of sequence jittering. |
 
 ## Role Classification Thresholds
 
@@ -43,6 +41,18 @@ The system uses Graph Theory metrics to identify the role of each chunk (e.g., V
 | `CORE_ORCHESTRATOR_OUT_DEGREE` | Out-degree threshold to classify a chunk as a Core orchestrator. |
 
 These thresholds are actively used by `src/classify_logic.js` to separate utility libraries from application logic.
+
+## Training & Refinement Parameters
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `ML_TRAIN_PRESET` | `null` | Allows using named configurations like "production". |
+| `ML_VAL_LIB_COUNT` | `3` | Number of libraries to hold out for validation. |
+| `ML_VAL_SPLIT` | `0` | Ratio for random validation split (alternative to leave-library-out). |
+| `REFINE_CONTEXT_LIMIT` | `400000` | Character limit for files sent to the LLM refinement pass. |
+| `ML_LITERAL_DROPOUT` | `0.5` | Training regularization: probability of masking literal features. |
+| `ML_NODE_MASKING` | `0.15` | Training regularization: probability of masking node types. |
+| `ML_SEQ_JITTER` | `0.3` | Training regularization: probability of sequence jittering. |
 
 ---
 

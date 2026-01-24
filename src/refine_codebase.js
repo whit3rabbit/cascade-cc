@@ -48,6 +48,56 @@ function stripExtension(p) {
     return p.replace(/\.[^.]+$/, '');
 }
 
+function resolveVectors(entry) {
+    if (!entry) return { structural: null, literals: null };
+    if (entry.vector_structural && entry.vector_literals) {
+        return { structural: entry.vector_structural, literals: entry.vector_literals };
+    }
+    if (entry.vector) {
+        return { structural: entry.vector, literals: null };
+    }
+    return { structural: null, literals: null };
+}
+
+function calculateWeightedSimilarity(aStruct, aLit, bStruct, bLit, structWeight = 0.7, litWeight = 0.3) {
+    if (!aStruct || !bStruct) return 0;
+    const structSim = aStruct.reduce((sum, a, i) => sum + a * bStruct[i], 0);
+    if (aLit && bLit) {
+        const litSim = aLit.reduce((sum, a, i) => sum + a * bLit[i], 0);
+        return (structWeight * structSim) + (litWeight * litSim);
+    }
+    return structSim;
+}
+
+function extractLibFromLabel(label) {
+    if (!label) return null;
+    const idx = label.indexOf('_');
+    return idx === -1 ? null : label.slice(0, idx);
+}
+
+function loadBootstrapSource(libName) {
+    if (!libName) return '';
+    const bootstrapRoot = path.join(__dirname, '..', 'ml', 'bootstrap_data');
+    if (!fs.existsSync(bootstrapRoot)) return '';
+
+    const candidates = fs.readdirSync(bootstrapRoot)
+        .map(name => path.join(bootstrapRoot, name))
+        .filter(p => fs.statSync(p).isDirectory())
+        .filter(p => {
+            const base = path.basename(p);
+            return base === libName || base.startsWith(`${libName}_`) || base.startsWith(`_${libName}`);
+        })
+        .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+
+    if (candidates.length === 0) return '';
+    const dir = candidates[0];
+    const entryPath = path.join(dir, 'entry.js');
+    if (fs.existsSync(entryPath)) return fs.readFileSync(entryPath, 'utf8');
+    const bundledPath = path.join(dir, 'bundled.js');
+    if (fs.existsSync(bundledPath)) return fs.readFileSync(bundledPath, 'utf8');
+    return '';
+}
+
 function getLatestBootstrapDir(rootDir) {
     if (!fs.existsSync(rootDir)) return null;
     const entries = fs.readdirSync(rootDir)
@@ -213,7 +263,7 @@ function updateStatus(status, relPath, entry) {
     };
 }
 
-async function refineFile(filePath, relPath, refinedRoot, internalIndex, pathIndex, goldIndex, status, persistStatus) {
+async function refineFile(filePath, relPath, refinedRoot, internalIndex, pathIndex, goldIndex, graphChunks, logicByName, logicRegistry, status, persistStatus) {
     const code = fs.readFileSync(filePath, 'utf8');
 
     // Skip very large files or vendor files if needed, but for now let's try all
@@ -276,6 +326,62 @@ async function refineFile(filePath, relPath, refinedRoot, internalIndex, pathInd
         }
     }
 
+    const relNoExt = stripExtension(relPathPosix);
+    const matchedChunks = (graphChunks || []).filter(chunk => {
+        const candidates = [
+            chunk.proposedPath,
+            chunk.suggestedPath,
+            chunk.kb_info?.suggested_path
+        ].filter(Boolean).map(p => stripExtension(toPosixPath(p)));
+        return candidates.includes(relNoExt);
+    });
+
+    let structuralReference = '';
+    let structuralReferenceSimilarity = null;
+    if (logicRegistry && matchedChunks.length > 0) {
+        const founderChunk = matchedChunks.find(c => c.category === 'founder') ||
+            matchedChunks.find(c => c.role === 'ENTRY_POINT') ||
+            matchedChunks.slice().sort((a, b) => (b.centrality || 0) - (a.centrality || 0))[0];
+
+        if (founderChunk) {
+            const logicEntry = logicByName.get(founderChunk.name);
+            const chunkVectors = resolveVectors(logicEntry);
+            if (chunkVectors.structural) {
+                let bestMatch = { label: null, ref: null, similarity: -1 };
+                for (const [label, refData] of Object.entries(logicRegistry)) {
+                    const refVectors = resolveVectors(refData);
+                    const sim = calculateWeightedSimilarity(
+                        chunkVectors.structural,
+                        chunkVectors.literals,
+                        refVectors.structural,
+                        refVectors.literals
+                    );
+                    if (sim > bestMatch.similarity) {
+                        bestMatch = { label, ref: refData, similarity: sim };
+                    }
+                }
+                if (bestMatch.similarity >= 0.8) {
+                    const libName = bestMatch.ref?.lib || extractLibFromLabel(bestMatch.label);
+                    const source = loadBootstrapSource(libName);
+                    if (source) {
+                        structuralReferenceSimilarity = bestMatch.similarity;
+                        structuralReference = truncateGold(source);
+                    }
+                }
+            }
+        }
+    }
+
+    const ignoreLibs = new Set();
+    matchedChunks.forEach(chunk => {
+        const sim = chunk.matchSimilarityBoosted ?? chunk.matchSimilarity ?? 0;
+        const label = chunk.matchLabel;
+        if (sim >= 0.95 && label) {
+            const lib = extractLibFromLabel(label);
+            if (lib) ignoreLibs.add(lib);
+        }
+    });
+
     const prompt = `
 Role: Senior Staff Software Engineer / Reverse Engineer
 Task: Source Code Reconstruction & Logic Refinement
@@ -292,6 +398,19 @@ Do not copy unless it matches the assembled file's logic.
 \`\`\`javascript
 ${goldReference}
 \`\`\`
+` : ''}
+
+${structuralReference ? `STRUCTURAL_REFERENCE (Neural Registry Match, ${(structuralReferenceSimilarity * 100).toFixed(2)}%):
+Use this as a structural guide only when it aligns closely; do not force matches that diverge.
+
+\`\`\`javascript
+${structuralReference}
+\`\`\`
+` : ''}
+
+${ignoreLibs.size > 0 ? `IGNORE LIST:
+These chunks are confirmed vendor libraries. Do NOT rename internal variables to proprietary names.
+${Array.from(ignoreLibs).map(lib => `- ${lib.toUpperCase()}`).join('\n')}
 ` : ''}
 
 IMPORT RESOLUTION CONTEXT:
@@ -397,6 +516,16 @@ async function run() {
     const internalIndex = buildInternalIndex(assembleDir);
 
     const pathIndex = buildPathIndex(internalIndex);
+    const graphMapPath = path.join(OUTPUT_ROOT, version, 'metadata', 'graph_map.json');
+    const graphDataRaw = fs.existsSync(graphMapPath) ? JSON.parse(fs.readFileSync(graphMapPath, 'utf8')) : [];
+    const graphChunks = Array.isArray(graphDataRaw) ? graphDataRaw : (graphDataRaw.chunks || []);
+
+    const logicDbPath = path.join(OUTPUT_ROOT, version, 'metadata', 'logic_db.json');
+    const logicDb = fs.existsSync(logicDbPath) ? JSON.parse(fs.readFileSync(logicDbPath, 'utf8')) : [];
+    const logicByName = new Map(logicDb.map(entry => [entry.name, entry]));
+
+    const registryPath = path.join(OUTPUT_ROOT, 'logic_registry.json');
+    const logicRegistry = fs.existsSync(registryPath) ? JSON.parse(fs.readFileSync(registryPath, 'utf8')) : null;
     const latestBootstrapDir = getLatestBootstrapDir(BOOTSTRAP_ROOT);
     const goldIndex = latestBootstrapDir ? buildGoldIndex(latestBootstrapDir) : null;
     if (latestBootstrapDir) {
@@ -423,7 +552,7 @@ async function run() {
         if (existing && existing.status === 'done') {
             return null;
         }
-        return limit(() => refineFile(file, relPath, refinedRoot, internalIndex, pathIndex, goldIndex, status, persistStatus));
+        return limit(() => refineFile(file, relPath, refinedRoot, internalIndex, pathIndex, goldIndex, graphChunks, logicByName, logicRegistry, status, persistStatus));
     }).filter(Boolean);
 
     await Promise.all(tasks);

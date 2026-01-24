@@ -95,6 +95,9 @@ Every chunk in the target bundle is vectorized. These vectors are compared again
 - **Similarity > 0.80**: Strong Structural Match.
 - **Heuristic Boosts**: If `knowledge_base.json` suggests a library (e.g., "ink"), the similarity score is boosted to help the model lock in.
 
+### Step 4.2: Discovery Crawling (Iterative Analysis)
+The codebase includes a "Frontier" crawler (`src/discovery_walk.js`) designed for iterative analysis. After an initial analysis pass, this script can be run to identify unanalyzed neighboring chunks. It uses a combination of outbound connections from known modules and Markov centrality scores to intelligently expand the analysis frontier, guiding the deobfuscation process into previously unexplored parts of the codebase. This is particularly useful for massive bundles where a full analysis is not feasible in a single pass.
+
 ### Step 4.5: Architectural Classification
 The classifier (`src/classify_logic.js`) uses graph metrics and anchor metadata to assign roles (e.g., `VENDOR_LIBRARY`, `APP_LOGIC`) and propose paths before the LLM pass.
 
@@ -109,11 +112,9 @@ Chunks identified as "Founder" logic are sent to an LLM. The pipeline prioritize
 The final step uses the `mapping.json` to perform a scope-safe rename across all chunks via `src/rename_chunks.js` and writes them to a new directory structure that mirrors the inferred original codebase.
 
 ### Step 7: Logic Refinement
-The assembled codebase undergoes a final refinement pass (`npm run refine`). This stage uses an LLM to restore high-level control flow (converting complex ternary chains back to if/else blocks) and remove lingering obfuscation boilerplate.
-
-**Refinement scripts**:
-- **`src/systematic_refiner.js`**: Bulk symbol replacement using the registry and mapping metadata.
-- **`src/refine_codebase.js`**: LLM-driven logic reconstruction, aliased to `npm run refine`.
+The assembled codebase undergoes a final refinement pass (`npm run refine`). This stage consists of two distinct sub-steps:
+1.  **Systematic Replacement**: A fast, regex-based pass (`src/systematic_refiner.js`) that performs bulk symbol replacement based on the complete `mapping.json` registry. This ensures all known symbols are updated across the entire codebase.
+2.  **Semantic Reconstruction**: A powerful, LLM-driven pass (`src/refine_codebase.js`) that restores high-level control flow. It converts complex ternary chains back into readable `if/else` blocks and removes other lingering obfuscation boilerplate.
 
 ---
 

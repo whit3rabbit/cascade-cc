@@ -44,6 +44,29 @@ function calculateSimilarity(vecA, vecB) {
     return vecA.reduce((sum, a, i) => sum + a * vecB[i], 0); // Dot product
 }
 
+function resolveVectors(entry) {
+    if (!entry) return { structural: null, literals: null };
+    if (entry.vector_structural && entry.vector_literals) {
+        return { structural: entry.vector_structural, literals: entry.vector_literals };
+    }
+    if (entry.vector) {
+        return { structural: entry.vector, literals: null };
+    }
+    return { structural: null, literals: null };
+}
+
+function calculateWeightedSimilarity(aStruct, aLit, bStruct, bLit, structWeight = 0.7, litWeight = 0.3) {
+    if (aStruct && bStruct) {
+        const structSim = calculateSimilarity(aStruct, bStruct);
+        if (aLit && bLit) {
+            const litSim = calculateSimilarity(aLit, bLit);
+            return (structWeight * structSim) + (litWeight * litSim);
+        }
+        return structSim;
+    }
+    return 0;
+}
+
 /**
  * Aligns symbols between two matched entities and updates the target mapping.
  * Uses structural key-based alignment for robustness against code reordering.
@@ -56,7 +79,7 @@ function calculateSimilarity(vecA, vecB) {
  */
 function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targetSymbols, refSymbols, sourceLabel, options = {}) {
     let alignedCount = 0;
-    let { lockConfidence = null } = options;
+    let { lockConfidence = null, moduleId = null } = options;
 
     // ADDITION: If a match comes from 'bootstrap' or label indicates golden match, lock it with 1.0 confidence
     if (sourceLabel && (sourceLabel.includes('bootstrap') || sourceLabel.includes('GOLDEN'))) {
@@ -126,16 +149,18 @@ function alignSymbols(targetMapping, resolvedVariables, resolvedProperties, targ
             }
         }
         if (resolvedProp) {
-            if (!targetMapping.properties[targetMangled]) {
+            const scopedKey = moduleId ? `${moduleId}::${targetMangled}` : targetMangled;
+            if (!targetMapping.properties[scopedKey]) {
                 const bestName = typeof resolvedProp === 'string' ? resolvedProp : (resolvedProp && typeof resolvedProp.name === 'string' ? resolvedProp.name : null);
 
                 if (bestName) {
-                    targetMapping.properties[targetMangled] = {
+                    targetMapping.properties[scopedKey] = {
                         name: bestName,
                         confidence: lockConfidence ?? (match.method === 'key'
                             ? (parseFloat(process.env.ANCHOR_KEY_CONFIDENCE) || 0.9)
                             : (parseFloat(process.env.ANCHOR_NAME_CONFIDENCE) || 0.85)),
-                        source: `anchored_${match.method}_${sourceLabel}`
+                        source: `anchored_${match.method}_${sourceLabel}`,
+                        scope: moduleId ? { moduleId } : undefined
                     };
                     alignedCount++;
                 }
@@ -194,6 +219,24 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
             targetMapping = JSON.parse(fs.readFileSync(targetMappingPath, 'utf8'));
         }
 
+        const graphMapPath = path.join(targetPath, 'metadata', 'graph_map.json');
+        const graphMapRaw = fs.existsSync(graphMapPath) ? JSON.parse(fs.readFileSync(graphMapPath, 'utf8')) : { chunks: [] };
+        const graphChunks = Array.isArray(graphMapRaw) ? graphMapRaw : (graphMapRaw.chunks || []);
+        const neighborMap = new Map();
+        graphChunks.forEach(chunk => {
+            const neighbors = [...(chunk.neighbors || []), ...(chunk.outbound || [])];
+            neighborMap.set(chunk.name, neighbors);
+        });
+        const neighborBoostPath = path.join(targetPath, 'metadata', 'neighbor_boosts.json');
+        let neighborBoosts = {};
+        if (fs.existsSync(neighborBoostPath)) {
+            try {
+                neighborBoosts = JSON.parse(fs.readFileSync(neighborBoostPath, 'utf8'));
+            } catch (err) {
+                console.warn(`[!] Failed to parse neighbor boosts: ${err.message}`);
+            }
+        }
+
         let matchedCount = 0;
         let totalNamesAnchored = 0;
         let existingMatchedCount = 0;
@@ -205,13 +248,14 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
 
         const lockThreshold = parseFloat(process.env.ANCHOR_LOCK_THRESHOLD) || 0.98;
         const lockConfidence = parseFloat(process.env.ANCHOR_LOCK_CONFIDENCE) || 0.99;
+        const recursiveThreshold = parseFloat(process.env.ANCHOR_RECURSIVE_THRESHOLD) || 0.98;
 
         const registryEntries = Object.entries(registry);
         const simThreshold = parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.9;
 
         for (const targetChunk of targetLogicDb) {
             let bestMatch = { ref: null, similarity: -1, label: null };
-            const targetVec = targetChunk.vector;
+            const targetVecs = resolveVectors(targetChunk);
 
             // Heuristic Signal Extraction
             const kbDescription = targetChunk.kb_info ? (targetChunk.kb_info.description || '').toLowerCase() : '';
@@ -227,10 +271,20 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
             else if (kbPath.includes('chalk') || kbDescription.includes('chalk')) boostLib = 'chalk';
             else if (kbPath.includes('commander')) boostLib = 'commander';
             // Add more common libs as needed, or make dynamic
+            if (!boostLib) {
+                const boostHint = neighborBoosts[targetChunk.name] || neighborBoosts[targetChunk.name.split('_')[0]];
+                if (boostHint && boostHint.lib) boostLib = boostHint.lib;
+            }
 
             for (let i = 0; i < registryEntries.length; i++) {
                 const [label, refData] = registryEntries[i];
-                let sim = calculateSimilarity(targetVec, refData.vector);
+                const refVecs = resolveVectors(refData);
+                let sim = calculateWeightedSimilarity(
+                    targetVecs.structural,
+                    targetVecs.literals,
+                    refVecs.structural,
+                    refVecs.literals
+                );
 
                 // Apply Heuristic Boost
                 // If the registry label matches the KB hint, we trust the NN match much more easily.
@@ -268,7 +322,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     targetChunk.symbols,
                     bestMatch.ref.symbols,
                     bestMatch.label,
-                    bestMatch.similarity >= lockThreshold ? { lockConfidence } : {}
+                    bestMatch.similarity >= lockThreshold ? { lockConfidence, moduleId: targetChunk.moduleId || null } : { moduleId: targetChunk.moduleId || null }
                 );
 
                 const isCustomGoldLabel = bestMatch.label.includes('custom_claude_gold');
@@ -305,6 +359,24 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     is_library_match: isLibraryMatch,
                 };
 
+                if (bestMatch.similarity >= recursiveThreshold && bestMatch.label) {
+                    const recursiveLib = bestMatch.label.split('_')[0];
+                    if (recursiveLib) {
+                        const neighbors = neighborMap.get(targetChunk.name) || [];
+                        neighbors.forEach(neighborName => {
+                            const neighborKey = neighborName.split('_')[0];
+                            const existing = neighborBoosts[neighborKey];
+                            if (!existing || (existing.confidence || 0) < bestMatch.similarity) {
+                                neighborBoosts[neighborKey] = {
+                                    lib: recursiveLib,
+                                    confidence: bestMatch.similarity,
+                                    source: targetChunk.name
+                                };
+                            }
+                        });
+                    }
+                }
+
                 if (isNewChunk) {
                     targetMapping.processed_chunks.push(targetChunk.name);
                     matchedCount++;
@@ -320,9 +392,11 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         }
         fs.writeFileSync(targetMappingPath, JSON.stringify(targetMapping, null, 2));
 
+        if (Object.keys(neighborBoosts).length > 0) {
+            fs.writeFileSync(neighborBoostPath, JSON.stringify(neighborBoosts, null, 2));
+        }
+
         // Match anchoring results back to graph_map.json
-        const graphMapPath = path.join(targetPath, 'metadata', 'graph_map.json');
-        const graphMapRaw = JSON.parse(fs.readFileSync(graphMapPath, 'utf8'));
         const chunks = Array.isArray(graphMapRaw) ? graphMapRaw : (graphMapRaw.chunks || []);
 
         for (const targetChunk of targetLogicDb) {
@@ -417,7 +491,14 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         for (const targetChunk of targetLogicDb) {
             let bestMatch = { ref: null, similarity: -1 };
             for (const refChunk of referenceLogicDb) {
-                const sim = calculateSimilarity(targetChunk.vector, refChunk.vector);
+                const targetVecs = resolveVectors(targetChunk);
+                const refVecs = resolveVectors(refChunk);
+                const sim = calculateWeightedSimilarity(
+                    targetVecs.structural,
+                    targetVecs.literals,
+                    refVecs.structural,
+                    refVecs.literals
+                );
                 if (sim > bestMatch.similarity) {
                     bestMatch = { ref: refChunk, similarity: sim };
                 }
@@ -448,7 +529,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                     targetChunk.symbols,
                     bestMatch.ref.symbols,
                     bestMatch.ref.name,
-                    bestMatch.similarity >= lockThreshold ? { lockConfidence } : {}
+                    bestMatch.similarity >= lockThreshold ? { lockConfidence, moduleId: targetChunk.moduleId || null } : { moduleId: targetChunk.moduleId || null }
                 );
                 if (!targetMapping.processed_chunks.includes(targetChunk.name)) {
                     targetMapping.processed_chunks.push(targetChunk.name);

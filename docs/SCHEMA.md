@@ -26,7 +26,7 @@ This file contains high-level metadata about the deobfuscated chunks and their r
       "displayName": "PrettyName",
       "file": "chunks/chunk001_PrettyName.js",
       "moduleId": "module_42",
-      "affinityLink": "chunk000",
+      "affinityLink / parentChunk": "chunk000",
       "isGoldenMatch": false,
       "proposedPath": "src/utils.ts",
       "tokens": 1234,
@@ -39,6 +39,7 @@ This file contains high-level metadata about the deobfuscated chunks and their r
       "centrality": 0.05,
       "score": 0.051,
       "neighborCount": 5,
+      "entrySignalCount": 10,
       "outbound": ["chunk002", "chunk005"],
       "kb_info": {
         "suggested_path": "src/utils.ts",
@@ -48,6 +49,7 @@ This file contains high-level metadata about the deobfuscated chunks and their r
       "hints": [],
       "hasGenerator": false,
       "hasStateMutator": false,
+      "hasTengu": true,
       "error_signature": null,
       "startsWithImport": true
     }
@@ -126,6 +128,7 @@ The central registry of renamed identifiers for a specific version, including si
     "chunk001": {
       "label": "zod_v3_23_8",
       "similarity": 0.96,
+      "similarity_boosted": 0.98,
       "is_library_match": true
     }
   },

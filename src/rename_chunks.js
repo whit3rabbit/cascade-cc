@@ -40,7 +40,7 @@ const isProtectedProperty = (propName) =>
  * Safely renames identifiers in a piece of code using Babel's scope-aware renaming.
  */
 function renameIdentifiers(code, mapping, sourceInfo = {}) {
-    const { sourceFile = null, neighbors = [], displayName = null, suggestedPath = null } = sourceInfo;
+    const { sourceFile = null, neighbors = [], displayName = null, suggestedPath = null, moduleId = null, typeName = null } = sourceInfo;
     try {
         const ast = parser.parse(code, {
             sourceType: 'module',
@@ -74,6 +74,8 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             // Initialize file-level used names tracking on first run
                             if (!sourceInfo.usedNames) {
                                 sourceInfo.usedNames = new Set();
+                            }
+                            if (sourceInfo.usedNames.size === 0) {
                                 // Pre-fill with existing top-level variables to avoid collisions with un-renamed globals
                                 for (const name in p.scope.getAllBindings()) {
                                     sourceInfo.usedNames.add(name);
@@ -126,8 +128,14 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
 
                 const propName = p.node.property.name;
                 if (!propName) return;
-                if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
-                    const entry = mapping.properties[propName];
+                const scopedKey = moduleId ? `${moduleId}::${propName}` : null;
+                const typedKey = typeName ? `${typeName}.${propName}` : null;
+                const entry = (mapping.properties && (
+                    (scopedKey && Object.prototype.hasOwnProperty.call(mapping.properties, scopedKey) && mapping.properties[scopedKey]) ||
+                    (typedKey && Object.prototype.hasOwnProperty.call(mapping.properties, typedKey) && mapping.properties[typedKey]) ||
+                    (Object.prototype.hasOwnProperty.call(mapping.properties, propName) && mapping.properties[propName])
+                ));
+                if (entry) {
                     if (!entry) return;
                     let newName = null;
                     let confidence = 0.5;
@@ -203,8 +211,14 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
 
                 const propName = p.node.key.name;
                 if (!propName) return;
-                if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
-                    const entry = mapping.properties[propName];
+                const scopedKey = moduleId ? `${moduleId}::${propName}` : null;
+                const typedKey = typeName ? `${typeName}.${propName}` : null;
+                const entry = (mapping.properties && (
+                    (scopedKey && Object.prototype.hasOwnProperty.call(mapping.properties, scopedKey) && mapping.properties[scopedKey]) ||
+                    (typedKey && Object.prototype.hasOwnProperty.call(mapping.properties, typedKey) && mapping.properties[typedKey]) ||
+                    (Object.prototype.hasOwnProperty.call(mapping.properties, propName) && mapping.properties[propName])
+                ));
+                if (entry) {
                     if (!entry) return;
                     let newName = null;
                     let confidence = 0.5;
@@ -339,6 +353,7 @@ async function main() {
     let newCount = 0;
     let updatedCount = 0;
     let unchangedCount = 0;
+    const fileUsedNames = new Map();
 
     for (const file of chunkFiles) {
         try {
@@ -373,11 +388,19 @@ async function main() {
             generatedFiles.add(finalName);
 
             const neighbors = chunkMeta ? [...(chunkMeta.neighbors || []), ...(chunkMeta.outbound || [])] : [];
+            const fileKey = chunkMeta?.proposedPath || chunkMeta?.suggestedPath || chunkMeta?.kb_info?.suggested_path || chunkMeta?.displayName || chunkBaseName;
+            let usedNames = fileUsedNames.get(fileKey);
+            if (!usedNames) {
+                usedNames = new Set();
+                fileUsedNames.set(fileKey, usedNames);
+            }
             const renamedCode = renameIdentifiers(code, mapping, {
                 sourceFile: chunkBase,
                 neighbors,
                 displayName: chunkMeta?.displayName,
-                suggestedPath: chunkMeta?.proposedPath || chunkMeta?.kb_info?.suggested_path
+                suggestedPath: chunkMeta?.proposedPath || chunkMeta?.kb_info?.suggested_path,
+                moduleId: chunkMeta?.moduleId || null,
+                usedNames
             });
 
             const finalCodeRaw = renamedCode || code;

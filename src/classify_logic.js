@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * ARCHITECTURAL CLASSIFIER (Phase 4 & 5)
+ * ARCHITECTURAL CLASSIFIER (Phase 4)
  * This script runs after Static Analysis and Neural Anchoring.
  * It uses the enriched metadata to assign roles and identify the entry point.
  */
@@ -16,7 +16,7 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         throw new Error(`Graph data not found at ${graphDataPath}`);
     }
 
-    console.log(`[*] Phase 4 & 5: Architectural Classification (Version: ${targetVersion})...`);
+    console.log(`[*] Phase 4: Architectural Classification (Version: ${targetVersion})...`);
     const graphData = JSON.parse(fs.readFileSync(graphDataPath, 'utf8'));
     const nnMapping = fs.existsSync(mappingPath) ? JSON.parse(fs.readFileSync(mappingPath, 'utf8')) : { processed_chunks: [], variables: {} };
 
@@ -131,18 +131,25 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         // --- 2. Founder Roles (Semantic Inference) ---
         else if (isFounder) {
             // Assign roles based on capabilities found during static analysis
-            if (node.entrySignalCount > 0) {
-                node.role = 'CLI_ENTRY_POINT';
+            const codeLower = node.code?.toLowerCase() || "";
+            if (node.entrySignalCount > 0 || (codeLower.includes('command') && codeLower.includes('parse'))) {
+                node.role = 'CLI_COMMAND';
             } else if (node.hasGenerator) {
                 node.role = 'STREAM_PROCESSOR';
+            } else if (codeLower.includes('auth') || codeLower.includes('login') || codeLower.includes('token')) {
+                node.role = 'AUTH_SERVICE';
+            } else if (codeLower.includes('react') || codeLower.includes('ink') || codeLower.includes('usecontext')) {
+                node.role = 'UI_COMPONENT';
             } else if (node.hasNetwork) {
                 node.role = 'API_CLIENT';
             } else if (node.hasFS) {
                 node.role = 'FILESYSTEM_SERVICE';
-            } else if (node.hasStateMutator) {
+            } else if (node.hasStateMutator || codeLower.includes('setstate')) {
                 node.role = 'STATE_ORCHESTRATOR';
+            } else if (codeLower.includes('validate') || codeLower.includes('schema') || codeLower.includes('zod')) {
+                node.role = 'VALIDATION_LOGIC';
             } else {
-                node.role = 'APP_LOGIC'; // Default for Founder
+                node.role = 'UTILITY_HELPER';
             }
 
             node.label = (node.centrality > 0.05) ? 'CORE_MODULE' : 'INTERNAL_HELPER';
@@ -159,12 +166,15 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         // --- 4. Role-based Path Hinting (New) ---
         const roleToFolderMap = {
             'STREAM_ORCHESTRATOR': 'src/core/session',
-            'API_CLIENT': 'src/integrations/anthropic',
-            'FILESYSTEM_SERVICE': 'src/core/fs',
-            'UI_COMPONENT': 'src/ui/shared',
-            'CLI_ENTRY_POINT': 'src/cli',
-            'STATE_ORCHESTRATOR': 'src/core/state',
-            'APP_LOGIC': 'src/core/logic'
+            'STREAM_PROCESSOR': 'src/services/streaming',
+            'API_CLIENT': 'src/services/network',
+            'FILESYSTEM_SERVICE': 'src/services/fs',
+            'UI_COMPONENT': 'src/components',
+            'CLI_COMMAND': 'src/commands',
+            'STATE_ORCHESTRATOR': 'src/services/state',
+            'AUTH_SERVICE': 'src/services/auth',
+            'VALIDATION_LOGIC': 'src/utils/validation',
+            'UTILITY_HELPER': 'src/utils'
         };
 
         if (node.kb_info && node.kb_info.suggested_path && node.kb_info.suggested_path !== '-') {
@@ -172,12 +182,12 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         }
 
         if (roleToFolderMap[node.role] && !node.proposedPath) {
-            node.proposedPath = `${roleToFolderMap[node.role]}/${node.displayName || node.name}.ts`;
+            node.proposedPath = `${roleToFolderMap[node.role]}/${node.displayName || node.suggestedFilename || node.name}.ts`;
         }
     });
 
     // 5. Entry Point Identification
-    console.log(`[*] Phase 5: Identifying Main Entry Point...`);
+    console.log(`[*] Phase 4.1: Identifying Main Entry Point...`);
     let bestEntry = null;
     let maxEntryScore = -1;
 
