@@ -7,6 +7,21 @@ const { renameIdentifiers: liveRenamer } = require('./rename_chunks');
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 
+const KEYWORDS = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'async', 'null', 'true', 'false', 'undefined']);
+const GLOBALS = new Set(['console', 'Object', 'Array', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'JSON', 'Math', 'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'globalThis', 'window', 'global', 'process', 'require', 'module', 'exports', 'URL', 'Buffer']);
+const BUILTIN_PROPS = new Set([
+    'toString', 'constructor', 'hasOwnProperty', 'valueOf', 'propertyIsEnumerable', 'toLocaleString', 'isPrototypeOf', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__', '__proto__',
+    'length', 'map', 'forEach', 'filter', 'reduce', 'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'join', 'split',
+    'includes', 'indexOf', 'lastIndexOf', 'apply', 'call', 'bind',
+    'message', 'stack', 'name', 'code', 'status', 'headers', 'body',
+    'write', 'end', 'on', 'once', 'emit', 'removeListener', 'removeAllListeners',
+    'substring', 'substr', 'replace', 'trim', 'toLowerCase', 'toUpperCase', 'charAt',
+    'match', 'search', 'concat', 'entries', 'keys', 'values', 'from',
+    'stdout', 'stderr', 'stdin', 'destroyed', 'preInit'
+]);
+
+const IDENTIFIER_REGEX = /\b[a-zA-Z_$][a-zA-Z0-9_$]*\b/g;
+
 const OUTPUT_ROOT = './cascade_graph_analysis';
 const REGISTRY_PATH = path.join(OUTPUT_ROOT, 'logic_registry.json');
 const BOOTSTRAP_SOURCE_ROOT = './ml/bootstrap_data';
@@ -95,8 +110,127 @@ function isGenericProposedPath(candidatePath, chunkMeta) {
     return false;
 }
 
-function extractIdentifiers(code) {
+function buildGlobalIdentifierFrequency(chunksDir, chunkFiles) {
+    const freq = new Map();
+    let totalChunks = 0;
+    for (const file of chunkFiles) {
+        const fullPath = path.join(chunksDir, file);
+        if (!fs.existsSync(fullPath)) continue;
+        totalChunks++;
+        const code = fs.readFileSync(fullPath, 'utf8');
+        const seen = new Set();
+        IDENTIFIER_REGEX.lastIndex = 0;
+        let match;
+        while ((match = IDENTIFIER_REGEX.exec(code)) !== null) {
+            const id = match[0];
+            if (KEYWORDS.has(id) || GLOBALS.has(id) || BUILTIN_PROPS.has(id)) continue;
+            seen.add(id);
+        }
+        seen.forEach(id => {
+            freq.set(id, (freq.get(id) || 0) + 1);
+        });
+    }
+    return { freq, totalChunks };
+}
+
+function buildIdentifierImportance(code) {
+    const importance = new Map();
+    const mark = (name, level) => {
+        if (!name) return;
+        const prev = importance.get(name) || 0;
+        if (level > prev) importance.set(name, level);
+    };
+
     try {
+        const ast = parser.parse(code, {
+            sourceType: 'module',
+            plugins: ['jsx', 'typescript']
+        });
+
+        traverse(ast, {
+            ExportNamedDeclaration(path) {
+                const decl = path.node.declaration;
+                if (decl) {
+                    if (decl.id && decl.id.name) mark(decl.id.name, 3);
+                    if (decl.declarations) {
+                        decl.declarations.forEach(d => {
+                            if (d.id && d.id.name) mark(d.id.name, 3);
+                        });
+                    }
+                }
+                if (path.node.specifiers) {
+                    path.node.specifiers.forEach(s => {
+                        if (s.exported && s.exported.name) mark(s.exported.name, 3);
+                        if (s.local && s.local.name) mark(s.local.name, 3);
+                    });
+                }
+            },
+            ExportDefaultDeclaration(path) {
+                const decl = path.node.declaration;
+                if (decl && decl.id && decl.id.name) mark(decl.id.name, 3);
+                if (decl && decl.type === 'Identifier') mark(decl.name, 3);
+            },
+            FunctionDeclaration(path) {
+                if (path.node.id && path.node.id.name) mark(path.node.id.name, 3);
+            },
+            ClassDeclaration(path) {
+                if (path.node.id && path.node.id.name) mark(path.node.id.name, 3);
+            },
+            VariableDeclarator(path) {
+                if (path.node.id && path.node.id.type === 'Identifier') {
+                    const init = path.node.init;
+                    if (init && (init.type === 'FunctionExpression' || init.type === 'ArrowFunctionExpression' || init.type === 'ClassExpression')) {
+                        mark(path.node.id.name, 3);
+                    }
+                }
+            },
+            ReturnStatement(path) {
+                if (!path.node.argument) return;
+                path.traverse({
+                    Identifier(p) {
+                        mark(p.node.name, 2);
+                    }
+                });
+            },
+            ForStatement(path) {
+                const init = path.node.init;
+                if (init && init.type === 'VariableDeclaration') {
+                    init.declarations.forEach(d => {
+                        if (d.id && d.id.type === 'Identifier') mark(d.id.name, 1);
+                    });
+                }
+            },
+            ForInStatement(path) {
+                const left = path.node.left;
+                if (left && left.type === 'VariableDeclaration') {
+                    left.declarations.forEach(d => {
+                        if (d.id && d.id.type === 'Identifier') mark(d.id.name, 1);
+                    });
+                } else if (left && left.type === 'Identifier') {
+                    mark(left.name, 1);
+                }
+            },
+            ForOfStatement(path) {
+                const left = path.node.left;
+                if (left && left.type === 'VariableDeclaration') {
+                    left.declarations.forEach(d => {
+                        if (d.id && d.id.type === 'Identifier') mark(d.id.name, 1);
+                    });
+                } else if (left && left.type === 'Identifier') {
+                    mark(left.name, 1);
+                }
+            }
+        });
+    } catch (err) {
+        return importance;
+    }
+
+    return importance;
+}
+
+function extractIdentifiers(code, options = {}) {
+    try {
+        const { globalFreq = null, globalThreshold = null } = options;
         const ast = parser.parse(code, {
             sourceType: 'module',
             plugins: ['jsx', 'typescript']
@@ -106,24 +240,12 @@ function extractIdentifiers(code) {
         const properties = new Set();
         const variableCandidates = new Set();
         const variableCounts = new Map();
-        const keywords = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'async', 'null', 'true', 'false', 'undefined']);
-        const globals = new Set(['console', 'Object', 'Array', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'JSON', 'Math', 'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'globalThis', 'window', 'global', 'process', 'require', 'module', 'exports', 'URL', 'Buffer']);
-
-        const builtInProps = new Set([
-            'toString', 'constructor', 'hasOwnProperty', 'valueOf', 'propertyIsEnumerable', 'toLocaleString', 'isPrototypeOf', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__', '__proto__',
-            'length', 'map', 'forEach', 'filter', 'reduce', 'push', 'pop', 'shift', 'unshift', 'slice', 'splice', 'join', 'split',
-            'includes', 'indexOf', 'lastIndexOf', 'apply', 'call', 'bind',
-            'message', 'stack', 'name', 'code', 'status', 'headers', 'body',
-            'write', 'end', 'on', 'once', 'emit', 'removeListener', 'removeAllListeners',
-            'substring', 'substr', 'replace', 'trim', 'toLowerCase', 'toUpperCase', 'charAt',
-            'match', 'search', 'concat', 'entries', 'keys', 'values', 'from',
-            'stdout', 'stderr', 'stdin', 'destroyed', 'preInit'
-        ]);
+        const isDictObfuscated = id => globalFreq && globalThreshold && (globalFreq.get(id) || 0) >= globalThreshold;
 
         traverse(ast, {
             Identifier(path) {
                 const id = path.node.name;
-                if (keywords.has(id) || globals.has(id) || builtInProps.has(id)) return;
+                if (KEYWORDS.has(id) || GLOBALS.has(id) || BUILTIN_PROPS.has(id)) return;
 
                 // Check if it's a property of a member expression (not computed)
                 if (path.parentPath.isMemberExpression({ property: path.node, computed: false })) {
@@ -149,7 +271,7 @@ function extractIdentifiers(code) {
 
         variableCandidates.forEach(id => {
             const count = variableCounts.get(id) || 0;
-            if (!isHumanReadable(id) || isLikelyObfuscated(id, count)) {
+            if (!isHumanReadable(id) || isLikelyObfuscated(id, count) || isDictObfuscated(id)) {
                 variables.add(id);
             }
         });
@@ -163,18 +285,21 @@ function extractIdentifiers(code) {
         // Fallback to regex if parsing fails (e.g. invalid snippet)
         const variables = new Set();
         const properties = new Set();
-        const idRegex = /\b[a-zA-Z_$][a-zA-Z0-9_$]*\b/g;
+        const { globalFreq = null, globalThreshold = null } = options;
+        const isDictObfuscated = id => globalFreq && globalThreshold && (globalFreq.get(id) || 0) >= globalThreshold;
+        IDENTIFIER_REGEX.lastIndex = 0;
         let match;
         const counts = new Map();
-        while ((match = idRegex.exec(code)) !== null) {
+        while ((match = IDENTIFIER_REGEX.exec(code)) !== null) {
             const id = match[0];
+            if (KEYWORDS.has(id) || GLOBALS.has(id) || BUILTIN_PROPS.has(id)) continue;
             counts.set(id, (counts.get(id) || 0) + 1);
         }
         const isHumanReadable = id =>
             id.length > 4 || id.includes('_') || (/[a-z]/.test(id) && /[A-Z]/.test(id));
         const isLikelyObfuscated = (id, count) => count >= 20;
         counts.forEach((count, id) => {
-            if (!isHumanReadable(id) || isLikelyObfuscated(id, count)) variables.add(id);
+            if (!isHumanReadable(id) || isLikelyObfuscated(id, count) || isDictObfuscated(id)) variables.add(id);
         });
         return { variables: Array.from(variables), properties: [] };
     }
@@ -444,6 +569,7 @@ async function run() {
         console.error(`[!] Error: Chunks directory not found at ${chunksDir}`);
         process.exit(1);
     }
+    const chunkFiles = fs.readdirSync(chunksDir).filter(f => f.endsWith('.js'));
 
     let globalMapping = {
         version: "1.2",
@@ -472,6 +598,8 @@ async function run() {
     const logicDbByName = new Map(logicDb.map(entry => [entry.name, entry]));
 
     const CORE_LIBS = ['zod', 'react', 'react-dom', 'next', 'lucide', 'framer-motion', 'clsx', 'tailwind', 'radix-ui'];
+    const { freq: globalIdentifierFreq, totalChunks: globalIdentifierTotal } = buildGlobalIdentifierFrequency(chunksDir, chunkFiles);
+    const globalIdentifierThreshold = Math.max(5, Math.floor(globalIdentifierTotal * 0.2));
 
     // --- CONSOLIDATION PASS (Phase 0.9) ---
     // Group chunks by Module ID or Affinity Link to propose unified file paths *before* individual processing
@@ -682,19 +810,30 @@ Response JSON:
                 return originalCode; // Fallback to original code for context
             }
 
-            const { variables: origVars, properties: origProps } = extractIdentifiers(originalCode);
+            const { variables: origVars, properties: origProps } = extractIdentifiers(originalCode, {
+                globalFreq: globalIdentifierFreq,
+                globalThreshold: globalIdentifierThreshold
+            });
+            const importanceMap = buildIdentifierImportance(originalCode);
 
             // Filter for unknown identifiers using ORIGINAL mangled names
             // Filter for unknown identifiers using ORIGINAL mangled names
             // Send to LLM if: 1. No mapping exists OR 2. Mapping is low confidence OR 3. The "resolved" name is still 1-2 chars
-            const unknownVariables = origVars.filter(v => {
+            let unknownVariables = origVars.filter(v => {
                 const m = globalMapping.variables[v];
                 return !m || (m.confidence || 0) < 0.85 || (m.name && m.name.length <= 2);
             });
-            const unknownProperties = origProps.filter(p => {
+            let unknownProperties = origProps.filter(p => {
                 const m = globalMapping.properties[p];
                 return !m || (m.confidence || 0) < 0.85 || (m.name && m.name.length <= 2);
             });
+            unknownVariables = unknownVariables.sort((a, b) => {
+                const ia = importanceMap.get(a) || 0;
+                const ib = importanceMap.get(b) || 0;
+                if (ia !== ib) return ib - ia;
+                return a.localeCompare(b);
+            });
+            unknownProperties = unknownProperties.sort((a, b) => a.localeCompare(b));
 
             if (unknownVariables.length === 0 && unknownProperties.length === 0 && !isForce && !needsPathInference) {
                 if (!globalMapping.processed_chunks.includes(chunkMeta.name)) {
@@ -797,6 +936,10 @@ ${[...origVars, ...origProps].filter(id => {
                 const m = globalMapping.variables[id] || globalMapping.properties[id];
                 return `- ${id} is ${m.name} (Source: ${m.source}, Confidence: ${m.confidence})`;
             }).join('\n') || 'None'}
+
+TARGET IDENTIFIERS TO RESOLVE (prioritize higher-importance names first):
+Variables: ${vars.length > 0 ? vars.join(', ') : 'None'}
+Properties: ${props.length > 0 ? props.join(', ') : 'None'}
 
             ${goldReferenceCode ? `GOLD REFERENCE MATCH:
             This chunk matches a library signature (${(goldSimilarity * 100).toFixed(2)}% similarity). Use this to resolve ambiguous names.

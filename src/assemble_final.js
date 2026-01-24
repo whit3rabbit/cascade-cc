@@ -93,6 +93,102 @@ function normalizeMergedCode(code) {
     return generate(ast, { retainLines: false, compact: false, comments: true }).code;
 }
 
+function normalizeExports(code) {
+    let ast = null;
+    try {
+        ast = parser.parse(code, {
+            sourceType: 'unambiguous',
+            plugins: ['jsx', 'typescript', 'dynamicImport', 'topLevelAwait', 'classProperties']
+        });
+    } catch (err) {
+        return code;
+    }
+
+    const body = ast.program.body;
+    const exportSpecifiers = new Map();
+    const cjsExports = [];
+    const newBody = [];
+
+    const addSpecifier = (localName, exportedName) => {
+        if (!localName || !exportedName) return;
+        const key = `${localName}:${exportedName}`;
+        if (!exportSpecifiers.has(key)) {
+            exportSpecifiers.set(key, { localName, exportedName });
+        }
+    };
+
+    const collectId = id => {
+        if (id && id.type === 'Identifier') addSpecifier(id.name, id.name);
+    };
+
+    const isCjsExportAssignment = stmt => {
+        if (!stmt || stmt.type !== 'ExpressionStatement') return false;
+        const expr = stmt.expression;
+        if (!expr || expr.type !== 'AssignmentExpression') return false;
+        const left = expr.left;
+        if (!left || left.type !== 'MemberExpression') return false;
+        if (left.object && left.object.type === 'Identifier' && left.object.name === 'exports') return true;
+        if (left.object && left.object.type === 'MemberExpression') {
+            const obj = left.object;
+            if (obj.object && obj.object.type === 'Identifier' && obj.object.name === 'module' &&
+                obj.property && obj.property.type === 'Identifier' && obj.property.name === 'exports') {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    for (const stmt of body) {
+        if (isCjsExportAssignment(stmt)) {
+            cjsExports.push(stmt);
+            continue;
+        }
+
+        if (stmt.type === 'ExportNamedDeclaration') {
+            if (stmt.source) {
+                newBody.push(stmt);
+                continue;
+            }
+            if (stmt.declaration) {
+                const decl = stmt.declaration;
+                if (decl.type === 'VariableDeclaration') {
+                    decl.declarations.forEach(d => collectId(d.id));
+                } else if (decl.type === 'FunctionDeclaration' || decl.type === 'ClassDeclaration') {
+                    collectId(decl.id);
+                }
+                newBody.push(decl);
+            } else if (stmt.specifiers && stmt.specifiers.length > 0) {
+                stmt.specifiers.forEach(s => {
+                    const localName = s.local && s.local.name ? s.local.name : null;
+                    const exportedName = s.exported && s.exported.name ? s.exported.name : null;
+                    addSpecifier(localName, exportedName || localName);
+                });
+            }
+            continue;
+        }
+
+        newBody.push(stmt);
+    }
+
+    if (exportSpecifiers.size > 0) {
+        const specifiers = Array.from(exportSpecifiers.values())
+            .sort((a, b) => {
+                if (a.exportedName !== b.exportedName) return a.exportedName.localeCompare(b.exportedName);
+                return a.localName.localeCompare(b.localName);
+            })
+            .map(({ localName, exportedName }) => ({
+                type: 'ExportSpecifier',
+                local: { type: 'Identifier', name: localName },
+                exported: { type: 'Identifier', name: exportedName }
+            }));
+        newBody.push({ type: 'ExportNamedDeclaration', declaration: null, specifiers, source: null });
+    }
+
+    newBody.push(...cjsExports);
+    ast.program.body = newBody;
+    return generate(ast, { retainLines: true }).code;
+}
+
 function getLatestVersion(outputRoot) {
     if (!fs.existsSync(outputRoot)) return null;
     const versions = fs.readdirSync(outputRoot).filter(f => {
@@ -449,6 +545,9 @@ async function assemble(version) {
             }
         }
 
+        if (chunkList.length > 1) {
+            mergedCode = normalizeExports(mergedCode);
+        }
         mergedCode = normalizeMergedCode(mergedCode);
         fs.writeFileSync(fullOutputPath, mergedCode);
         console.log(`    [+] Generated: ${filePath}`);

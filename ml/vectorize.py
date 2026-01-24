@@ -239,6 +239,8 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
         chunks = json.load(f)
 
     results = []
+    total_attempted = 0
+    fail_count = 0
     
     stats = {"total_nodes": 0, "unknown_nodes": 0}
     with torch.no_grad():
@@ -266,7 +268,9 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
             literals = []
             flatten_ast(ast_root, sequence, symbols, literals, stats)
             
-            if not sequence: continue
+            if not sequence:
+                continue
+            total_attempted += 1
             
             # Truncate or pad to fixed length (matching model capacity)
             seq_tensor = torch.tensor(sequence[:effective_max_nodes]).unsqueeze(0)
@@ -290,6 +294,7 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
                 # Log first 5 node types in the offending sequence for debugging
                 debug_types = [NODE_TYPES[id] if id < len(NODE_TYPES) else f"OUT_OF_BOUNDS({id})" for id in sequence[:5]]
                 print(f"    Sample sequence types: {debug_types}")
+                fail_count += 1
                 continue
             results.append({
                 "name": chunk_name,
@@ -308,6 +313,13 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
     if stats["total_nodes"] > 0:
         unknown_pct = (stats["unknown_nodes"] / stats["total_nodes"]) * 100
         print(f"[*] Vocabulary Health Check: {unknown_pct:.2f}% UNKNOWN nodes")
+
+    if total_attempted > 0:
+        failure_rate = fail_count / total_attempted
+        if failure_rate > 0.15:
+            print(f"[!] Vectorization failed for {fail_count}/{total_attempted} chunks ({failure_rate * 100:.1f}%).")
+            print("[!] Aborting to avoid corrupt logic_db.json. Run 'npm run sync-vocab' and re-run vectorization.")
+            sys.exit(1)
 
     output_path = os.path.join(version_path, "metadata", "logic_db.json")
     with open(output_path, "w") as f:

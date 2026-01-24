@@ -77,3 +77,11 @@ Validated against a high-stress pool of 255 unseen structural chunks.
 | **Cloud Infrastucture** | `@aws-sdk/client-s3`, `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/client-sts` |
 | **Observability** | `@sentry/node`, `@opentelemetry/api`, `@segment/analytics-node` |
 | **Complex Parsing** | `ajv`, `zod`, `marked`, `tree-sitter-typescript` |
+
+### Recommendations & Observations
+
+#### 🎯 Success Metric
+For a "Production Grade" Brain (v1.2), you should look for:
+1.  **Avg-Library MRR:** > 0.92
+2.  **Min-Library MRR:** > 0.70
+3.  **Similarity Spread:** > 0.20

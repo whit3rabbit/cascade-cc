@@ -40,6 +40,19 @@ const ERROR_CALLEES = new Set([
     'panic'
 ]);
 
+const STOP_WORDS = new Set([
+    'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends',
+    'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try',
+    'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'async', 'null', 'true', 'false', 'undefined',
+    'the', 'and', 'that', 'with', 'from', 'into', 'when', 'where', 'have', 'has', 'had', 'also', 'then', 'than', 'only', 'over', 'under',
+    'more', 'less', 'not', 'yes', 'no', 'your', 'their', 'ours', 'ourselves', 'itself', 'it', 'its', 'this', 'these', 'those', 'here',
+    'there', 'what', 'which', 'who', 'whom', 'why', 'how', 'can', 'could', 'should', 'would', 'will', 'shall', 'may', 'might', 'must'
+]);
+
+function isStopWord(token) {
+    return STOP_WORDS.has(String(token || '').toLowerCase());
+}
+
 function getVersionRoots() {
     if (!fs.existsSync(CUSTOM_GOLD_DIR)) return [];
     const entries = fs.readdirSync(CUSTOM_GOLD_DIR, { withFileTypes: true });
@@ -246,10 +259,14 @@ function main() {
             const suggestedName = exports.find((n) => n !== 'default') || exports[0] || base;
 
             const tokens = new Set();
-            tokens.add(base);
-            if (suggestedName) tokens.add(suggestedName);
+            const addToken = (t) => {
+                if (!t || isStopWord(t)) return;
+                tokens.add(t);
+            };
+            addToken(base);
+            addToken(suggestedName);
             parsed.strings.forEach((s) => {
-                extractWordTokens(s).forEach((t) => tokens.add(t));
+                extractWordTokens(s).forEach((t) => addToken(t));
             });
 
             tokens.forEach((t) => {
@@ -275,7 +292,8 @@ function main() {
     fileInfos.forEach((info) => {
         const tokens = info.tokens
             .filter((t) => t.length >= 4 && t.length <= 40)
-            .filter((t) => !/^\d+$/.test(t));
+            .filter((t) => !/^\d+$/.test(t))
+            .filter((t) => !isStopWord(t));
 
         tokens.sort((a, b) => {
             const fa = globalTokenFreq.get(a.toLowerCase()) || 0;
