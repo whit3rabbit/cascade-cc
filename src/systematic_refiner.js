@@ -2,6 +2,9 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { jsonrepair } = require('jsonrepair');
+const parser = require('@babel/parser');
+const traverse = require('@babel/traverse').default;
+const generate = require('@babel/generator').default;
 
 const VERSION = '2.1.12';
 const VERSION_DIR = `./cascade_graph_analysis/${VERSION}`;
@@ -15,20 +18,12 @@ async function loadSystemMap() {
     return JSON.parse(fs.readFileSync(SYSTEM_MAP_PATH, 'utf8'));
 }
 
-function escapeRegExp(string) {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 async function refineCodebase() {
     console.log(`[*] Starting Systematic Refinement for version ${VERSION}...`);
     const systemMap = await loadSystemMap();
 
     const registry = systemMap.symbol_registry;
     const modules = systemMap.modules;
-
-    // Create a mapping of all symbols to be replaced
-    // We sort by length descending to avoid partial matches (e.g., replacement of 'abc' before 'abcd')
-    const sortedSymbols = Object.keys(registry).sort((a, b) => b.length - a.length);
 
     if (!fs.existsSync(OUTPUT_ROOT)) fs.mkdirSync(OUTPUT_ROOT, { recursive: true });
 
@@ -45,13 +40,39 @@ async function refineCodebase() {
             }
         }
 
-        // Perform Systematic Replacement
+        // Perform scope-aware replacement using Babel bindings
         let refinedCode = mergedCode;
-        for (const obf of sortedSymbols) {
-            const refined = registry[obf].refined;
-            // Use word boundary to avoid accidental partial matches in larger strings
-            const regex = new RegExp(`\\b${escapeRegExp(obf)}\\b`, 'g');
-            refinedCode = refinedCode.replace(regex, refined);
+        try {
+            const ast = parser.parse(mergedCode, {
+                sourceType: 'module',
+                plugins: ['jsx', 'typescript'],
+                allowUndeclaredExports: true
+            });
+
+            const renamedBindings = new WeakSet();
+            traverse(ast, {
+                Identifier(p) {
+                    const obf = p.node.name;
+                    const entry = registry[obf];
+                    if (!entry) return;
+                    const refined = typeof entry === 'string' ? entry : entry.refined;
+                    if (!refined || typeof refined !== 'string' || refined === obf) return;
+
+                    const binding = p.scope.getBinding(obf);
+                    if (!binding || renamedBindings.has(binding)) return;
+
+                    try {
+                        p.scope.rename(obf, refined);
+                        renamedBindings.add(binding);
+                    } catch (err) {
+                        console.warn(`[!] Failed to rename ${obf} -> ${refined}: ${err.message}`);
+                    }
+                }
+            });
+
+            refinedCode = generate(ast, { retainLines: true }).code;
+        } catch (err) {
+            console.warn(`[!] Babel refine failed for ${proposedPath}: ${err.message}. Falling back to original code.`);
         }
 
         // Construct Output Dir

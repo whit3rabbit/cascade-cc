@@ -128,6 +128,13 @@ function getDeobfuscatedChunkPath(chunksDir, chunkMeta) {
     const fullPath = path.join(chunksDir, finalName);
 
     if (fs.existsSync(fullPath)) return fullPath;
+    if (logicalName) {
+        const candidates = fs.readdirSync(chunksDir).filter(f => f.startsWith(`${chunkBase}_${logicalName}_`) && f.endsWith('.js'));
+        if (candidates.length > 0) {
+            candidates.sort();
+            return path.join(chunksDir, candidates[0]);
+        }
+    }
 
     // Fallback: Check if the original chunk name exists
     const fallbackPath = path.join(chunksDir, originalFile);
@@ -359,29 +366,23 @@ async function assemble(version) {
             const sccSource = nodeToScc.get(source);
             const sccTarget = nodeToScc.get(target);
             if (sccSource !== sccTarget && !condensation.hasDirectedEdge(sccTarget, sccSource)) {
-                // Dependency: source -> target means target should come AFTER source in assembly
-                // BUT wait, topoSort usually gives order where source comes first.
-                // In assembly, we want dependencies to be defined before they are used.
-                // So if source -> target, target is the dependency. target should come first?
-                // Actually, in JS bundles, if module A depends on B, B is often defined after A if it's a lazy load, 
-                // but usually dependencies are at the top.
-                // The existing logic used .reverse() on topologicalSort.
-                if (!condensation.hasDirectedEdge(sccSource, sccTarget)) {
-                    condensation.addDirectedEdge(sccSource, sccTarget);
+                // Dependency: source -> target means target should be defined before source.
+                // Build edges from dependency (target) to dependent (source) for topo ordering.
+                if (!condensation.hasDirectedEdge(sccTarget, sccSource)) {
+                    condensation.addDirectedEdge(sccTarget, sccSource);
                 }
             }
         });
 
         let sortedNames = [];
         try {
-            const sortedSccIndices = topologicalSort(condensation).reverse();
+            const sortedSccIndices = topologicalSort(condensation);
             sortedSccIndices.forEach(idx => {
                 const nodesInScc = sccs[idx];
-                // Heuristic sort within the SCC
+                // Heuristic sort within the SCC (cycle-safe)
                 const sortedNodesInScc = nodesInScc.sort((aName, bName) => {
                     const a = chunkList.find(c => c.name === aName);
                     const b = chunkList.find(c => c.name === bName);
-                    if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
                     return (a.startLine || 0) - (b.startLine || 0);
                 });
                 sortedNames.push(...sortedNodesInScc);
@@ -390,9 +391,8 @@ async function assemble(version) {
         } catch (err) {
             console.warn(`    [!] SCC Topo-sort failed: ${err.message}. Falling back to pure heuristic.`);
             sortedNames = chunkList.slice().sort((a, b) => {
-                if (b.outbound && b.outbound.includes(a.name)) return -1;
                 if (a.outbound && a.outbound.includes(b.name)) return 1;
-                if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
+                if (b.outbound && b.outbound.includes(a.name)) return -1;
                 return (a.startLine || 0) - (b.startLine || 0);
             }).map(c => c.name);
         }

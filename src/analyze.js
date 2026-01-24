@@ -146,16 +146,30 @@ function ensureTargetExists() {
  */
 function findStrings(node, strings = []) {
     if (!node) return strings;
-    if (node.type === 'StringLiteral') {
-        strings.push(node.value);
-    } else {
-        for (const key in node) {
-            const child = node[key];
+    const stack = [node];
+    while (stack.length > 0) {
+        const current = stack.pop();
+        if (!current) continue;
+        if (Array.isArray(current)) {
+            for (let i = current.length - 1; i >= 0; i--) {
+                const child = current[i];
+                if (child && typeof child === 'object') stack.push(child);
+            }
+            continue;
+        }
+        if (current.type === 'StringLiteral') {
+            strings.push(current.value);
+        }
+        for (const key in current) {
+            const child = current[key];
             if (child && typeof child === 'object') {
                 if (Array.isArray(child)) {
-                    child.forEach(c => findStrings(c, strings));
+                    for (let i = child.length - 1; i >= 0; i--) {
+                        const item = child[i];
+                        if (item && typeof item === 'object') stack.push(item);
+                    }
                 } else if (child.type) {
-                    findStrings(child, strings);
+                    stack.push(child);
                 }
             }
         }
@@ -172,30 +186,86 @@ const crypto = require('crypto');
  */
 function simplifyAST(node) {
     if (!node || typeof node !== 'object') return null;
-    if (Array.isArray(node)) {
-        return node.map((item, idx) => {
-            const res = simplifyAST(item);
-            if (res) res.slot = idx;
-            return res;
-        }).filter(Boolean);
-    }
 
-    const structure = { type: node.type };
-    if (node.callee && node.callee.name) structure.call = node.callee.name;
-    if (node.type === 'Identifier') structure.name = node.name;
+    const classifyLiteral = value => {
+        if (typeof value !== 'string') return null;
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        if (/^[A-Z0-9_]{3,}$/.test(trimmed)) return 'const';
+        if (/(^\.{1,2}\/)|[\\/]/.test(trimmed)) return 'path';
+        if (/^[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]{1,6}$/.test(trimmed)) return 'path';
+        return null;
+    };
 
-    // Literal Hashing Channel
-    if (node.type === 'StringLiteral' || node.type === 'NumericLiteral' || node.type === 'BooleanLiteral') {
-        const val = String(node.value);
-        structure.valHash = crypto.createHash('md5').update(val).digest('hex').slice(0, 8);
-    }
+    const skipKeys = new Set(['loc', 'start', 'end', 'comments']);
+    const resultMap = new Map();
+    const stack = [{ node, visited: false }];
 
-    const children = [];
-    for (const key in node) {
-        const val = node[key];
-        if (val && typeof val === 'object' && key !== 'loc' && key !== 'start' && key !== 'end' && key !== 'comments') {
-            const childResult = simplifyAST(val);
-            if (childResult) {
+    while (stack.length > 0) {
+        const frame = stack.pop();
+        const current = frame.node;
+        if (!current || typeof current !== 'object') continue;
+
+        if (!frame.visited) {
+            stack.push({ node: current, visited: true });
+            if (Array.isArray(current)) {
+                for (let i = current.length - 1; i >= 0; i--) {
+                    const child = current[i];
+                    if (child && typeof child === 'object') stack.push({ node: child, visited: false });
+                }
+            } else {
+                for (const key in current) {
+                    if (skipKeys.has(key)) continue;
+                    const val = current[key];
+                    if (val && typeof val === 'object') {
+                        if (Array.isArray(val)) {
+                            for (let i = val.length - 1; i >= 0; i--) {
+                                const item = val[i];
+                                if (item && typeof item === 'object') stack.push({ node: item, visited: false });
+                            }
+                        } else {
+                            stack.push({ node: val, visited: false });
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
+        if (Array.isArray(current)) {
+            const arrResult = [];
+            for (let idx = 0; idx < current.length; idx++) {
+                const child = current[idx];
+                const childResult = child && typeof child === 'object' ? resultMap.get(child) : null;
+                if (childResult) {
+                    childResult.slot = idx;
+                    arrResult.push(childResult);
+                }
+            }
+            resultMap.set(current, arrResult);
+            continue;
+        }
+
+        const structure = { type: current.type };
+        if (current.callee && current.callee.name) structure.call = current.callee.name;
+        if (current.type === 'Identifier') structure.name = current.name;
+
+        if (current.type === 'StringLiteral' || current.type === 'NumericLiteral' || current.type === 'BooleanLiteral') {
+            const val = String(current.value);
+            structure.valHash = crypto.createHash('md5').update(val).digest('hex').slice(0, 8);
+            if (current.type === 'StringLiteral') {
+                const kind = classifyLiteral(val);
+                if (kind) structure.valKind = kind;
+            }
+        }
+
+        const children = [];
+        for (const key in current) {
+            if (skipKeys.has(key)) continue;
+            const val = current[key];
+            if (val && typeof val === 'object') {
+                const childResult = resultMap.get(val);
+                if (!childResult) continue;
                 if (Array.isArray(childResult)) {
                     childResult.forEach(c => {
                         if (c) {
@@ -209,13 +279,12 @@ function simplifyAST(node) {
                 }
             }
         }
+
+        if (children.length > 0) structure.children = children;
+        resultMap.set(current, structure);
     }
 
-    if (children.length > 0) {
-        structure.children = children;
-    }
-
-    return structure;
+    return resultMap.get(node) || null;
 }
 
 function collapseProxyNodes(nodes) {

@@ -1,12 +1,12 @@
 [
     {
         "name": "zod",
-        "version": "4.3.5",
+        "version": "3.24.1",
         "fixed": true
     },
     {
         "name": "zod",
-        "version": "4.2.1",
+        "version": "3.24.0",
         "fixed": true
     },
     {

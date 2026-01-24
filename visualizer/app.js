@@ -77,15 +77,51 @@ async function init() {
             const term = e.target.value.toLowerCase();
             if (!term) {
                 renderer.setSetting('nodeReducer', null);
+                renderer.setSetting('edgeReducer', null);
             } else {
+                const matched = new Set();
+                graph.forEachNode((nodeId, attrs) => {
+                    if ((attrs.label || '').toLowerCase().includes(term)) matched.add(nodeId);
+                });
+
+                const neighbors = new Set();
+                const focusedEdges = new Set();
+                matched.forEach(nodeId => {
+                    graph.forEachNeighbor(nodeId, neighborId => {
+                        neighbors.add(neighborId);
+                    });
+                    graph.forEachEdge(nodeId, edgeId => {
+                        focusedEdges.add(edgeId);
+                    });
+                });
+
+                const focusNodes = new Set([...matched, ...neighbors]);
+
                 renderer.setSetting('nodeReducer', (node, data) => {
                     const res = { ...data };
-                    if (!data.label.toLowerCase().includes(term)) {
+                    if (!focusNodes.has(node)) {
                         res.label = '';
                         res.color = '#333';
                         res.zIndex = 0;
+                    } else if (matched.has(node)) {
+                        res.color = '#ffb86b';
+                        res.zIndex = 2;
                     } else {
+                        res.color = '#666';
                         res.zIndex = 1;
+                    }
+                    return res;
+                });
+
+                renderer.setSetting('edgeReducer', (edge, data) => {
+                    const res = { ...data };
+                    if (!focusedEdges.has(edge)) {
+                        res.hidden = true;
+                        res.color = '#1f1f1f';
+                    } else {
+                        res.hidden = false;
+                        res.color = '#ffb86b';
+                        res.size = 1.5;
                     }
                     return res;
                 });

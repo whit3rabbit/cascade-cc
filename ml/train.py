@@ -149,7 +149,8 @@ class TripletDataset(Dataset):
         # 1. Anchor
         anchor_seq = []
         anchor_lits = []
-        flatten_ast(anchor_ast, anchor_seq, [], anchor_lits, {"total_nodes": 0, "unknown_nodes": 0})
+        anchor_lit_kinds = []
+        flatten_ast(anchor_ast, anchor_seq, [], anchor_lits, {"total_nodes": 0, "unknown_nodes": 0}, literal_kinds=anchor_lit_kinds)
         
         # --- NUCLEAR OPTION: Node Type Masking (15%) ---
         for i in range(len(anchor_seq)):
@@ -161,13 +162,16 @@ class TripletDataset(Dataset):
             anchor_t = F.pad(anchor_t, (0, self.max_nodes - anchor_t.size(0)))
             
         anchor_lit_t = torch.tensor(anchor_lits[:MAX_LITERALS])
+        anchor_lit_protect = torch.tensor(anchor_lit_kinds[:MAX_LITERALS], dtype=torch.bool)
         if anchor_lit_t.size(0) < MAX_LITERALS:
             anchor_lit_t = F.pad(anchor_lit_t, (0, MAX_LITERALS - anchor_lit_t.size(0)), value=-1.0)
+            anchor_lit_protect = F.pad(anchor_lit_protect, (0, MAX_LITERALS - anchor_lit_protect.size(0)), value=0)
             
         # --- NUCLEAR OPTION: Literal Dropout (50%) Phase 1: Determine ---
         dropout_active = random.random() < 0.5
         if dropout_active:
-            anchor_lit_t = torch.full((MAX_LITERALS,), -1.0)
+            drop_mask = ~anchor_lit_protect
+            anchor_lit_t = torch.where(drop_mask, torch.full_like(anchor_lit_t, -1.0), anchor_lit_t)
 
         # 2. Positive: usually a synthetic obfuscation of the anchor,
         # but occasionally (10%) a different chunk from the same library
@@ -183,7 +187,8 @@ class TripletDataset(Dataset):
             pos_ast = generate_synthetic_obfuscation(anchor_ast)
         pos_seq = []
         pos_lits = []
-        flatten_ast(pos_ast, pos_seq, [], pos_lits, {"total_nodes": 0, "unknown_nodes": 0})
+        pos_lit_kinds = []
+        flatten_ast(pos_ast, pos_seq, [], pos_lits, {"total_nodes": 0, "unknown_nodes": 0}, literal_kinds=pos_lit_kinds)
         
         # --- NUCLEAR OPTION: Node Type Masking (15%) ---
         for i in range(len(pos_seq)):
@@ -211,12 +216,15 @@ class TripletDataset(Dataset):
             positive_t = F.pad(positive_t, (0, self.max_nodes - positive_t.size(0)))
             
         pos_lit_t = torch.tensor(pos_lits[:MAX_LITERALS])
+        pos_lit_protect = torch.tensor(pos_lit_kinds[:MAX_LITERALS], dtype=torch.bool)
         if pos_lit_t.size(0) < MAX_LITERALS:
             pos_lit_t = F.pad(pos_lit_t, (0, MAX_LITERALS - pos_lit_t.size(0)), value=-1.0)
+            pos_lit_protect = F.pad(pos_lit_protect, (0, MAX_LITERALS - pos_lit_protect.size(0)), value=0)
         
         # --- NUCLEAR OPTION: Literal Dropout (50%) Phase 2: Align ---
-        if dropout_active: 
-            pos_lit_t = torch.full((MAX_LITERALS,), -1.0)
+        if dropout_active:
+            drop_mask = ~pos_lit_protect
+            pos_lit_t = torch.where(drop_mask, torch.full_like(pos_lit_t, -1.0), pos_lit_t)
             
         return anchor_t, anchor_lit_t, positive_t, pos_lit_t, anchor_key
 
@@ -397,7 +405,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     if node_type_count < 2:
         print("[!] Error: NODE_TYPES is unexpectedly small; run 'npm run sync-vocab' before training.")
         return (0, 0, 0, 0), None
-    current_vocab_size = node_type_count + 5
+    current_vocab_size = node_type_count + 100
 
     if not is_sweep: print(f"[*] Starting 'Brain' Training on Bootstrap Data: {bootstrap_dir}")
     

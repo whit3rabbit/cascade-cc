@@ -319,7 +319,7 @@ NODE_TYPES = [
 ]
 
 TYPE_TO_ID = {t: i for i, t in enumerate(NODE_TYPES)}
-VOCAB_SIZE = len(NODE_TYPES)
+VOCAB_SIZE = len(NODE_TYPES) + 100
 
 # Model configuration
 MAX_NODES = 2048 # Safer default for Transformers. Use --batch_size 1 for 4096 on limited VRAM.

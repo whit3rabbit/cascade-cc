@@ -101,12 +101,12 @@ def get_literal_hash(value):
     # Range 0.0 to 1.0 (float)
     return int(hashlib.md5(s.encode()).hexdigest(), 16) % 10000000 / 10000000.0
 
-def flatten_ast(node, sequence, symbols, literals, stats, path="Root"):
+def flatten_ast(node, sequence, symbols, literals, stats, path="Root", literal_kinds=None):
     """Convert AST tree into a linear sequence of type IDs (DFS) and extract symbols with relative context keys"""
     stats["total_nodes"] += 1
     if isinstance(node, list):
         for i, item in enumerate(node):
-            flatten_ast(item, sequence, symbols, literals, stats, f"{path}[{i}]")
+            flatten_ast(item, sequence, symbols, literals, stats, f"{path}[{i}]", literal_kinds)
         return
 
     node_type = node.get("type", "UNKNOWN")
@@ -119,6 +119,8 @@ def flatten_ast(node, sequence, symbols, literals, stats, path="Root"):
     if "valHash" in node:
         val_hash_int = int(node["valHash"], 16)
         literals.append((val_hash_int % 10000000) / 10000000.0)
+        if literal_kinds is not None:
+            literal_kinds.append(node.get("valKind") in ("const", "path"))
     
     # Built-in detection
     if node_type == "CallExpression" and "call" in node:
@@ -147,7 +149,7 @@ def flatten_ast(node, sequence, symbols, literals, stats, path="Root"):
         
     for child in node.get("children", []):
         slot = child.get("slot", "child")
-        flatten_ast(child, sequence, symbols, literals, stats, f"{path}/{slot}")
+        flatten_ast(child, sequence, symbols, literals, stats, f"{path}/{slot}", literal_kinds)
 
 def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_override=None):
     torch.manual_seed(42)
@@ -176,7 +178,7 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
     if node_type_count < 2:
         print("[!] Error: NODE_TYPES is unexpectedly small; run 'npm run sync-vocab' before vectorizing.")
         sys.exit(1)
-    current_vocab_size = node_type_count + 5
+    current_vocab_size = node_type_count + 100
     model = CodeFingerprinter(vocab_size=current_vocab_size, max_nodes=effective_max_nodes).to(device)
     
     if os.path.exists(model_path):

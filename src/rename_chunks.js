@@ -130,11 +130,18 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                 if (!propName) return;
                 const scopedKey = moduleId ? `${moduleId}::${propName}` : null;
                 const typedKey = typeName ? `${typeName}.${propName}` : null;
-                const entry = (mapping.properties && (
-                    (scopedKey && Object.prototype.hasOwnProperty.call(mapping.properties, scopedKey) && mapping.properties[scopedKey]) ||
-                    (typedKey && Object.prototype.hasOwnProperty.call(mapping.properties, typedKey) && mapping.properties[typedKey]) ||
-                    (Object.prototype.hasOwnProperty.call(mapping.properties, propName) && mapping.properties[propName])
-                ));
+                let entrySource = null;
+                let entry = null;
+                if (mapping.properties && scopedKey && Object.prototype.hasOwnProperty.call(mapping.properties, scopedKey)) {
+                    entry = mapping.properties[scopedKey];
+                    entrySource = 'scoped';
+                } else if (mapping.properties && typedKey && Object.prototype.hasOwnProperty.call(mapping.properties, typedKey)) {
+                    entry = mapping.properties[typedKey];
+                    entrySource = 'typed';
+                } else if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
+                    entry = mapping.properties[propName];
+                    entrySource = 'global';
+                }
                 if (entry) {
                     if (!entry) return;
                     let newName = null;
@@ -181,6 +188,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             // Silently ignore invalid mappings
                             return;
                         }
+                        if (entrySource === 'global' && propName.length <= 2 && confidence < 0.98) return;
                         // SAFETY CHECKS:
                         const isObjectKnown = (p.node.object.type === 'Identifier' && mapping.variables && mapping.variables[p.node.object.name]);
                         const isHighConfidence = confidence >= 0.98;
@@ -213,11 +221,18 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                 if (!propName) return;
                 const scopedKey = moduleId ? `${moduleId}::${propName}` : null;
                 const typedKey = typeName ? `${typeName}.${propName}` : null;
-                const entry = (mapping.properties && (
-                    (scopedKey && Object.prototype.hasOwnProperty.call(mapping.properties, scopedKey) && mapping.properties[scopedKey]) ||
-                    (typedKey && Object.prototype.hasOwnProperty.call(mapping.properties, typedKey) && mapping.properties[typedKey]) ||
-                    (Object.prototype.hasOwnProperty.call(mapping.properties, propName) && mapping.properties[propName])
-                ));
+                let entrySource = null;
+                let entry = null;
+                if (mapping.properties && scopedKey && Object.prototype.hasOwnProperty.call(mapping.properties, scopedKey)) {
+                    entry = mapping.properties[scopedKey];
+                    entrySource = 'scoped';
+                } else if (mapping.properties && typedKey && Object.prototype.hasOwnProperty.call(mapping.properties, typedKey)) {
+                    entry = mapping.properties[typedKey];
+                    entrySource = 'typed';
+                } else if (mapping.properties && Object.prototype.hasOwnProperty.call(mapping.properties, propName)) {
+                    entry = mapping.properties[propName];
+                    entrySource = 'global';
+                }
                 if (entry) {
                     if (!entry) return;
                     let newName = null;
@@ -255,6 +270,7 @@ function renameIdentifiers(code, mapping, sourceInfo = {}) {
                             // Silently ignore invalid mappings (e.g. empty objects from registry)
                             return;
                         }
+                        if (entrySource === 'global' && propName.length <= 2 && confidence < 0.98) return;
                         const isHighConfidence = confidence >= 0.95;
                         const isDescriptive = propName.length > 3;
 
@@ -377,13 +393,15 @@ async function main() {
 
             logicalName = logicalName.replace(/[\/\\?%*:|"<>]/g, '_');
             const chunkBase = path.basename(file, '.js');
-            let finalName = file;
-            if (logicalName) {
-                const suffix = `_${logicalName}`;
-                if (!chunkBase.endsWith(suffix) && !chunkBase.includes(suffix)) { // Added includes check to be safer
-                    finalName = `${chunkBase}_${logicalName}.js`;
-                }
+            let finalName = logicalName ? `${chunkBase}_${logicalName}.js` : file;
+            let dedupName = finalName;
+            let counter = 2;
+            while (generatedFiles.has(dedupName)) {
+                const base = logicalName ? `${chunkBase}_${logicalName}` : chunkBase;
+                dedupName = `${base}_${counter}.js`;
+                counter++;
             }
+            finalName = dedupName;
             const outputPath = path.join(deobfuscatedDir, finalName);
             generatedFiles.add(finalName);
 

@@ -104,6 +104,8 @@ function extractIdentifiers(code) {
 
         const variables = new Set();
         const properties = new Set();
+        const variableCandidates = new Set();
+        const variableCounts = new Map();
         const keywords = new Set(['break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'enum', 'await', 'async', 'null', 'true', 'false', 'undefined']);
         const globals = new Set(['console', 'Object', 'Array', 'String', 'Number', 'Boolean', 'Promise', 'Error', 'JSON', 'Math', 'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'globalThis', 'window', 'global', 'process', 'require', 'module', 'exports', 'URL', 'Buffer']);
 
@@ -136,11 +138,19 @@ function extractIdentifiers(code) {
                 }
 
                 // Otherwise, it's a variable/binding
-                // IGNORE human-readable names: length > 4 or containing underscores or camelCase
-                const isHumanReadable = id.length > 4 || id.includes('_') || (/[a-z]/.test(id) && /[A-Z]/.test(id));
-                if (!isHumanReadable) {
-                    variables.add(id);
-                }
+                variableCandidates.add(id);
+                variableCounts.set(id, (variableCounts.get(id) || 0) + 1);
+            }
+        });
+
+        const isHumanReadable = id =>
+            id.length > 4 || id.includes('_') || (/[a-z]/.test(id) && /[A-Z]/.test(id));
+        const isLikelyObfuscated = (id, count) => count >= 20;
+
+        variableCandidates.forEach(id => {
+            const count = variableCounts.get(id) || 0;
+            if (!isHumanReadable(id) || isLikelyObfuscated(id, count)) {
+                variables.add(id);
             }
         });
 
@@ -155,11 +165,17 @@ function extractIdentifiers(code) {
         const properties = new Set();
         const idRegex = /\b[a-zA-Z_$][a-zA-Z0-9_$]*\b/g;
         let match;
+        const counts = new Map();
         while ((match = idRegex.exec(code)) !== null) {
             const id = match[0];
-            const isHumanReadable = id.length > 4 || id.includes('_') || (/[a-z]/.test(id) && /[A-Z]/.test(id));
-            if (!isHumanReadable) variables.add(id);
+            counts.set(id, (counts.get(id) || 0) + 1);
         }
+        const isHumanReadable = id =>
+            id.length > 4 || id.includes('_') || (/[a-z]/.test(id) && /[A-Z]/.test(id));
+        const isLikelyObfuscated = (id, count) => count >= 20;
+        counts.forEach((count, id) => {
+            if (!isHumanReadable(id) || isLikelyObfuscated(id, count)) variables.add(id);
+        });
         return { variables: Array.from(variables), properties: [] };
     }
 }
