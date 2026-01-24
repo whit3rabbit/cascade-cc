@@ -30,6 +30,7 @@ function propagateNames(version) {
     const versionPath = path.join(outputRoot, version);
     const mappingPath = path.join(versionPath, 'metadata', 'mapping.json');
     const graphMapPath = path.join(versionPath, 'metadata', 'graph_map.json');
+    const neighborBoostPath = path.join(versionPath, 'metadata', 'neighbor_boosts.json');
 
     if (!fs.existsSync(mappingPath) || !fs.existsSync(graphMapPath)) {
         console.error(`[!] Missing mapping or graph map for ${version}`);
@@ -44,25 +45,41 @@ function propagateNames(version) {
     const neighborHints = mapping.neighbor_hints || {};
     let updates = 0;
 
-    chunks.forEach(chunk => {
-        const sim = chunk.matchSimilarityBoosted ?? chunk.matchSimilarity ?? 0;
-        if (sim < threshold) return;
-        const lib = extractLibFromLabel(chunk.matchLabel);
-        if (!lib) return;
-
-        const neighbors = [...(chunk.neighbors || []), ...(chunk.outbound || [])];
-        neighbors.forEach(neighbor => {
+    if (fs.existsSync(neighborBoostPath)) {
+        const boosts = JSON.parse(fs.readFileSync(neighborBoostPath, 'utf8'));
+        Object.entries(boosts).forEach(([neighbor, hint]) => {
+            if (!hint || !hint.lib) return;
             const existing = neighborHints[neighbor];
-            if (!existing || (existing.similarity || 0) < sim) {
+            if (!existing || (existing.similarity || 0) < (hint.confidence || 0)) {
                 neighborHints[neighbor] = {
-                    lib,
-                    similarity: sim,
-                    source: chunk.name
+                    lib: hint.lib,
+                    similarity: hint.confidence || 0,
+                    source: hint.source || 'neighbor_boosts'
                 };
                 updates++;
             }
         });
-    });
+    } else {
+        chunks.forEach(chunk => {
+            const sim = chunk.matchSimilarityBoosted ?? chunk.matchSimilarity ?? 0;
+            if (sim < threshold) return;
+            const lib = extractLibFromLabel(chunk.matchLabel);
+            if (!lib) return;
+
+            const neighbors = [...(chunk.neighbors || []), ...(chunk.outbound || [])];
+            neighbors.forEach(neighbor => {
+                const existing = neighborHints[neighbor];
+                if (!existing || (existing.similarity || 0) < sim) {
+                    neighborHints[neighbor] = {
+                        lib,
+                        similarity: sim,
+                        source: chunk.name
+                    };
+                    updates++;
+                }
+            });
+        });
+    }
 
     mapping.neighbor_hints = neighborHints;
     mapping.metadata = mapping.metadata || {};

@@ -3,6 +3,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const readline = require('readline');
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
 const generate = require('@babel/generator').default;
@@ -1006,7 +1007,7 @@ class CascadeGraph {
         });
     }
 
-    saveResults(versionDir) {
+    async saveResults(versionDir) {
         const chunksDir = path.join(versionDir, 'chunks');
         const metadataDir = path.join(versionDir, 'metadata');
 
@@ -1109,35 +1110,43 @@ class CascadeGraph {
 
         // Save Structural ASTs for ML anchoring
         const astOutputPath = path.join(metadataDir, 'simplified_asts.json');
-        const astLines = fs.existsSync(this.structuralAstTempPath)
-            ? fs.readFileSync(this.structuralAstTempPath, 'utf8').split('\n').filter(Boolean)
-            : [];
         const astStream = fs.createWriteStream(astOutputPath);
         astStream.write('{\n');
         let first = true;
-        for (const line of astLines) {
-            let parsed = null;
-            try {
-                parsed = JSON.parse(line);
-            } catch (err) {
-                console.warn(`[!] Skipping malformed AST line: ${err.message}`);
-                continue;
+
+        if (fs.existsSync(this.structuralAstTempPath)) {
+            const rl = readline.createInterface({
+                input: fs.createReadStream(this.structuralAstTempPath),
+                crlfDelay: Infinity
+            });
+            for await (const line of rl) {
+                if (!line) continue;
+                let parsed = null;
+                try {
+                    parsed = JSON.parse(line);
+                } catch (err) {
+                    console.warn(`[!] Skipping malformed AST line: ${err.message}`);
+                    continue;
+                }
+                const name = parsed.name;
+                const node = this.nodes.get(name);
+                const payload = {
+                    ast: parsed.ast,
+                    kb_info: parsed.kb_info,
+                    hints: parsed.hints,
+                    category: node?.category || parsed.category,
+                    role: node?.role || parsed.role,
+                    moduleId: node?.moduleId || parsed.moduleId || null
+                };
+                if (!astStream.write(`${first ? '' : ',\n'}${JSON.stringify(name)}:${JSON.stringify(payload)}`)) {
+                    await new Promise(resolve => astStream.once('drain', resolve));
+                }
+                first = false;
             }
-            const name = parsed.name;
-            const node = this.nodes.get(name);
-            const payload = {
-                ast: parsed.ast,
-                kb_info: parsed.kb_info,
-                hints: parsed.hints,
-                category: node?.category || parsed.category,
-                role: node?.role || parsed.role,
-                moduleId: node?.moduleId || parsed.moduleId || null
-            };
-            astStream.write(`${first ? '' : ',\n'}${JSON.stringify(name)}:${JSON.stringify(payload)}`);
-            first = false;
         }
+
         astStream.write('\n}\n');
-        astStream.end();
+        await new Promise(resolve => astStream.end(resolve));
         if (fs.existsSync(this.structuralAstTempPath)) {
             fs.unlinkSync(this.structuralAstTempPath);
         }
@@ -1232,7 +1241,7 @@ async function run() {
     OUTPUT_BASE = path.join(OUTPUT_ROOT, version);
     console.log(`[*] Output directory: ${OUTPUT_BASE}`);
 
-    graph.saveResults(OUTPUT_BASE);
+    await graph.saveResults(OUTPUT_BASE);
 
     console.log(`\n[COMPLETE] Static Analysis Phase Done.`);
     console.log(`Phase 1-2 results saved to: ${OUTPUT_BASE}`);

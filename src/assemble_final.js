@@ -70,6 +70,29 @@ function detectTopLevelImports(code) {
     return false;
 }
 
+function normalizeMergedCode(code) {
+    let ast = null;
+    try {
+        ast = parser.parse(code, {
+            sourceType: 'unambiguous',
+            plugins: ['jsx', 'typescript', 'dynamicImport', 'topLevelAwait', 'classProperties']
+        });
+    } catch (err) {
+        return code;
+    }
+
+    let seenUseStrict = false;
+    ast.program.body = ast.program.body.filter(stmt => {
+        if (stmt.type === 'ExpressionStatement' && stmt.directive === 'use strict') {
+            if (seenUseStrict) return false;
+            seenUseStrict = true;
+        }
+        return true;
+    });
+
+    return generate(ast, { retainLines: false, compact: false, comments: true }).code;
+}
+
 function getLatestVersion(outputRoot) {
     if (!fs.existsSync(outputRoot)) return null;
     const versions = fs.readdirSync(outputRoot).filter(f => {
@@ -426,6 +449,7 @@ async function assemble(version) {
             }
         }
 
+        mergedCode = normalizeMergedCode(mergedCode);
         fs.writeFileSync(fullOutputPath, mergedCode);
         console.log(`    [+] Generated: ${filePath}`);
     }

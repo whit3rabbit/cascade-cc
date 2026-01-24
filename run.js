@@ -175,7 +175,56 @@ switch (command) {
     case 'deobfuscate':
     case 'assemble':
     case 'refine':
-    case 'anchor':
+    case 'anchor': {
+        const child = spawn(config.cmd, config.args, {
+            stdio: 'inherit',
+            shell: true,
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+        });
+        child.on('exit', (code) => {
+            if (code !== 0) process.exit(code);
+
+            const extractTargetVersion = (argv) => {
+                const versionIdx = argv.indexOf('--version');
+                const nonFlagArgs = [];
+                for (let i = 0; i < argv.length; i++) {
+                    const arg = argv[i];
+                    if (arg === '--version') {
+                        i += 1;
+                        continue;
+                    }
+                    if (arg.startsWith('--')) continue;
+                    nonFlagArgs.push(arg);
+                }
+                return versionIdx !== -1 ? argv[versionIdx + 1] : nonFlagArgs[0];
+            };
+
+            const targetVersion = extractTargetVersion(args);
+            if (!targetVersion) {
+                console.warn('[!] No target version detected for propagate-names; skipping.');
+                process.exit(0);
+            }
+
+            const classifyChild = spawn('node', ['src/classify_logic.js', targetVersion], {
+                stdio: 'inherit',
+                shell: true,
+                env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+            });
+            classifyChild.on('exit', (classifyCode) => {
+                if (classifyCode !== 0) process.exit(classifyCode);
+                const propagateChild = spawn('node', ['src/propagate_names.js', targetVersion], {
+                    stdio: 'inherit',
+                    shell: true,
+                    env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+                });
+                propagateChild.on('exit', (propCode) => {
+                    process.exit(propCode);
+                });
+            });
+        });
+        break;
+    }
+
     case 'classify':
     case 'propagate-names': {
         const child = spawn(config.cmd, config.args, {
@@ -225,17 +274,25 @@ switch (command) {
             shell: true,
             env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
         });
-        anchorChild.on('exit', (code) => {
-            if (code !== 0) process.exit(code);
-            const classifyChild = spawn('node', ['src/classify_logic.js', targetVersion], {
-                stdio: 'inherit',
-                shell: true,
-                env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+            anchorChild.on('exit', (code) => {
+                if (code !== 0) process.exit(code);
+                const classifyChild = spawn('node', ['src/classify_logic.js', targetVersion], {
+                    stdio: 'inherit',
+                    shell: true,
+                    env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+                });
+                classifyChild.on('exit', (classifyCode) => {
+                    if (classifyCode !== 0) process.exit(classifyCode);
+                    const propagateChild = spawn('node', ['src/propagate_names.js', targetVersion], {
+                        stdio: 'inherit',
+                        shell: true,
+                        env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+                    });
+                    propagateChild.on('exit', (propCode) => {
+                        process.exit(propCode);
+                    });
+                });
             });
-            classifyChild.on('exit', (classifyCode) => {
-                process.exit(classifyCode);
-            });
-        });
         break;
     }
 

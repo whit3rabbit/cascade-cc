@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 import json
 import sys
 import os
@@ -56,9 +57,20 @@ class CodeFingerprinter(nn.Module):
             max_nodes=max_nodes,
         )
         
-        # Permutation-invariant literal channel: Process each hash independently then pool
-        self.literal_fc = nn.Linear(1, 32)
+        # Permutation-invariant literal channel: sinusoidal encoding before projection
+        self.literal_in_dim = 16
+        freqs = torch.pow(2.0, torch.arange(self.literal_in_dim // 2)) * (2 * math.pi)
+        self.register_buffer("literal_freqs", freqs)
+        self.literal_fc = nn.Linear(self.literal_in_dim, 32)
         self.literal_proj = nn.Linear(32, 64)
+
+    def encode_literals(self, literal_vectors):
+        # literal_vectors: (batch, L), values in [0,1]
+        vals = literal_vectors.unsqueeze(-1).float()
+        phases = vals * self.literal_freqs
+        sin = torch.sin(phases)
+        cos = torch.cos(phases)
+        return torch.cat([sin, cos], dim=-1)
 
     def forward(self, x, literal_vectors=None):
         # x: (batch, seq_len)
@@ -70,8 +82,9 @@ class CodeFingerprinter(nn.Module):
             # literal_vectors: (batch, 32)
             # mask out padding (-1.0)
             lit_mask = (literal_vectors != -1.0).float().unsqueeze(-1)
-            # Process each literal: (batch, 32, 1) -> (batch, 32, 32)
-            lit_embeds = torch.relu(self.literal_fc(literal_vectors.unsqueeze(-1)))
+            lit_features = self.encode_literals(literal_vectors)
+            # Process each literal: (batch, 32, 16) -> (batch, 32, 32)
+            lit_embeds = torch.relu(self.literal_fc(lit_features))
             # Average pool over literals
             masked_lits = lit_embeds * lit_mask
             lit_feat = torch.sum(masked_lits, dim=1) / torch.clamp(torch.sum(lit_mask, dim=1), min=1e-9)

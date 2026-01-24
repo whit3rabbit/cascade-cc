@@ -1,6 +1,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 /**
  * ARCHITECTURAL CLASSIFIER (Phase 4)
@@ -19,6 +20,27 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
     console.log(`[*] Phase 4: Architectural Classification (Version: ${targetVersion})...`);
     const graphData = JSON.parse(fs.readFileSync(graphDataPath, 'utf8'));
     const nnMapping = fs.existsSync(mappingPath) ? JSON.parse(fs.readFileSync(mappingPath, 'utf8')) : { processed_chunks: [], variables: {} };
+
+    const toSafeName = (value) => String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+    const isChunkyName = (value) => /^chunk\d+$/i.test(String(value || ''));
+
+    const getSemanticName = (node) => {
+        if (node.proposedPath) {
+            return path.basename(node.proposedPath, path.extname(node.proposedPath));
+        }
+        if (node.displayName) return node.displayName;
+        if (node.suggestedFilename && !isChunkyName(node.suggestedFilename)) return node.suggestedFilename;
+
+        const roleTag = toSafeName(node.role || 'module') || 'module';
+        const centrality = node.centrality || 0;
+        const tier = centrality >= 0.15 ? 'high' : centrality >= 0.06 ? 'mid' : 'low';
+        const hash = crypto.createHash('md5').update(`${roleTag}:${centrality}`).digest('hex').slice(0, 3);
+        return `${roleTag}_${tier}_${hash}`;
+    };
 
     // Optimize variable lookup (same as in analyze.js previously)
     const varSourceMap = new Map();
@@ -182,7 +204,7 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         }
 
         if (roleToFolderMap[node.role] && !node.proposedPath) {
-            node.proposedPath = `${roleToFolderMap[node.role]}/${node.displayName || node.suggestedFilename || node.name}.ts`;
+            node.proposedPath = `${roleToFolderMap[node.role]}/${getSemanticName(node)}.ts`;
         }
     });
 
