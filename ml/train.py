@@ -698,6 +698,11 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             if mask_same_library and per_lib_mrr:
                 print(f"    Validation Min-Library MRR: {min_lib_mrr:.4f}")
                 print(f"    Validation Avg-Library MRR: {avg_lib_mrr:.4f}")
+                print("    Troubleshooting (Bottom 3 Libraries by MRR):")
+                worst_libs = sorted(per_lib_mrr.items(), key=lambda x: x[1])[:3]
+                for lib, mrr_score in worst_libs:
+                    lib_margin = per_lib_margins.get(lib, 0.0)
+                    print(f"      - {lib.ljust(20)}: MRR {mrr_score:.4f} | Margin: {lib_margin:.4f}")
             if checkpoint_dir and (epoch + 1) % checkpoint_interval == 0:
                 checkpoint_epoch = effective_epoch
                 checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{checkpoint_epoch}.pth")
