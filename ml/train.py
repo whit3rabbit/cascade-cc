@@ -365,7 +365,7 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
         avg_lib_mrr,
     )
 
-def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_lib_count=3, val_split=0.0, val_max_chunks=None, load_checkpoint=False, checkpoint_interval=0, lr_decay_epoch=0, lr_decay_factor=1.0, preset_name=None):
+def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, margin=0.5, embed_dim=32, hidden_dim=128, is_sweep=False, device_name="cuda", max_nodes_override=None, val_library=None, val_lib_count=3, val_split=0.0, val_max_chunks=None, load_checkpoint=False, checkpoint_interval=0, lr_decay_epoch=0, lr_decay_factor=1.0, preset_name=None, checkpoint_dir_override=None):
     # Device discovery (CUDA -> MPS -> CPU)
     if device_name == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -521,7 +521,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     # Checkpoint directory and resume behavior
     checkpoint_dir = None
     if not is_sweep:
-        checkpoint_dir = os.path.join(os.path.dirname(__file__), "checkpoints")
+        checkpoint_dir = checkpoint_dir_override or os.getenv("ML_CHECKPOINT_DIR") or os.path.join(os.path.dirname(__file__), "checkpoints")
         if checkpoint_interval and checkpoint_interval > 0:
             os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -557,6 +557,9 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             sys.exit(1)
         if checkpoint_path:
             start_epoch = checkpoint_epoch
+            print(f"[*] Using latest checkpoint from {checkpoint_dir}: {checkpoint_path}")
+        else:
+            print(f"[*] No checkpoints found in {checkpoint_dir}. Falling back to {model_path}.")
         print(f"[*] Found existing model at {load_path}. Attempting to load...")
         try:
             checkpoint = torch.load(load_path, map_location=device)
@@ -843,6 +846,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_decay_epoch", type=int, default=int(os.getenv("ML_TRAIN_LR_DECAY_EPOCH", "0")), help="Apply LR decay at this epoch (0 disables)")
     parser.add_argument("--lr_decay_factor", type=float, default=float(os.getenv("ML_TRAIN_LR_DECAY_FACTOR", "1.0")), help="LR decay multiplier (e.g., 0.1)")
     parser.add_argument("--checkpoint_interval", type=int, default=int(os.getenv("ML_TRAIN_CHECKPOINT_INTERVAL", "0")), help="Save checkpoints every N epochs (0 disables)")
+    parser.add_argument("--checkpoint_dir", type=str, default=os.getenv("ML_CHECKPOINT_DIR", ""), help="Override checkpoint directory")
     parser.add_argument("--force", action="store_true", help="Force loading weights even if vocabulary size mismatches")
     parser.add_argument("--sweep", action="store_true", help="Run hyperparameter sweep")
     parser.add_argument("--finetune", action="store_true", help="Load existing model.pth to continue training")
@@ -921,4 +925,5 @@ if __name__ == "__main__":
             val_lib_count=args.val_lib_count,
             val_split=val_split,
             val_max_chunks=val_max_chunks,
+            checkpoint_dir_override=(args.checkpoint_dir or None),
         )
