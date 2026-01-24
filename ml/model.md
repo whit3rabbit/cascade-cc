@@ -2,12 +2,14 @@
 
 ## 1. Model Summary
 
-The **Cascade-CC Structural DNA Model** is a specialized Transformer-based Siamese Network designed to identify JavaScript code logic via its Abstract Syntax Tree (AST) topology. Version 1.2 features an expanded hidden dimension and a doubled context window (1024 nodes), allowing it to capture the "fingerprints" of complex vendor libraries (e.g., AWS SDK, Sentry, Anthropic SDK) with high precision, even after aggressive minification.
+The **Cascade-CC Structural DNA Model** is a specialized Transformer-based Siamese Network designed to identify JavaScript code logic via its Abstract Syntax Tree (AST) topology. Version 1.2 features an expanded hidden dimension and a doubled context window, allowing it to capture the "fingerprints" of complex vendor libraries (e.g., AWS SDK, Sentry, Anthropic SDK) with high precision, even after aggressive minification.
+
+The "Brain" scales its resolution (context window) based on the hardware it is running on.
 
 ## 2. Technical Specifications
 
 *   **Architecture:** Siamese Transformer Encoder
-*   **Context Window:** 1024 AST Nodes (Auto-detected for CUDA)
+*   **Context Window:** 2048 AST Nodes (Auto-scales based on VRAM)
 *   **Embedding Dimension:** 32
 *   **Hidden Dimension:** 256
 *   **Peak Performance (v1.2):** Epoch 8
@@ -23,7 +25,7 @@ The **Cascade-CC Structural DNA Model** is a specialized Transformer-based Siame
 *   **Augmentation:** Nuclear-grade structural mangling: 50% Literal Dropout, 15% Node Masking, and 30% Sequence Jittering.
 *   **Mining Strategy:** **Vectorized Hard Negative Mining**. The model identifies the "hardest" negatives (most structurally similar non-matches) within each batch to maximize discrimination.
 *   **Validation Strategy:** Leave-Multi-Library-Out (LMLO). Validated against 10 completely unseen libraries including `aws-sdk`, `anthropic-ai/sdk`, and `sentry/node`.
-*   **Training Command:** `node run train --device cuda --batch_size 64 --hidden_dim 256 --max_nodes 1024 --margin 1.2 --lr 0.00002 --finetune`
+*   **Training Command:** `node run train --device cuda --batch_size 64 --hidden_dim 256 --max_nodes 2048 --margin 1.2 --lr 0.00002 --finetune`
 
 ## 4. Performance Metrics (v1.2 Final Run)
 
@@ -49,13 +51,13 @@ Validated against a high-stress pool of 255 unseen structural chunks.
 
 ## 6. Limitations & Biases
 
-*   **Context Saturation:** At 1024 nodes, very small helper functions (e.g., `isObject`) may appear identical across different libraries.
+*   **Context Saturation:** At 2048 nodes, very small helper functions (e.g., `isObject`) may appear identical across different libraries.
 *   **Literal Blindness:** Highly effective against obfuscation, but requires the **Literal Channel** to distinguish between functions with identical control flow (e.g., two different string-concatenation utilities).
 
 ## 7. Version History
 *   **v1.0 (Lean):** Embed 32/Hidden 128. Fastest inference, good for simple logic.
 *   **v1.1 (Production):** Margin 0.8, LR 0.001. Balanced performance.
-*   **v1.2 (High-Res):** **Current.** Embed 32/Hidden 256, 1024 Nodes. Significant jump in `MinLib MRR` (0.50 -> 0.89). Optimized for deep identification of complex SDKs (AWS, Anthropic, Sentry).
+*   **v1.2 (High-Res):** **Current.** Embed 32/Hidden 256, 2048 Nodes. Significant jump in `MinLib MRR` (0.50 -> 0.89). Optimized for deep identification of complex SDKs (AWS, Anthropic, Sentry).
 
 ---
 

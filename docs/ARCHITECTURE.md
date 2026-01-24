@@ -42,79 +42,64 @@ The repository is partitioned into three main layers:
 
 ```mermaid
 flowchart TD
-  subgraph "Phase 1: Bootstrapping & Training"
-    B1[Bootstrap Libs] --> B2[Extract Gold ASTs]
-    B2 --> B3[Train Transformer]
-    B3 --> B4[ml/model.pth]
-  end
+    subgraph "Setup"
+        S1[Bootstrap Libs] --> S2[Train Transformer]
+        S2 --> S3[ml/model.pth]
+    end
 
-  subgraph "Phase 2: Analysis & Neural Anchoring"
-    A1[Analyze Target Bundle] --> A2[Chunking & Graph Mapping]
-    A2 --> A3[Vectorize Chunks]
-    A3 --> A4[Neural Anchoring]
-    A4 --> A5[logic_registry.json / KB Match]
-  end
+    subgraph "Phase 1: Static Analysis & Chunking"
+        A1[Target Bundle] --> P1[analyze.js]
+        P1 --> O1[Chunks & Initial Metadata]
+    end
 
-  subgraph "Phase 2.5: Architectural Classification"
-    A5 --> C1[Architectural Classification]
-    C1 --> C2[Role & Path Assignment]
-  end
+    subgraph "Phase 2: Graph Mapping & Centrality"
+        O1 --> P2[analyze.js]
+        P2 --> O2[graph_map.json]
+    end
 
-  subgraph "Phase 3: LLM & Assembly"
-    L1[Anchor Core Libs] --> L2[LLM Pass (Founder Logic)]
-    L2 --> L3[mapping.json Update]
-    L3 --> L4[Final Assembly]
-  end
+    subgraph "Phase 3: Neural Anchoring"
+        S3 --> P3[anchor_logic.js]
+        O2 --> P3
+        P3 --> O3[mapping.json]
+    end
 
-  subgraph "Phase 4: Refinement"
-    R1[Refine Codebase] --> R2[Final Clean Source]
-  end
+    subgraph "Phase 4: Architectural Classification"
+        O3 --> P4[classify_logic.js]
+        P4 --> O4[graph_map.json (w/ roles)]
+    end
 
-  B4 -.-> A3
-  C2 --> L1
-  L4 --> R1
+    subgraph "Phase 5: LLM Deobfuscation"
+        O4 --> P5[deobfuscate_pipeline.js]
+        P5 --> O5[mapping.json (w/ LLM names)]
+    end
+
+    subgraph "Phase 6: Reassembly & Refinement"
+        O5 --> P6_A[assemble_final.js]
+        P6_A --> P6_B[refine_codebase.js]
+        P6_B --> O6[Final Source Code]
+    end
 ```
 
-### Step 1: Bootstrapping Library DNA
-The system downloads known libraries (e.g., React, Zod, Anthropic SDK) and generates clean, "Gold Standard" structural fingerprints. This creates the baseline "Brain" of the system.
+### Phase 1: Static Analysis & Chunking (`analyze.js`)
+The target bundle is ingested by `analyze.js`. The script performs initial static analysis to identify module wrappers, hard-coded signals, and potential entry points. It then breaks down the large bundle into small, manageable "chunks" based on token count and syntactic boundaries.
 
-### Step 2: Training (Nuclear Regularization)
-The Transformer Network is trained on the bootstrapped data using **Triplet Loss**. To prevent the model from overfitting to easy signals (like string literals), we employ "Nuclear Options":
-- **Literal Dropout**: Randomly masking all string/numeric literals.
-- **Sequence Jittering**: Randomly cropping or padding sequences.
-- **Node Type Masking**: Replacing valid AST node types with `UNKNOWN` tokens.
+### Phase 2: Graph Mapping & Centrality (`analyze.js`)
+The script builds a dependency graph of all chunks and uses "Identifier Affinity" to create soft links between chunks that likely originated from the same file. Before calculating centrality, it collapses simple proxy nodes to simplify the graph topology. Finally, it calculates **Markov Centrality** (a variant of PageRank) to determine which chunks are the "heart" of the application.
 
-This forces the model to learn the *topology* of the logic (how nodes connect) rather than superficial markers.
+### Phase 3: Neural Anchoring (`anchor_logic.js`)
+Every chunk is vectorized by the pre-trained ML model (`ml/model.pth`) to create a "structural fingerprint." These vectors are compared against a registry of known libraries (`logic_registry.json`). High-similarity matches are "anchored," and their known variable and function names are added to the `mapping.json` file with high confidence.
 
-### Step 3: Analysis & Chunking
-The target bundle is broken down into small, manageable "chunks." The system calculates **Markov Centrality** (PageRank with 0.85 damping) to determine which chunks are the "heart" of the application. It uses "Hybrid Teleportation" to bias importance towards suspected Founder logic.
+### Phase 4: Architectural Classification (`classify_logic.js`)
+The classifier script uses the graph metrics (centrality) and anchoring results (library vs. unknown) to assign architectural roles to each chunk (e.g., `VENDOR_LIBRARY`, `APP_LOGIC`, `CORE_MODULE`). This crucial step determines which code is proprietary and requires LLM analysis.
 
-### Step 4: Neural Anchoring
-Every chunk in the target bundle is vectorized. These vectors are compared against the `logic_registry.json`.
-- **Similarity > 0.95**: Gold Standard / Library Match.
-- **Similarity > 0.80**: Strong Structural Match.
-- **Heuristic Boosts**: If `knowledge_base.json` suggests a library (e.g., "ink"), the similarity score is boosted to help the model lock in.
+### Phase 5: LLM Deobfuscation (`deobfuscate_pipeline.js`)
+Chunks identified as "Founder" (proprietary) logic are sent to a Large Language Model. The LLM is prompted with the chunk's code, its neighbors' names, and any partial matches to infer the original, human-readable names for variables and functions.
 
-### Step 4.2: Discovery Crawling (Iterative Analysis)
-The codebase includes a "Frontier" crawler (`src/discovery_walk.js`) designed for iterative analysis. After an initial analysis pass, this script can be run to identify unanalyzed neighboring chunks. It uses a combination of outbound connections from known modules and Markov centrality scores to intelligently expand the analysis frontier, guiding the deobfuscation process into previously unexplored parts of the codebase. This is particularly useful for massive bundles where a full analysis is not feasible in a single pass.
+### Phase 6: Reassembly & Refinement (`assemble_final.js` & `refine_codebase.js`)
+First, `assemble_final.js` uses the completed `mapping.json` to reconstruct the deobfuscated chunks into a clean, new directory structure that mirrors the inferred original codebase. Second, `refine_codebase.js` performs a final LLM-driven pass to restore high-level control flow, converting complex ternary chains back into readable `if/else` blocks and removing other obfuscation artifacts.
 
-### Step 4.5: Architectural Classification
-The classifier (`src/classify_logic.js`) uses graph metrics and anchor metadata to assign roles (e.g., `VENDOR_LIBRARY`, `APP_LOGIC`) and propose paths before the LLM pass.
-
-### Step 5: LLM Deobfuscation
-Chunks identified as "Founder" logic are sent to an LLM. The pipeline prioritizes "Core" chunks first. The LLM receives:
-1.  The chunk's code.
-2.  Neighboring chunk names (context).
-3.  Any identified "Gold" partial matches.
-4.  Existing mappings (incremental context).
-
-### Step 6: Reconstruction
-The final step uses the `mapping.json` to perform a scope-safe rename across all chunks via `src/rename_chunks.js` and writes them to a new directory structure that mirrors the inferred original codebase.
-
-### Step 7: Logic Refinement
-The assembled codebase undergoes a final refinement pass (`npm run refine`). This stage consists of two distinct sub-steps:
-1.  **Systematic Replacement**: A fast, regex-based pass (`src/systematic_refiner.js`) that performs bulk symbol replacement based on the complete `mapping.json` registry. This ensures all known symbols are updated across the entire codebase.
-2.  **Semantic Reconstruction**: A powerful, LLM-driven pass (`src/refine_codebase.js`) that restores high-level control flow. It converts complex ternary chains back into readable `if/else` blocks and removes other lingering obfuscation boilerplate.
+### Iterative Discovery
+The repository includes a "Frontier Crawler" script (`src/discovery_walk.js`) that allows for iterative analysis. After an initial analysis pass, this script can be run to identify unanalyzed neighboring chunks. It uses outbound connections from known modules and Markov centrality scores to intelligently expand the analysis frontier, guiding the deobfuscation process into previously unexplored parts of the codebase.
 
 ---
 

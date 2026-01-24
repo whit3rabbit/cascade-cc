@@ -262,9 +262,10 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
 
             # If we found a negative that isn't the anchor itself
             if row_sims[hardest_idx] > -9:
-                n_vec = a_vecs[hardest_idx]
-                d_pos = torch.norm(a_vecs[i] - p_vecs[i], p=2).item()
-                d_neg = torch.norm(a_vecs[i] - n_vec, p=2).item()
+                sim_pos = 0.7 * torch.dot(a_structs[i], p_structs[i]) + 0.3 * torch.dot(a_lit_vecs[i], p_lit_vecs[i])
+                sim_neg = 0.7 * torch.dot(a_structs[i], a_structs[hardest_idx]) + 0.3 * torch.dot(a_lit_vecs[i], a_lit_vecs[hardest_idx])
+                d_pos = (1.0 - sim_pos).item()
+                d_neg = (1.0 - sim_neg).item()
 
                 if d_pos < d_neg:
                     p_correct += 1
@@ -275,12 +276,12 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
 
                 # Only update global ranking metrics on the most accurate pass
                 if not force_any_negative:
-                    pos_dists = torch.norm(a_vecs[i].unsqueeze(0) - p_vecs, p=2, dim=1)
+                    pos_sims = 0.7 * torch.matmul(p_structs, a_structs[i]) + 0.3 * torch.matmul(p_lit_vecs, a_lit_vecs[i])
                     if mask_same_library:
                         for j in range(len(all_keys)):
                             if i != j and all_keys[j].split("_", 1)[0] == anchor_lib:
-                                pos_dists[j] = 1e9
-                    rank = int(torch.argsort(pos_dists).tolist().index(i)) + 1
+                                pos_sims[j] = -1e9
+                    rank = int(torch.argsort(pos_sims, descending=True).tolist().index(i)) + 1
                     total_rr += 1.0 / rank
                     rr_count += 1
 
@@ -299,19 +300,25 @@ def evaluate_model(model, dataloader, device, dataset, mask_same_library=False):
         correct, total, total_pos_dist, total_neg_dist, count = p_correct, p_total, p_pos_d, p_neg_d, p_count
 
     with torch.no_grad():
-        all_keys, a_vecs, p_vecs = [], [], []
+        all_keys, a_structs, a_lit_vecs, p_structs, p_lit_vecs = [], [], [], [], []
         for anchors, a_lits, positives, p_lits, anchor_keys in dataloader:
             anchors, a_lits = anchors.to(device), a_lits.to(device)
             positives, p_lits = positives.to(device), p_lits.to(device)
-            a_vecs.append(model(anchors, a_lits))
-            p_vecs.append(model(positives, p_lits))
+            a_struct, a_lit = model(anchors, a_lits)
+            p_struct, p_lit = model(positives, p_lits)
+            a_structs.append(a_struct)
+            a_lit_vecs.append(a_lit)
+            p_structs.append(p_struct)
+            p_lit_vecs.append(p_lit)
             all_keys.extend(anchor_keys)
 
-        if not a_vecs:
+        if not a_structs:
             return 0, 0, 0, 0, {}, {}, 0, 0
-        a_vecs = torch.cat(a_vecs, dim=0)
-        p_vecs = torch.cat(p_vecs, dim=0)
-        sims = torch.matmul(a_vecs, a_vecs.T)
+        a_structs = torch.cat(a_structs, dim=0)
+        a_lit_vecs = torch.cat(a_lit_vecs, dim=0)
+        p_structs = torch.cat(p_structs, dim=0)
+        p_lit_vecs = torch.cat(p_lit_vecs, dim=0)
+        sims = 0.7 * torch.matmul(a_structs, a_structs.T) + 0.3 * torch.matmul(a_lit_vecs, a_lit_vecs.T)
 
         score_candidates(ignore_isomorphs=False)
         if total == 0:
@@ -577,10 +584,10 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             positives, p_lits = positives.to(device), p_lits.to(device)
 
             with torch.no_grad():
-                anchor_vecs = model(anchors, a_lits)
+                anchor_structs, anchor_lits = model(anchors, a_lits)
             
             # Vectorized Hard Negative Mining
-            sims = torch.matmul(anchor_vecs, anchor_vecs.T)
+            sims = 0.7 * torch.matmul(anchor_structs, anchor_structs.T) + 0.3 * torch.matmul(anchor_lits, anchor_lits.T)
             negatives = []
             neg_lits = []
             
@@ -609,11 +616,13 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             negatives = torch.stack(negatives).to(device)
             neg_lits = torch.stack(neg_lits).to(device)
 
-            a_vec = model(anchors, a_lits)
-            p_vec = model(positives, p_lits)
-            n_vec = model(negatives, neg_lits)
+            a_struct, a_lit = model(anchors, a_lits)
+            p_struct, p_lit = model(positives, p_lits)
+            n_struct, n_lit = model(negatives, neg_lits)
 
-            loss = criterion(a_vec, p_vec, n_vec)
+            loss_struct = criterion(a_struct, p_struct, n_struct)
+            loss_lit = criterion(a_lit, p_lit, n_lit)
+            loss = (0.7 * loss_struct) + (0.3 * loss_lit)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()

@@ -9,6 +9,7 @@ class TransformerCodeEncoder(nn.Module):
         super().__init__()
         self.max_nodes = max_nodes
         self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         # Positional Encoding is required for Transformers to know order
         # max_nodes + 1 for safety
         self.pos_encoder = nn.Parameter(torch.zeros(1, max_nodes + 1, embed_dim)) 
@@ -26,15 +27,16 @@ class TransformerCodeEncoder(nn.Module):
     def forward(self, x):
         # x: (batch, seq_len)
         pad_mask = (x == 0).to(torch.bool)
-        x = self.embedding(x) + self.pos_encoder[:, :x.size(1), :]
+        x = self.embedding(x)
+        cls = self.cls_token.expand(x.size(0), -1, -1)
+        x = torch.cat([cls, x], dim=1)
+        pad_mask = torch.cat([torch.zeros(x.size(0), 1, device=x.device, dtype=torch.bool), pad_mask], dim=1)
+        x = x + self.pos_encoder[:, :x.size(1), :]
         x = self.transformer(x, src_key_padding_mask=pad_mask)
-        
-        # Global average pooling (masking out PAD/0 nodes if necessary, 
-        # but simple average over seq dimension is often sufficient for code structure)
-        keep_mask = (~pad_mask).unsqueeze(-1)
-        denom = keep_mask.sum(dim=1).clamp(min=1)
-        x = (x * keep_mask).sum(dim=1) / denom
-        return F.normalize(self.fc(x), p=2, dim=1)
+
+        # CLS pooling: take the aggregate representation from the first token
+        cls_out = x[:, 0, :]
+        return F.normalize(self.fc(cls_out), p=2, dim=1)
 
 class ASTPreprocessor:
     def __init__(self):

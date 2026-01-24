@@ -10,6 +10,7 @@ This document explains the environment variables used by the Claude Code Cascade
 | `LLM_MODEL` | The specific model identifier (e.g., `gemini-2.0-flash` for Gemini or `google/gemini-2.0-flash-exp:free` for OpenRouter). |
 | `GEMINI_API_KEY` | Your Google AI Studio / Gemini API key. |
 | `OPENROUTER_API_KEY` | Your OpenRouter API key. |
+| `LLM_TIMEOUT_MS` | Timeout for LLM API requests in milliseconds. |
 
 ## Detection & Analysis Parameters
 
@@ -26,7 +27,7 @@ These variables tune the static analysis and anchoring logic.
 | `CUSTOM_GOLD_SIMILARITY_THRESHOLD` | `0.98` | Similarity required to trigger 1.0 confidence for custom logic. |
 | `MARKOV_DAMPING_FACTOR`| `0.85` | Used in the PageRank-style Centrality algorithm. Higher values increase the influence of long-range connections. |
 | `CHUNKING_TOKEN_THRESHOLD` | `2000` | The target number of tokens per code chunk during analysis. |
-| `SPREADING_THRESHOLD_RATIO` | `0.3` | Threshold for property spreading activation. |
+| `SPREADING_THRESHOLD_RATIO` | `0.3` | "Infection" rate for reclassifying a chunk as "Founder" code. If 30% of a chunk's neighbors are "Founder" code, it will also be reclassified as "Founder." |
 | `SPREADING_THRESHOLD_COUNT` | `2` | Minimum number of hits for property name propagation. |
 
 ## Role Classification Thresholds
@@ -43,12 +44,15 @@ The system uses Graph Theory metrics to identify the role of each chunk (e.g., V
 These thresholds are actively used by `src/classify_logic.js` to separate utility libraries from application logic.
 
 ## Training & Refinement Parameters
+> [!WARNING]
+> The `ML_TRAIN_PRESET` variable takes precedence over individual `ML_TRAIN_*` variables. If a preset is used, it will overwrite any other training-related environment variables.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `ML_TRAIN_PRESET` | `null` | Allows using named configurations like "production". |
 | `ML_VAL_LIB_COUNT` | `3` | Number of libraries to hold out for validation. |
 | `ML_VAL_SPLIT` | `0` | Ratio for random validation split (alternative to leave-library-out). |
+| `ML_VAL_MAX_CHUNKS` | `0` | Cap validation chunks (0 disables). |
 | `REFINE_CONTEXT_LIMIT` | `400000` | Character limit for files sent to the LLM refinement pass. |
 | `ML_LITERAL_DROPOUT` | `0.5` | Training regularization: probability of masking literal features. |
 | `ML_NODE_MASKING` | `0.15` | Training regularization: probability of masking node types. |

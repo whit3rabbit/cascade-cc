@@ -52,7 +52,7 @@ const PYTHON_BIN = findPython();
 const command = process.argv[2];
 const args = process.argv.slice(3).map(arg => arg.replace(/[^a-zA-Z0-9.\-_=:/]/g, ''));
 
-const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'anchor-classify', 'train', 'bootstrap', 'clean', 'refine', 'full'];
+const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'anchor-classify', 'classify', 'propagate-names', 'train', 'bootstrap', 'clean', 'refine', 'full'];
 
 const scripts = {
     'analyze': {
@@ -84,6 +84,16 @@ const scripts = {
         cmd: 'node',
         args: ['src/anchor_logic.js', ...args],
         desc: 'Run anchoring logic to compare two versions'
+    },
+    'classify': {
+        cmd: 'node',
+        args: ['src/classify_logic.js', ...args],
+        desc: 'Assign roles and propose folder structures for chunks'
+    },
+    'propagate-names': {
+        cmd: 'node',
+        args: ['src/propagate_names.js', ...args],
+        desc: 'Propagate high-confidence naming hints to neighbor chunks'
     },
     'anchor-classify': {
         cmd: 'node',
@@ -165,7 +175,9 @@ switch (command) {
     case 'deobfuscate':
     case 'assemble':
     case 'refine':
-    case 'anchor': {
+    case 'anchor':
+    case 'classify':
+    case 'propagate-names': {
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',
             shell: true,
@@ -273,6 +285,8 @@ switch (command) {
         }
 
         runStep('anchor', 'node', ['--max-old-space-size=8192', 'src/anchor_logic.js', resolvedVersion, ...(referenceVersion ? [referenceVersion] : [])]);
+        runStep('classify', 'node', ['src/classify_logic.js', resolvedVersion]);
+        runStep('propagate-names', 'node', ['src/propagate_names.js', resolvedVersion]);
         runStep('deobfuscate', 'node', ['--max-old-space-size=8192', 'src/deobfuscate_pipeline.js', resolvedVersion]);
         runStep('assemble', 'node', ['--max-old-space-size=8192', 'src/assemble_final.js', resolvedVersion]);
         runStep('refine', 'node', ['src/refine_codebase.js', resolvedVersion]);

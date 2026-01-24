@@ -57,32 +57,29 @@ class CodeFingerprinter(nn.Module):
         )
         
         # Permutation-invariant literal channel: Process each hash independently then pool
-        self.literal_fc = nn.Linear(1, 16) 
-        
-        # Combined projection: Transformer out (64) + Literal out (16)
-        self.fc = nn.Linear(64 + 16, 64) 
+        self.literal_fc = nn.Linear(1, 32)
+        self.literal_proj = nn.Linear(32, 64)
 
     def forward(self, x, literal_vectors=None):
         # x: (batch, seq_len)
         # Transformer output is already normalized and 64-dim from TransformerCodeEncoder
-        struct_feat = self.transformer_encoder(x)
+        struct_vec = self.transformer_encoder(x)
         
         # Literal Channel: Order-independent Pooling
         if literal_vectors is not None:
             # literal_vectors: (batch, 32)
             # mask out padding (-1.0)
             lit_mask = (literal_vectors != -1.0).float().unsqueeze(-1)
-            # Process each literal: (batch, 32, 1) -> (batch, 32, 16)
+            # Process each literal: (batch, 32, 1) -> (batch, 32, 32)
             lit_embeds = torch.relu(self.literal_fc(literal_vectors.unsqueeze(-1)))
             # Average pool over literals
             masked_lits = lit_embeds * lit_mask
             lit_feat = torch.sum(masked_lits, dim=1) / torch.clamp(torch.sum(lit_mask, dim=1), min=1e-9)
-            combined = torch.cat([struct_feat, lit_feat], dim=1)
         else:
-            lit_feat = torch.zeros(x.size(0), 16).to(x.device)
-            combined = torch.cat([struct_feat, lit_feat], dim=1)
-            
-        return torch.nn.functional.normalize(self.fc(combined), p=2, dim=1)
+            lit_feat = torch.zeros(x.size(0), 32).to(x.device)
+
+        lit_vec = torch.nn.functional.normalize(self.literal_proj(lit_feat), p=2, dim=1)
+        return struct_vec, lit_vec
 
 def get_literal_hash(value):
     """Generate a numeric hash for a literal value (String/Number)"""
@@ -239,6 +236,7 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
                 category = None
                 role = None
                 proposed_path = None
+                module_id = None
             else:
                 ast_root = chunk_data.get("ast")
                 kb_info = chunk_data.get("kb_info")
@@ -246,6 +244,7 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
                 category = chunk_data.get("category")
                 role = chunk_data.get("role")
                 proposed_path = chunk_data.get("proposedPath")
+                module_id = chunk_data.get("moduleId")
 
             sequence = []
             symbols = []
@@ -268,7 +267,9 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
                 # Move tensors to device
                 seq_tensor = seq_tensor.to(device)
                 lit_tensor = lit_tensor.to(device)
-                fingerprint = model(seq_tensor, lit_tensor).squeeze().tolist()
+                struct_vec, lit_vec = model(seq_tensor, lit_tensor)
+                struct_vec = struct_vec.squeeze().tolist()
+                lit_vec = lit_vec.squeeze().tolist()
             except Exception as e:
                 print(f"[!] Warning: Model execution failed for {chunk_name}: {e}")
                 # Log first 5 node types in the offending sequence for debugging
@@ -277,13 +278,15 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
                 continue
             results.append({
                 "name": chunk_name,
-                "vector": fingerprint,
+                "vector_structural": struct_vec,
+                "vector_literals": lit_vec,
                 "symbols": symbols,
                 "kb_info": kb_info,
                 "hints": hints,
                 "category": category,
                 "role": role,
-                "proposedPath": proposed_path
+                "proposedPath": proposed_path,
+                "moduleId": module_id
             })
 
     # Vocabulary health check
