@@ -9,7 +9,7 @@ This document provides a detailed technical overview of the Claude Code Cascade 
 The system employs a **Hybrid Differential Deobfuscation** approach. Instead of relying purely on pattern matching or LLMs, it combines three distinct domains to reconstruct obfuscated codebases:
 
 1.  **Graph Theory & Static Analysis**: Understanding the relationship between code chunks, identifying entry points, and calculating importance (Markov Centrality/PageRank).
-2.  **Neural Fingerprinting**: Using a **Transformer Encoder** (Siamese Network) to identify code based on its "Structural DNA" (AST topology) rather than literal content.
+2.  **Neural Fingerprinting**: Using a **Transformer Encoder** (Siamese Network) with CLS pooling to identify code based on its "Structural DNA" (AST topology) while retaining a separate literal channel.
 3.  **LLM Semantic Inference**: Using Large Language Models (LLMs) to reconstruct human-readable names and file structures for proprietary ("Founder") logic that lacks a public baseline.
 
 ---
@@ -27,9 +27,9 @@ The repository is partitioned into three main layers:
 - **`src/assemble_final.js`**: The reconstruction engine that performs **Deduplicating Merges** to strip module wrappers and reassemble split chunks into clean files.
 
 ### B. Machine Learning Core (Python/PyTorch)
-- **`ml/encoder.py`**: Defines the `TransformerCodeEncoder`. It uses a Transformer Encoder with Positional Encoding to generate fixed-size (32-dim) embeddings from AST sequences.
+- **`ml/encoder.py`**: Defines the `TransformerCodeEncoder`. It uses a Transformer Encoder with CLS pooling to generate fixed-size (64-dim) embeddings from AST sequences.
 - **`ml/train.py`**: Implements the Triplet Loss training loop with "Nuclear Options" (Literal Dropout, Sequence Jittering, Node Masking) to force structural learning.
-- **`ml/vectorize.py`**: Generates 32-dimensional L2-normalized embeddings (fingerprints) for code chunks.
+- **`ml/vectorize.py`**: Generates 64-dimensional L2-normalized structural and literal embeddings for code chunks.
 
 ### C. Knowledge & Metadata (JSON)
 - **`knowledge_base.json`**: A curated database of known library "anchors" (keywords, error strings, unique patterns).
@@ -68,8 +68,13 @@ flowchart TD
         P4 --> O4[graph_map.json (w/ roles)]
     end
 
+    subgraph "Phase 4.5: Name Propagation"
+        O4 --> P4b[propagate_names.js]
+        P4b --> O4b[mapping.json (neighbor hints)]
+    end
+
     subgraph "Phase 5: LLM Deobfuscation"
-        O4 --> P5[deobfuscate_pipeline.js]
+        O4b --> P5[deobfuscate_pipeline.js]
         P5 --> O5[mapping.json (w/ LLM names)]
     end
 
@@ -87,7 +92,7 @@ The target bundle is ingested by `analyze.js`. The script performs initial stati
 The script builds a dependency graph of all chunks and uses "Identifier Affinity" to create soft links between chunks that likely originated from the same file. Before calculating centrality, it collapses simple proxy nodes to simplify the graph topology. Finally, it calculates **Markov Centrality** (a variant of PageRank) to determine which chunks are the "heart" of the application.
 
 ### Phase 3: Neural Anchoring (`anchor_logic.js`)
-Every chunk is vectorized by the pre-trained ML model (`ml/model.pth`) to create a "structural fingerprint." These vectors are compared against a registry of known libraries (`logic_registry.json`). High-similarity matches are "anchored," and their known variable and function names are added to the `mapping.json` file with high confidence.
+Every chunk is vectorized by the pre-trained ML model (`ml/model.pth`) to create **structural + literal fingerprints**. These vectors are compared against a registry of known libraries (`logic_registry.json`) using a weighted similarity score. High-similarity matches are "anchored," and their known variable and function names are added to the `mapping.json` file with high confidence.
 
 ### Phase 4: Architectural Classification (`classify_logic.js`)
 The classifier script uses the graph metrics (centrality) and anchoring results (library vs. unknown) to assign architectural roles to each chunk (e.g., `VENDOR_LIBRARY`, `APP_LOGIC`, `CORE_MODULE`). This crucial step determines which code is proprietary and requires LLM analysis.
@@ -127,7 +132,7 @@ We calculate a **Cohesion Score** between adjacent chunks based on the continuit
 Because the NN is trained on structural patterns rather than specific hashes, it can identify a library version it has never seen before, provided it follows similar architectural patterns to other libraries in the training set.
 
 ### Literal Hashing & Dropout
-The ML model uses a separate channel for literals (strings, numbers). During training, this channel is frequently "dropped out" (masked). This teaches the model to use literals as helpful hints when available, but not to depend on them, making it robust against string encryption or modification.
+The ML model uses a separate channel for literals (strings, numbers) with sinusoidal encoding and dropout during training. This teaches the model to use literals as helpful hints when available, but not to depend on them, making it robust against string encryption or modification.
 
 ### Graph-Aware Deobfuscation
 Most deobfuscators look at files in isolation. This system uses the dependency graph to propagate information. If `chunkA` is identified as "Gemini Client," and `chunkB` depends heavily on it, the LLM is primed to know that `chunkB` likely contains core AI orchestration logic.

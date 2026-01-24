@@ -57,7 +57,8 @@ Once initialized, use this sequence to analyze any new version of Claude:
 npm run analyze
 #npm run analyze -- --version <version>
 
-# 2. Anchor and classify roles (Replace <version> with output from step 1)
+# 2. Anchor, classify roles, and propagate name hints (Replace <version> with output from step 1)
+# anchor-classify now chains classify + propagate-names automatically
 npm run anchor-classify -- <version>
 
 # 3. (Optional) Iterative Discovery
@@ -73,6 +74,9 @@ npm run assemble -- <version>
 # 6. (Optional) Final Logic Refinement Pass
 npm run refine -- <version>
 ```
+
+Notes:
+- `npm run anchor` now runs `classify` and `propagate-names` automatically.
 
 ---
 

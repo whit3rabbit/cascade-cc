@@ -17,7 +17,7 @@ Pre-processor for CASCADE-style analysis and deobfuscation of Claude Code bundle
 
 ## TL;DR & Quick Start
 1. **Setup**: `npm install` && `python3 -m venv .venv` && `source .venv/bin/activate` && `pip install -r requirements.txt`.
-2. **Initialize**: `npm run sync-vocab` && `npm run bootstrap` && `node src/update_registry_from_bootstrap.js`.
+2. **Initialize**: `npm run sync-vocab` && `npm run bootstrap` && `./sync_registry.sh`.
 3. **Workflow**: `analyze` -> `anchor` -> `deobfuscate` -> `assemble` -> `refine`.
 
 ## Build, Training, and Development Commands
@@ -50,19 +50,22 @@ The system uses a **Transformer Encoder** architecture for structural fingerprin
 flowchart TD
   A[claude-analysis/bundle.js] --> B[src/analyze.js]
   B --> C[metadata/simplified_asts.json]
-  C --> D[src/anchor_logic.js]
-  D --> E[ml/vectorize.py]
-  E --> F[metadata/logic_db.json]
-  F --> G[src/anchor_logic.js]
-  G --> H[metadata/mapping.json]
-  H --> I[src/deobfuscate_pipeline.js]
-  I --> J[metadata/mapping.json]
-  J --> K[src/rename_chunks.js]
-  K --> L[deobfuscated_chunks/]
-  L --> M[src/assemble_final.js]
-  M --> N[final_codebase/]
-  N --> O[src/refine_codebase.js]
-  O --> P[final_codebase/ (refined)]
+  C --> D[ml/vectorize.py]
+  D --> E[metadata/logic_db.json]
+  E --> F[src/anchor_logic.js]
+  F --> G[metadata/mapping.json]
+  G --> H[src/classify_logic.js]
+  H --> I[metadata/graph_map.json]
+  I --> J[src/propagate_names.js]
+  J --> K[metadata/mapping.json]
+  K --> L[src/deobfuscate_pipeline.js]
+  L --> M[metadata/mapping.json]
+  M --> N[src/rename_chunks.js]
+  N --> O[deobfuscated_chunks/]
+  O --> P[src/assemble_final.js]
+  P --> Q[final_codebase/]
+  Q --> R[src/refine_codebase.js]
+  R --> S[final_codebase/ (refined)]
 ```
 
 ## Configuration & Security

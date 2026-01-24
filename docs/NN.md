@@ -36,8 +36,8 @@ Training uses a Transformer Encoder architecture to learn an embedding space whe
 
 - **Source Code**: `ml/train.py`
 - **Network Architecture**: 
-    - **CodeStructureEncoder**: Uses a Transformer Encoder with learnable positional embeddings.
-    - **Literal Channel**: A separate pathway that hashes literals (Strings/Numbers) to preserve semantic signals.
+    - **CodeStructureEncoder**: Uses a Transformer Encoder with learnable positional embeddings and **CLS pooling**.
+    - **Literal Channel**: A separate pathway that hashes literals (Strings/Numbers) and applies a sinusoidal encoding before projection.
     - **Triplet Loss**: Optimizes the model using (Anchor, Positive, Negative) triplets with Hard Negative Mining.
 
 ### Hyperparameter Sweep Analysis
@@ -76,7 +76,7 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
 | `MAX_LITERALS` | `32` | Maximum number of hashed literals captured per chunk. |
 | `Embedding Dim` | `32` | Dimension of the AST Node Type embeddings (default). |
 | `Hidden Dim` | `128` | Dimension of the Transformer hidden state (default). |
-| `Fingerprint Dim`| `128` | Final L2-normalized output vector size. |
+| `Fingerprint Dim`| `64 x2` | Structural + literal L2-normalized output vectors. |
 | `Learning Rate` | `0.001` | Default learning rate. |
 | `Margin` | `0.5` | Default triplet loss margin. |
 
@@ -85,10 +85,12 @@ The system uses a custom **Multi-Channel Siamese Network** designed to process b
 1.  **Structural Channel (Transformer)**:
     - Inputs: `(Batch, 512)` token IDs.
     - Logic: Uses Multi-Head Attention to capture global structural dependencies.
+    - Pooling: Uses a CLS token for sequence aggregation.
     - Normalization: Applies **L2 Normalization** to the final embedding.
     - Padding: PAD tokens are masked during attention and pooling.
 2.  **Literal Channel (Permutation-Invariant Pooling)**:
     - Inputs: Hashed literals (Strings/Numbers) per chunk.
+    - Encoding: Sinusoidal features per literal hash (multi-frequency).
     - Logic: Uses permutation-invariant pooling (order-independent) so constant ordering does not alter fingerprints.
 
 ### Training Notes
@@ -148,7 +150,7 @@ Training supports several optional environment variables for defaults:
 
 ## 3. Inference / Vectorization (`ml/vectorize.py`)
 
-During the analysis phase, the model is used to generate 64-dimensional vectors (fingerprints) for every chunk in the target codebase.
+During the analysis phase, the model generates **two 64-dimensional vectors** (structural + literal) for every chunk in the target codebase.
 
 - **Source Code**: `ml/vectorize.py`
 - **Invoked By**: `node run analyze` or `src/anchor_logic.js`.
