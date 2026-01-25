@@ -9,6 +9,7 @@ This document describes the structure and purpose of the various JSON files used
 4. [mapping.json](#mappingjson)
 5. [logic_registry.json](#logic_registryjson)
 6. [knowledge_base.json](#knowledge_basejson)
+7. [custom_knowledge_base.json](#custom_knowledge_basejson)
 
 ---
 
@@ -187,20 +188,56 @@ A global database that maps structural logic vectors to confirmed names. This al
 ## knowledge_base.json
 **Location:** `./knowledge_base.json`
 
-Hand-crafted or bootstrapped rules used by `src/analyze.js` to identify chunks before ML or LLM passes.
+Hand-crafted or bootstrapped rules used by `src/analyze.js` to identify chunks before ML or LLM passes. If
+`custom_knowledge_base.json` exists, it takes precedence.
 
 ### Structure
 ```json
 {
+  "project_structure": {
+    "src": {
+      "description": "Auto-generated from custom_gold",
+      "files": ["fileA.ts", "fileB.ts"]
+    }
+  },
   "file_anchors": [
     {
       "suggested_path": "src/utils/fileUtils.ts",
       "suggested_name": "fileUtils",
       "description": "File system utilities",
-      "trigger_keywords": ["fs", "path", "readFile"]
+      "trigger_keywords": [
+        "fs",
+        { "word": "path", "weight": 2 },
+        "readFile"
+      ],
+      "threshold": 2
     }
   ],
-  "name_hints": [...],
-  "error_anchors": [...]
+  "name_hints": [
+    {
+      "suggested_name": "`formatTokens`",
+      "logic_anchor": "token count"
+    }
+  ],
+  "error_anchors": [
+    {
+      "role": "AUTO_ERROR",
+      "content": "Failed to initialize"
+    }
+  ],
+  "structural_anchors": [],
+  "known_packages": [
+    {
+      "dependencies": { "react": "^18.2.0" },
+      "devDependencies": { "vitest": "^1.2.0" }
+    }
+  ]
 }
 ```
+
+---
+
+## custom_knowledge_base.json
+**Location:** `./custom_knowledge_base.json`
+
+Optional override for `knowledge_base.json`. Uses the same schema and is loaded with higher priority when present.

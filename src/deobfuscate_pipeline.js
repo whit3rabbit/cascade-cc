@@ -27,13 +27,25 @@ const REGISTRY_PATH = path.join(OUTPUT_ROOT, 'logic_registry.json');
 const BOOTSTRAP_SOURCE_ROOT = './ml/bootstrap_data';
 
 // --- KNOWLEDGE BASE ---
-const KB_PATH = './knowledge_base.json';
+const { loadKnowledgeBase } = require('./knowledge_base');
 let KB = null;
-if (fs.existsSync(KB_PATH)) {
-    KB = JSON.parse(fs.readFileSync(KB_PATH, 'utf8'));
-    console.log(`[*] Loaded Knowledge Base with ${KB.name_hints?.length || 0} name hints.`);
+const STRUCTURE_MD_PATH = path.resolve('structrecc.md');
+const STRUCTURE_MD_LIMIT = Number.parseInt(process.env.STRUCTURE_MD_LIMIT || '20000', 10);
+let STRUCTURE_MD = '';
+const { kb: loadedKb, path: kbPath } = loadKnowledgeBase();
+if (loadedKb) {
+    KB = loadedKb;
+    const kbLabel = kbPath ? path.basename(kbPath) : 'knowledge_base.json';
+    console.log(`[*] Loaded Knowledge Base (${kbLabel}) with ${KB.name_hints?.length || 0} name hints.`);
     if (KB.project_structure) {
         console.log(`[*] Loaded Project Structure Definition.`);
+    }
+}
+
+if (fs.existsSync(STRUCTURE_MD_PATH)) {
+    STRUCTURE_MD = fs.readFileSync(STRUCTURE_MD_PATH, 'utf8');
+    if (!Number.isNaN(STRUCTURE_MD_LIMIT) && STRUCTURE_MD_LIMIT > 0 && STRUCTURE_MD.length > STRUCTURE_MD_LIMIT) {
+        STRUCTURE_MD = `${STRUCTURE_MD.slice(0, STRUCTURE_MD_LIMIT)}\n\n<!-- truncated -->\n`;
     }
 }
 
@@ -696,7 +708,7 @@ Existing Hints:
 ${group.map(c => c.kb_info ? `- ${c.name}: KB suggests ${c.kb_info.suggested_path}` : '').join('\n')}
 
 Project Structure Reference:
-${KB && KB.project_structure ? JSON.stringify(KB.project_structure, null, 2) : 'Structure not available.'}
+${STRUCTURE_MD || 'Structure not available.'}
 
 Instructions:
 1. Analyze the variable scope continuity and logic.
@@ -704,6 +716,8 @@ Instructions:
 3. Assign "part" numbers to each chunk (1, 2, 3...).
 4. Do NOT use chunk IDs (e.g. "chunk002") in the filename.
 5. Prefer directories hinted by parentHintPath, neighbor paths, or KB suggestions. If uncertain, use a descriptive filename based on semantics, not chunk IDs.
+6. Use the KB structure as the primary guide, but allow creating a new file path if the logic clearly does not fit any known path.
+7. Vendor libraries (e.g. zod/react) were filtered earlier. Do not name internal files or directories after vendor libraries.
 
 Response JSON:
 {
@@ -910,7 +924,7 @@ It is intended to be located at: ${chunkMeta.proposedPath || chunkMeta.kb_info?.
 
 PROJECT STRUCTURE REFERENCE:
 Use this structure to guide your filename proposals. Place files in the most appropriate directory based on their logic.
-${KB && KB.project_structure ? JSON.stringify(KB.project_structure, null, 2) : 'Structure not available.'}
+${STRUCTURE_MD || 'Structure not available.'}
 
 INFERRED FILESYSTEM STATE (Active Context):
 These are the directory paths we have already confirmed for key modules. Use these to maintain consistency (e.g. if you see a neighbor listed here, put this file close to it).
@@ -991,7 +1005,9 @@ INSTRUCTIONS:
    - Example: "src/utils/stringHelpers.js" NOT just "stringHelpers"
    - If the intended path looks generic (e.g. "src/core/logic/chunk123.ts"), override it with a more descriptive path.
    - Never use chunk IDs (e.g. "chunk002") in the filename.
-5. Output valid JSON only.
+5. Use the PROJECT STRUCTURE REFERENCE as the primary guide, but allow a new path if the logic clearly doesn't fit any existing folder.
+6. Vendor libraries (e.g. zod/react) were filtered earlier. Do not name internal files or directories after vendor libraries.
+7. Output valid JSON only.
 
 RESPONSE FORMAT (JSON ONLY):
 {

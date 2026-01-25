@@ -5,21 +5,32 @@ const { callLLM, validateKey, PROVIDER, MODEL } = require('./llm_client');
 const pLimit = require('p-limit');
 
 const OUTPUT_ROOT = './cascade_graph_analysis';
-const KB_PATH = './knowledge_base.json';
+const { loadKnowledgeBase } = require('./knowledge_base');
 const BOOTSTRAP_ROOT = path.join(OUTPUT_ROOT, 'bootstrap');
 let KNOWN_PACKAGES = [];
+const STRUCTURE_MD_PATH = path.resolve('structrecc.md');
+const STRUCTURE_MD_LIMIT = Number.parseInt(process.env.STRUCTURE_MD_LIMIT || '20000', 10);
+let STRUCTURE_MD = '';
 
-if (fs.existsSync(KB_PATH)) {
+const { kb: loadedKb, path: kbPath } = loadKnowledgeBase();
+if (loadedKb) {
     try {
-        const kb = JSON.parse(fs.readFileSync(KB_PATH, 'utf8'));
         const packages = new Set();
-        (kb.known_packages || []).forEach(pkg => {
+        (loadedKb.known_packages || []).forEach(pkg => {
             Object.keys(pkg.dependencies || {}).forEach(dep => packages.add(dep));
             Object.keys(pkg.devDependencies || {}).forEach(dep => packages.add(dep));
         });
         KNOWN_PACKAGES = Array.from(packages).sort();
     } catch (err) {
-        console.warn(`[!] Failed to parse ${KB_PATH}: ${err.message}`);
+        const kbLabel = kbPath ? path.basename(kbPath) : 'knowledge_base.json';
+        console.warn(`[!] Failed to parse ${kbLabel}: ${err.message}`);
+    }
+}
+
+if (fs.existsSync(STRUCTURE_MD_PATH)) {
+    STRUCTURE_MD = fs.readFileSync(STRUCTURE_MD_PATH, 'utf8');
+    if (!Number.isNaN(STRUCTURE_MD_LIMIT) && STRUCTURE_MD_LIMIT > 0 && STRUCTURE_MD.length > STRUCTURE_MD_LIMIT) {
+        STRUCTURE_MD = `${STRUCTURE_MD.slice(0, STRUCTURE_MD_LIMIT)}\n\n<!-- truncated -->\n`;
     }
 }
 
@@ -413,6 +424,9 @@ These chunks are confirmed vendor libraries. Do NOT rename internal variables to
 ${Array.from(ignoreLibs).map(lib => `- ${lib.toUpperCase()}`).join('\n')}
 ` : ''}
 
+PROJECT STRUCTURE REFERENCE (structrecc.md):
+${STRUCTURE_MD || 'Structure not available.'}
+
 IMPORT RESOLUTION CONTEXT:
 - Known internal module paths (same folder): ${localPaths.length > 0 ? `\n${localPaths.map(p => `  - ${p}`).join('\n')}` : 'None'}
 - Known internal module paths (other folders, sample): ${otherPaths.length > 0 ? `\n${otherPaths.slice(0, 120).map(p => `  - ${p}`).join('\n')}` : 'None'}
@@ -421,6 +435,7 @@ IMPORT RESOLUTION CONTEXT:
 - Unrecognized bare imports (do not invent packages): ${unresolvedBares.length > 0 ? `\n${unresolvedBares.slice(0, 60).map(s => `  - ${s}`).join('\n')}` : 'None'}
 
 INSTRUCTIONS:
+0. Use the custom_knowledge_base.json project structure as the PRIMARY guide: prioritize existing folders and nearby module paths, but allow creating a new file path when the logic genuinely doesn't fit any known path.
 1. Restore clean control flow (use if/else instead of complex ternaries where appropriate).
 2. Group related functions/variables logically.
 3. Remove any remaining obfuscation artifacts (like proxy functions or unused helper calls).
@@ -429,8 +444,9 @@ INSTRUCTIONS:
    - If an import matches a known internal module, rewrite it to the correct relative path.
    - If an import is a bare specifier, only use packages from the Known external packages list.
    - Do not invent new package names. If unsure, keep the original specifier.
-6. Add helpful comments explaining complex logic blocks.
-7. FIX any obviously broken logic caused by the assembly process (e.g. out-of-order definitions if detected).
+6. Vendor libraries (e.g. zod/react) were filtered earlier. Do not create internal files or import paths named after vendor libraries (e.g. ./zod, ./react, src/zod/*).
+7. Add helpful comments explaining complex logic blocks.
+8. FIX any obviously broken logic caused by the assembly process (e.g. out-of-order definitions if detected).
 
 FILE PATH: ${relPathPosix}
 

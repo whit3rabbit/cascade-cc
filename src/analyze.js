@@ -13,11 +13,13 @@ const { AAdecode, jjdecode } = require('./deobfuscation_helpers');
 const t = require('@babel/types');
 
 // --- 0. KNOWLEDGE BASE ---
-const KB_PATH = './knowledge_base.json';
+const { loadKnowledgeBase } = require('./knowledge_base');
 let KB = null;
-if (fs.existsSync(KB_PATH)) {
-    KB = JSON.parse(fs.readFileSync(KB_PATH, 'utf8'));
-    console.log(`[*] Loaded Knowledge Base with ${KB.file_anchors?.length || 0} file anchors.`);
+const { kb: loadedKb, path: kbPath } = loadKnowledgeBase();
+if (loadedKb) {
+    KB = loadedKb;
+    const kbLabel = kbPath ? path.basename(kbPath) : 'knowledge_base.json';
+    console.log(`[*] Loaded Knowledge Base (${kbLabel}) with ${KB.file_anchors?.length || 0} file anchors.`);
 }
 
 // --- 1. CONFIGURATION ---

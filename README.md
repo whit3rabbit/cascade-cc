@@ -113,6 +113,16 @@ Notes:
 - The generator preserves `known_packages` and `structural_anchors` from the backup so import refinement keeps working.
 - `project_structure` is auto-built from the gold folder tree; descriptions are generic.
 
+### Generate structrecc.md (LLM Filesystem Map)
+The LLM can use a compact filesystem map instead of the full KB JSON. This project reads `structrecc.md` from the repo root during deobfuscation/refinement.
+```bash
+# Generates structrecc.md from knowledge_base.json or custom_knowledge_base.json
+node scripts/generate_structure_md.js
+```
+Notes:
+- `custom_knowledge_base.json` takes precedence if present.
+- You can cap how much of the file is injected into prompts by setting `STRUCTURE_MD_LIMIT` (default: 20000 chars).
+
 > [!IMPORTANT]
 > If you add a significant amount of new code, consider **retraining from scratch** (see below) to help the model learn the unique structural "DNA" of the new logic.
 
