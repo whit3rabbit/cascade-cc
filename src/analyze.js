@@ -1185,6 +1185,7 @@ class CascadeGraph {
             const oldEntry = existingMetadata.find(e => e.name === name);
 
             const metaEntry = {
+                id: node.id || null,
                 name,
                 displayName: node.displayName || (oldEntry ? oldEntry.displayName : null),
                 file: `chunks/${fileName}`,

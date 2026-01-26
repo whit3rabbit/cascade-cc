@@ -59,6 +59,14 @@
       }
     },
     {
+      "name": "vendor_range_8_0.70",
+      "env": {
+        "VENDOR_RANGE_WINDOW_SIZE": "8",
+        "VENDOR_RANGE_VENDOR_RATIO": "0.70",
+        "VENDOR_RANGE_MIN_VENDOR": "3"
+      }
+    },
+    {
       "name": "liberal_combo",
       "env": {
         "LIBRARY_MATCH_THRESHOLD": "0.90",

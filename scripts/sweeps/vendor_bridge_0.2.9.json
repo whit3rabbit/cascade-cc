@@ -1,0 +1,69 @@
+{
+  "version": "0.2.9",
+  "outputDir": "cascade_graph_analysis/sweeps/vendor_bridge_0.2.9",
+  "baseEnv": {},
+  "runs": [
+    {
+      "name": "baseline_defaults",
+      "env": {}
+    },
+    {
+      "name": "bridge_gap_1",
+      "env": {
+        "VENDOR_BRIDGE_GAP": "1"
+      }
+    },
+    {
+      "name": "bridge_gap_1_spread_0.15",
+      "env": {
+        "VENDOR_BRIDGE_GAP": "1",
+        "SPREADING_THRESHOLD_RATIO": "0.15"
+      }
+    },
+    {
+      "name": "bridge_gap_1_vendor_range_6",
+      "env": {
+        "VENDOR_BRIDGE_GAP": "1",
+        "VENDOR_RANGE_WINDOW_SIZE": "6",
+        "VENDOR_RANGE_VENDOR_RATIO": "0.70",
+        "VENDOR_RANGE_MIN_VENDOR": "3"
+      }
+    },
+    {
+      "name": "bridge_gap_1_vendor_range_4",
+      "env": {
+        "VENDOR_BRIDGE_GAP": "1",
+        "VENDOR_RANGE_WINDOW_SIZE": "4",
+        "VENDOR_RANGE_VENDOR_RATIO": "0.70",
+        "VENDOR_RANGE_MIN_VENDOR": "3"
+      }
+    },
+    {
+      "name": "bridge_gap_1_vendor_range_8",
+      "env": {
+        "VENDOR_BRIDGE_GAP": "1",
+        "VENDOR_RANGE_WINDOW_SIZE": "8",
+        "VENDOR_RANGE_VENDOR_RATIO": "0.70",
+        "VENDOR_RANGE_MIN_VENDOR": "3"
+      }
+    },
+    {
+      "name": "bridge_gap_1_vendor_range_6_ratio_0.60",
+      "env": {
+        "VENDOR_BRIDGE_GAP": "1",
+        "VENDOR_RANGE_WINDOW_SIZE": "6",
+        "VENDOR_RANGE_VENDOR_RATIO": "0.60",
+        "VENDOR_RANGE_MIN_VENDOR": "3"
+      }
+    },
+    {
+      "name": "bridge_gap_1_vendor_range_6_ratio_0.80",
+      "env": {
+        "VENDOR_BRIDGE_GAP": "1",
+        "VENDOR_RANGE_WINDOW_SIZE": "6",
+        "VENDOR_RANGE_VENDOR_RATIO": "0.80",
+        "VENDOR_RANGE_MIN_VENDOR": "3"
+      }
+    }
+  ]
+}

@@ -104,6 +104,80 @@ const summarizeVendors = (graphData, limit = 5) => {
     };
 };
 
+const getChunkIndex = (chunk) => {
+    if (Number.isFinite(chunk.id)) return chunk.id;
+    const match = String(chunk.name || '').match(/(\d+)/);
+    return match ? parseInt(match[1], 10) : null;
+};
+
+const buildVendorRanges = (graphData) => {
+    const ordered = (graphData.chunks || [])
+        .map(chunk => ({ chunk, idx: getChunkIndex(chunk) }))
+        .filter(entry => Number.isFinite(entry.idx))
+        .sort((a, b) => a.idx - b.idx)
+        .map(entry => entry.chunk);
+
+    const ranges = [];
+    let start = null;
+    let prev = null;
+
+    ordered.forEach((chunk) => {
+        const idx = getChunkIndex(chunk);
+        if (chunk.category === 'vendor') {
+            if (start === null) {
+                start = idx;
+                prev = idx;
+            } else if (idx === prev + 1) {
+                prev = idx;
+            } else {
+                ranges.push({ start, end: prev });
+                start = idx;
+                prev = idx;
+            }
+        } else if (start !== null) {
+            ranges.push({ start, end: prev });
+            start = null;
+            prev = null;
+        }
+    });
+
+    if (start !== null) {
+        ranges.push({ start, end: prev });
+    }
+
+    return ranges;
+};
+
+const buildVendorHeatmap = (graphData, bucketSize = 10) => {
+    const ordered = (graphData.chunks || [])
+        .map(chunk => ({ chunk, idx: getChunkIndex(chunk) }))
+        .filter(entry => Number.isFinite(entry.idx))
+        .sort((a, b) => a.idx - b.idx)
+        .map(entry => entry.chunk);
+
+    if (ordered.length === 0) return { bucketSize, buckets: [] };
+
+    const buckets = [];
+    const maxIdx = getChunkIndex(ordered[ordered.length - 1]);
+    for (let start = 1; start <= maxIdx; start += bucketSize) {
+        const end = Math.min(start + bucketSize - 1, maxIdx);
+        let vendorCount = 0;
+        for (let i = start; i <= end; i++) {
+            const chunk = ordered[i - 1];
+            if (!chunk) continue;
+            if (chunk.category === 'vendor') vendorCount += 1;
+        }
+        let symbol = '.';
+        if (vendorCount >= 8) symbol = '█';
+        else if (vendorCount >= 4) symbol = '▓';
+        else if (vendorCount >= 1) symbol = '░';
+
+        buckets.push({ start, end, vendorCount, symbol });
+    }
+
+    return { bucketSize, buckets };
+};
+
 const configPath = getArgValue('--config') || DEFAULT_CONFIG_PATH;
 const config = loadConfig(configPath);
 
@@ -150,6 +224,8 @@ for (const run of runs) {
     const graphData = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
     const summary = summarizeCounts(graphData);
     const vendorSummary = summarizeVendors(graphData);
+    const vendorRanges = buildVendorRanges(graphData);
+    const vendorHeatmap = buildVendorHeatmap(graphData);
     console.log(`    Vendor chunks: ${vendorSummary.vendorTotal}`);
     if (vendorSummary.topLabels.length > 0) {
         console.log(`    Vendor labels: ${vendorSummary.topLabels.join(', ')}`);
@@ -164,6 +240,8 @@ for (const run of runs) {
         safeName: runName,
         env: run.env || {},
         summary,
+        vendorRanges,
+        vendorHeatmap,
         outputDir: runDir
     });
 }
@@ -199,6 +277,41 @@ results.forEach((entry) => {
     mdLines.push(
         `| ${entry.safeName} | ${formatEnvOverrides(entry.env)} | ${counts.vendor} | ${founderTotal} | ${counts.family} | ${counts.unknown} | ${counts.total} | ${vendorPct} | ${founderPct} |`
     );
+});
+
+mdLines.push('');
+mdLines.push('## Vendor Ranges');
+results.forEach((entry) => {
+    mdLines.push('');
+    mdLines.push(`### ${entry.safeName}`);
+    if (!entry.vendorRanges || entry.vendorRanges.length === 0) {
+        mdLines.push('(none)');
+        return;
+    }
+    const ranges = entry.vendorRanges
+        .map(range => (range.start === range.end ? `${range.start}` : `${range.start}-${range.end}`))
+        .join(', ');
+    mdLines.push(ranges);
+});
+
+mdLines.push('');
+mdLines.push('## Vendor Heatmaps (bucket size 10)');
+results.forEach((entry) => {
+    mdLines.push('');
+    mdLines.push(`### ${entry.safeName}`);
+    if (!entry.vendorHeatmap || entry.vendorHeatmap.buckets.length === 0) {
+        mdLines.push('(none)');
+        return;
+    }
+    const buckets = entry.vendorHeatmap.buckets;
+    const maxEnd = buckets[buckets.length - 1].end;
+    const rowSize = 200;
+    for (let rowStart = 1; rowStart <= maxEnd; rowStart += rowSize) {
+        const rowEnd = Math.min(rowStart + rowSize - 1, maxEnd);
+        const rowBuckets = buckets.filter(bucket => bucket.start >= rowStart && bucket.end <= rowEnd);
+        const symbols = rowBuckets.map(bucket => bucket.symbol).join('');
+        mdLines.push(`${String(rowStart).padStart(3, '0')}-${String(rowEnd).padStart(3, '0')} : ${symbols}`);
+    }
 });
 
 mdLines.push('');

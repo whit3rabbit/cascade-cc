@@ -27,6 +27,11 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         .replace(/^_+|_+$/g, '');
 
     const isChunkyName = (value) => /^chunk\d+$/i.test(String(value || ''));
+    const getChunkIndex = (node) => {
+        if (Number.isFinite(node?.id)) return node.id;
+        const match = String(node?.name || '').match(/(\d+)/);
+        return match ? parseInt(match[1], 10) : null;
+    };
 
     const getSemanticName = (node) => {
         if (node.proposedPath) {
@@ -152,6 +157,68 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
     }
     if (vendorSet.size > 0) {
         console.log(`    [+] Vendor spreading complete: ${vendorSet.size} chunks in vendor set.`);
+    }
+
+    // 3b. Vendor Range Detection (Cluster-based Promotion)
+    const vendorRangeWindow = parseInt(process.env.VENDOR_RANGE_WINDOW_SIZE, 10) || 0;
+    const vendorRangeRatio = parseFloat(process.env.VENDOR_RANGE_VENDOR_RATIO) || 0;
+    const vendorRangeMinVendor = parseInt(process.env.VENDOR_RANGE_MIN_VENDOR, 10) || 0;
+
+    if (vendorRangeWindow > 1 && vendorRangeRatio > 0) {
+        const orderedChunks = [...graphData.chunks]
+            .map(node => ({ node, idx: getChunkIndex(node) }))
+            .filter(entry => Number.isFinite(entry.idx))
+            .sort((a, b) => a.idx - b.idx)
+            .map(entry => entry.node);
+        let promotedCount = 0;
+
+        for (let i = 0; i <= orderedChunks.length - vendorRangeWindow; i++) {
+            const windowChunks = orderedChunks.slice(i, i + vendorRangeWindow);
+            const vendorCount = windowChunks.reduce((count, node) => count + (vendorSet.has(node.name) ? 1 : 0), 0);
+            if (vendorCount < vendorRangeMinVendor) continue;
+            if (vendorCount / vendorRangeWindow < vendorRangeRatio) continue;
+
+            windowChunks.forEach(node => {
+                if (vendorSet.has(node.name)) return;
+                if (node.category === 'founder') return;
+                vendorSet.add(node.name);
+                familySet.delete(node.name);
+                node.category = 'vendor';
+                promotedCount++;
+            });
+        }
+
+        if (promotedCount > 0) {
+            console.log(`    [+] Vendor range detection promoted ${promotedCount} chunks.`);
+        }
+    }
+
+    // 3c. Vendor Bridge Detection (Fill single-chunk gaps)
+    const vendorBridgeGap = parseInt(process.env.VENDOR_BRIDGE_GAP, 10) || 0;
+    if (vendorBridgeGap === 1) {
+        const orderedChunks = [...graphData.chunks]
+            .map(node => ({ node, idx: getChunkIndex(node) }))
+            .filter(entry => Number.isFinite(entry.idx))
+            .sort((a, b) => a.idx - b.idx);
+        let bridgedCount = 0;
+
+        for (let i = 1; i < orderedChunks.length - 1; i++) {
+            const current = orderedChunks[i].node;
+            if (vendorSet.has(current.name)) continue;
+            if (current.category === 'founder') continue;
+            const prev = orderedChunks[i - 1].node;
+            const next = orderedChunks[i + 1].node;
+            if (vendorSet.has(prev.name) && vendorSet.has(next.name)) {
+                vendorSet.add(current.name);
+                familySet.delete(current.name);
+                current.category = 'vendor';
+                bridgedCount++;
+            }
+        }
+
+        if (bridgedCount > 0) {
+            console.log(`    [+] Vendor bridge detection promoted ${bridgedCount} chunks.`);
+        }
     }
 
     // 4. Spreading Activation

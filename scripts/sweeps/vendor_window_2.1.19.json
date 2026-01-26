@@ -1,0 +1,35 @@
+{
+  "version": "2.1.19",
+  "outputDir": "cascade_graph_analysis/sweeps/vendor_window_2.1.19",
+  "baseEnv": {},
+  "runs": [
+    {
+      "name": "baseline_defaults",
+      "env": {}
+    },
+    {
+      "name": "vendor_window_4",
+      "env": {
+        "VENDOR_RANGE_WINDOW_SIZE": "4"
+      }
+    },
+    {
+      "name": "vendor_window_6",
+      "env": {
+        "VENDOR_RANGE_WINDOW_SIZE": "6"
+      }
+    },
+    {
+      "name": "vendor_window_8",
+      "env": {
+        "VENDOR_RANGE_WINDOW_SIZE": "8"
+      }
+    },
+    {
+      "name": "vendor_window_10",
+      "env": {
+        "VENDOR_RANGE_WINDOW_SIZE": "10"
+      }
+    }
+  ]
+}

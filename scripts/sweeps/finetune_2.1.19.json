@@ -1,0 +1,43 @@
+{
+  "version": "2.1.19",
+  "outputDir": "cascade_graph_analysis/sweeps/honing_2.1.19",
+  "runs": [
+    {
+      "name": "sim_high_res_0.88",
+      "env": { "LIBRARY_MATCH_THRESHOLD": "0.88", "ANCHOR_SIMILARITY_THRESHOLD": "0.75" }
+    },
+    {
+      "name": "sim_high_res_0.92",
+      "env": { "LIBRARY_MATCH_THRESHOLD": "0.92", "ANCHOR_SIMILARITY_THRESHOLD": "0.75" }
+    },
+    {
+      "name": "sim_high_res_0.94",
+      "env": { "LIBRARY_MATCH_THRESHOLD": "0.94", "ANCHOR_SIMILARITY_THRESHOLD": "0.75" }
+    },
+    {
+      "name": "aggressive_vendor_spread",
+      "env": { 
+        "LIBRARY_MATCH_THRESHOLD": "0.92",
+        "VENDOR_SPREADING_THRESHOLD_RATIO": "0.60",
+        "VENDOR_SPREADING_THRESHOLD_COUNT": "1"
+      }
+    },
+    {
+      "name": "founder_isolation",
+      "env": {
+        "LIBRARY_MATCH_THRESHOLD": "0.94",
+        "ANCHOR_SIMILARITY_THRESHOLD": "0.75",
+        "IMPORTANT_ORPHAN_CENTRALITY": "0.08",
+        "SPREADING_THRESHOLD_RATIO": "0.40"
+      }
+    },
+    {
+      "name": "vendor_range_8_0.70",
+      "env": {
+        "VENDOR_RANGE_WINDOW_SIZE": "8",
+        "VENDOR_RANGE_VENDOR_RATIO": "0.70",
+        "VENDOR_RANGE_MIN_VENDOR": "3"
+      }
+    }
+  ]
+}
