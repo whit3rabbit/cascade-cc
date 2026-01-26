@@ -84,6 +84,26 @@ const summarizeCounts = (graphData) => {
     };
 };
 
+const summarizeVendors = (graphData, limit = 5) => {
+    const labelCounts = new Map();
+    const chunks = graphData.chunks || [];
+    chunks.forEach((chunk) => {
+        if (chunk.category !== 'vendor') return;
+        const label = chunk.role || chunk.matchLabel || chunk.label || 'vendor_unknown';
+        labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+    });
+
+    const topLabels = Array.from(labelCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit)
+        .map(([label, count]) => `${label}=${count}`);
+
+    return {
+        vendorTotal: chunks.filter(c => c.category === 'vendor').length,
+        topLabels
+    };
+};
+
 const configPath = getArgValue('--config') || DEFAULT_CONFIG_PATH;
 const config = loadConfig(configPath);
 
@@ -112,6 +132,7 @@ for (const run of runs) {
     console.log(`\n[SWEEP] ${runName}`);
     console.log(`    Env: ${formatEnvOverrides(run.env || {})}`);
 
+    fs.rmSync(path.join('cascade_graph_analysis', version), { recursive: true, force: true });
     runStep('Analyze', 'node', ['--max-old-space-size=8192', 'src/analyze.js', '--version', version], runEnv);
     runStep(
         'Anchor',
@@ -128,6 +149,11 @@ for (const run of runs) {
 
     const graphData = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
     const summary = summarizeCounts(graphData);
+    const vendorSummary = summarizeVendors(graphData);
+    console.log(`    Vendor chunks: ${vendorSummary.vendorTotal}`);
+    if (vendorSummary.topLabels.length > 0) {
+        console.log(`    Vendor labels: ${vendorSummary.topLabels.join(', ')}`);
+    }
 
     const runDir = ensureUniqueDir(path.join(outputRoot, runName));
     fs.mkdirSync(runDir, { recursive: true });

@@ -21458,5 +21458,6 @@
     }
   ],
   "structural_anchors": [],
-  "known_packages": []
+  "known_packages": [],
+  "vendor_anchors": []
 }

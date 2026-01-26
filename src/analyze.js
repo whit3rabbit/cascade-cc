@@ -34,8 +34,13 @@ const GLOBAL_VARS = ['console', 'window', 'document', 'process', 'module', 'requ
 const GENERIC_KB_KEYWORDS = new Set([
     'react', 'react-dom', 'jsx', 'tsx', 'js',
     'column', 'row', 'flex', 'flex-start', 'flex-end', 'center',
-    'box', 'text', 'div', 'span', 'className', 'style'
+    'box', 'text', 'view', 'data', 'div', 'span', 'classname', 'style'
 ]);
+const LOW_SIGNAL_KB_KEYWORDS = new Set([
+    'react', 'react-dom', 'lodash', 'lodash-es', 'zod', 'axios', 'ink',
+    'chalk', 'commander', 'sentry', 'statsig', 'tree-sitter', 'jsdom'
+]);
+const KB_LOW_WEIGHT_MULTIPLIER = parseFloat(process.env.KB_LOW_WEIGHT_MULTIPLIER) || 0.1;
 
 function ensureTargetExists() {
     let targetFile = null;
@@ -593,8 +598,62 @@ class CascadeGraph {
 
             // --- NEW: ENHANCED KB METADATA ---
             if (KB && !IS_BOOTSTRAP) {
-                // 1. Check File Anchors
-                if (KB.file_anchors) {
+                // 1. Check Vendor Anchors (negative signal)
+                if (KB.vendor_anchors || KB.known_packages) {
+                    const vendorAnchors = Array.isArray(KB.vendor_anchors) ? KB.vendor_anchors : [];
+                    const knownPackages = Array.isArray(KB.known_packages) ? KB.known_packages : [];
+                    const combinedAnchors = vendorAnchors.concat(knownPackages.map(name => ({
+                        logic_anchor: name,
+                        suggested_name: name,
+                        description: 'known_package'
+                    })));
+
+                    for (const anchor of combinedAnchors) {
+                        const logicAnchor = typeof anchor === 'string'
+                            ? anchor
+                            : (anchor.logic_anchor || anchor.content || anchor.anchor);
+                        const triggerKeywords = Array.isArray(anchor.trigger_keywords) ? anchor.trigger_keywords : [];
+
+                        let matched = false;
+                        if (logicAnchor && chunkCode.includes(logicAnchor)) matched = true;
+
+                        if (!matched && triggerKeywords.length > 0) {
+                            let weightedSum = 0;
+                            let matchedSpecific = false;
+                            triggerKeywords.forEach(kwEntry => {
+                                const kw = typeof kwEntry === 'string' ? kwEntry : kwEntry.word;
+                                const weight = typeof kwEntry === 'string' ? 1 : (kwEntry.weight || 1);
+                                const kwNorm = String(kw).toLowerCase();
+                                if (GENERIC_KB_KEYWORDS.has(kwNorm)) return;
+                                const weightMultiplier = LOW_SIGNAL_KB_KEYWORDS.has(kwNorm) ? KB_LOW_WEIGHT_MULTIPLIER : 1;
+                                if (chunkCode.includes(kw)) {
+                                    weightedSum += weight * weightMultiplier;
+                                    matchedSpecific = true;
+                                }
+                            });
+                            const threshold = anchor.threshold || Math.max(2, Math.floor(triggerKeywords.length * 0.3));
+                            if (matchedSpecific && weightedSum >= threshold) matched = true;
+                        }
+
+                        if (matched) {
+                            if (!suggestedName && anchor.suggested_name) {
+                                suggestedName = anchor.suggested_name.replace(/`/g, '');
+                            }
+                            category = 'vendor';
+                            kbInfo = {
+                                suggested_path: anchor.suggested_path,
+                                description: anchor.description,
+                                anchor_type: 'vendor',
+                                anchor_match: logicAnchor || null
+                            };
+                            console.log(`    [+] KB Vendor Match: ${logicAnchor || suggestedName || 'vendor'}`);
+                            break;
+                        }
+                    }
+                }
+
+                // 2. Check File Anchors (positive signal, but soft)
+                if (KB.file_anchors && category !== 'vendor') {
                     for (const anchor of KB.file_anchors) {
                         // Weighted keywords logic
                         let weightedSum = 0;
@@ -606,8 +665,9 @@ class CascadeGraph {
                             const weight = typeof kwEntry === 'string' ? 1 : (kwEntry.weight || 1);
                             const kwNorm = String(kw).toLowerCase();
                             if (GENERIC_KB_KEYWORDS.has(kwNorm)) return;
+                            const weightMultiplier = LOW_SIGNAL_KB_KEYWORDS.has(kwNorm) ? KB_LOW_WEIGHT_MULTIPLIER : 1;
                             if (chunkCode.includes(kw)) {
-                                weightedSum += weight;
+                                weightedSum += weight * weightMultiplier;
                                 matchedSpecific = true;
                             }
                         });
@@ -616,11 +676,12 @@ class CascadeGraph {
 
                         if (weightedSum >= threshold && matchedSpecific) {
                             suggestedName = anchor.suggested_name.replace(/`/g, '');
-                            category = 'priority';
+                            category = 'kb_priority';
                             kbInfo = {
                                 suggested_path: anchor.suggested_path,
                                 description: anchor.description,
-                                weighted_sum: weightedSum
+                                weighted_sum: weightedSum,
+                                anchor_type: 'file'
                             };
                             console.log(`    [+] KB Match: Found ${suggestedName} (Score: ${weightedSum})`);
                             break;
@@ -628,7 +689,7 @@ class CascadeGraph {
                     }
                 }
 
-                // 2. Scan for Name Hints (Logic Anchors)
+                // 3. Scan for Name Hints (Logic Anchors)
                 if (KB.name_hints) {
                     for (const hint of KB.name_hints) {
                         if (hint.logic_anchor && hint.logic_anchor.length > 0 && chunkCode.includes(hint.logic_anchor)) {
@@ -640,7 +701,7 @@ class CascadeGraph {
                     }
                 }
 
-                // 3. Scan for Error Anchors
+                // 4. Scan for Error Anchors
                 if (KB.error_anchors) {
                     for (const anchor of KB.error_anchors) {
                         if (chunkCode.includes(anchor.content)) {
@@ -667,7 +728,7 @@ class CascadeGraph {
                 for (const val of collectedStrings) {
                     const isPath = val.includes('/') || val.includes('\\');
                     const isModule = val.includes('@') || val.endsWith('.js') || val.endsWith('.ts');
-                    const isClaudeSignal = val.startsWith('tengu_') || val.startsWith('claude_') || val.toLowerCase().includes('anthropic');
+                    const isClaudeSignal = val.startsWith('tengu_') || val.startsWith('claude_');
 
                     if (isPath || isModule || isClaudeSignal) {
                         if (!suggestedName || val.length < suggestedName.length) {

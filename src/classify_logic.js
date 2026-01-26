@@ -64,7 +64,17 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
     // 2. Identify Seeds (Strategic Shift: Inversion of Proof)
     const familySet = new Set();
 
+    const vendorSet = new Set();
     graphData.chunks.forEach(node => {
+        const kbAnchorType = node.kb_info?.anchor_type;
+        if (node.category === 'vendor' || kbAnchorType === 'vendor') {
+            node.category = 'vendor';
+            vendorSet.add(node.name);
+            return;
+        }
+        if (node.category === 'priority' || node.category === 'kb_priority') {
+            node.category = 'unknown';
+        }
         const matchMeta = nnMapping.matches ? nnMapping.matches[node.name] : null;
         const libThreshold = parseFloat(process.env.LIBRARY_MATCH_THRESHOLD) || 0.92;
         const similarity = matchMeta ? (matchMeta.similarity_boosted || matchMeta.similarity) : 0;
@@ -75,14 +85,15 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
 
         // EVIDENCE FOR VENDOR: Only if NN is very sure (> 0.92)
         // PROTECT FIRST_PARTY: If name contains "claude" or "theme", OR if it matches custom gold, assume it's ours.
-        const lowerName = (node.displayName || node.name || "").toLowerCase();
-        const looksLikeFirstParty = lowerName.includes('claude') || lowerName.includes('theme') || isCustomGold;
+        const looksLikeFirstParty = isCustomGold;
 
-        const isProvenLibrary = (similarity >= libThreshold || node.isGoldenMatch) && !looksLikeFirstParty;
+        const highConfidenceThreshold = parseFloat(process.env.HIGH_CONFIDENCE_LIB_THRESHOLD) || 0.98;
+        const isHighConfidenceLib = similarity >= highConfidenceThreshold || node.isGoldenMatch;
+        const isProvenLibrary = isHighConfidenceLib || (similarity >= libThreshold && !looksLikeFirstParty);
 
         // EVIDENCE FOR FOUNDER: 
         // a) Explicit signals (Tengu, Generators, Entry Points)
-        const hasHardSignal = node.hasTengu || node.hasGenerator || node.entrySignalCount > 0;
+        const hasHardSignal = node.hasGenerator || node.entrySignalCount > 0 || (node.hasTengu && !isProvenLibrary);
         // b) Architectural importance WITHOUT library identity
         const orphanCentrality = parseFloat(process.env.IMPORTANT_ORPHAN_CENTRALITY) || 0.05;
         const isImportantOrphan = node.centrality > orphanCentrality && !isProvenLibrary;
@@ -97,11 +108,12 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
                 node.proposedPath = matchMeta.ref.proposedPath;
             }
             familySet.add(node.name);
+        } else if (isProvenLibrary || node.matchIsLibrary) {
+            node.category = 'vendor';
+            vendorSet.add(node.name);
         } else if (hasHardSignal || isImportantOrphan) {
             familySet.add(node.name);
             node.category = 'founder';
-        } else if (isProvenLibrary) {
-            node.category = 'vendor';
         } else {
             // THE TIPPING POINT: If we can't prove it's a library, 
             // and it's not a leaf-node utility, it's probably proprietary.
@@ -111,7 +123,38 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
     });
     console.log(`    [+] Identified ${familySet.size} founder/family chunks.`);
 
-    // 3. Spreading Activation
+    // 3. Vendor Spreading Activation (Small Chunk Inheritance)
+    let vendorChanged = true;
+    let vendorIteration = 0;
+    const minAnchorTokens = parseInt(process.env.ANCHOR_MIN_TOKENS) || 50;
+    const vendorSpreadingRatio = parseFloat(process.env.VENDOR_SPREADING_THRESHOLD_RATIO) || 0.9;
+    const vendorSpreadingCount = parseInt(process.env.VENDOR_SPREADING_THRESHOLD_COUNT) || 3;
+
+    while (vendorChanged && vendorIteration < 10) {
+        vendorIteration++;
+        const startVendorSize = vendorSet.size;
+        graphData.chunks.forEach(node => {
+            if (vendorSet.has(node.name)) return;
+            const neighbors = node.outbound || [];
+            const vendorNeighbors = neighbors.filter(n => vendorSet.has(n));
+            if (neighbors.length === 0) return;
+
+            const isSmallChunk = (node.tokens || 0) > 0 && (node.tokens || 0) < minAnchorTokens;
+            if (!isSmallChunk && node.category !== 'unknown') return;
+
+            if (vendorNeighbors.length / neighbors.length >= vendorSpreadingRatio || vendorNeighbors.length >= vendorSpreadingCount) {
+                vendorSet.add(node.name);
+                familySet.delete(node.name);
+                node.category = 'vendor';
+            }
+        });
+        vendorChanged = vendorSet.size > startVendorSize;
+    }
+    if (vendorSet.size > 0) {
+        console.log(`    [+] Vendor spreading complete: ${vendorSet.size} chunks in vendor set.`);
+    }
+
+    // 4. Spreading Activation
     let changed = true;
     let iteration = 0;
     const spreadingRatio = parseFloat(process.env.SPREADING_THRESHOLD_RATIO) || 0.3;
@@ -121,6 +164,7 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         iteration++;
         let startSize = familySet.size;
         graphData.chunks.forEach(node => {
+            if (vendorSet.has(node.name)) return;
             if (familySet.has(node.name)) return;
 
             const neighbors = node.outbound || [];

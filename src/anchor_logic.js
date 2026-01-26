@@ -223,9 +223,11 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         const graphMapRaw = fs.existsSync(graphMapPath) ? JSON.parse(fs.readFileSync(graphMapPath, 'utf8')) : { chunks: [] };
         const graphChunks = Array.isArray(graphMapRaw) ? graphMapRaw : (graphMapRaw.chunks || []);
         const neighborMap = new Map();
+        const tokenMap = new Map();
         graphChunks.forEach(chunk => {
             const neighbors = [...(chunk.neighbors || []), ...(chunk.outbound || [])];
             neighborMap.set(chunk.name, neighbors);
+            tokenMap.set(chunk.name, chunk.tokens || 0);
         });
         const neighborBoostPath = path.join(targetPath, 'metadata', 'neighbor_boosts.json');
         let neighborBoosts = {};
@@ -253,7 +255,14 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         const registryEntries = Object.entries(registry);
         const simThreshold = parseFloat(process.env.ANCHOR_SIMILARITY_THRESHOLD) || 0.9;
 
+        const minAnchorTokens = parseInt(process.env.ANCHOR_MIN_TOKENS) || 50;
+        let skippedSmallChunks = 0;
         for (const targetChunk of targetLogicDb) {
+            const chunkTokens = tokenMap.get(targetChunk.name) || 0;
+            if (chunkTokens > 0 && chunkTokens < minAnchorTokens) {
+                skippedSmallChunks++;
+                continue;
+            }
             let bestMatch = { ref: null, similarity: -1, label: null };
             const targetVecs = resolveVectors(targetChunk);
 
@@ -326,7 +335,7 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
                 );
 
                 const isCustomGoldLabel = bestMatch.label.includes('custom_claude_gold');
-                const isLibraryLabel = !isCustomGoldLabel && (bestMatch.label.includes('_') || bestMatch.label.includes('-v'));
+                const isLibraryLabel = !isCustomGoldLabel && (/_/.test(bestMatch.label) || /-v?\d/.test(bestMatch.label));
                 const libraryThreshold = parseFloat(process.env.LIBRARY_MATCH_THRESHOLD) || 0.95;
                 const isLibraryMatch = isLibraryLabel && bestMatch.similarity >= libraryThreshold;
 
@@ -451,6 +460,9 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         console.log(`    - Lock Rate (matched):      ${lockRate}% (>= ${lockThreshold})`);
         console.log(`    - Lock Rate (overall):      ${overallLockRate}% (>= ${lockThreshold})`);
         console.log(`    - Similarity Histogram:     ${hist.join(', ')}`);
+        if (skippedSmallChunks > 0) {
+            console.log(`    - Skipped Small Chunks:     ${skippedSmallChunks} (< ${minAnchorTokens} tokens)`);
+        }
 
     } else {
         // Mode: Version-to-version anchoring (Legacy/Direct)
@@ -488,7 +500,21 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         const lockThreshold = parseFloat(process.env.ANCHOR_LOCK_THRESHOLD) || 0.98;
         const lockConfidence = parseFloat(process.env.ANCHOR_LOCK_CONFIDENCE) || 0.99;
 
+        const graphMapPath = path.join(targetPath, 'metadata', 'graph_map.json');
+        const graphMapRaw = fs.existsSync(graphMapPath) ? JSON.parse(fs.readFileSync(graphMapPath, 'utf8')) : { chunks: [] };
+        const graphChunks = Array.isArray(graphMapRaw) ? graphMapRaw : (graphMapRaw.chunks || []);
+        const tokenMap = new Map();
+        graphChunks.forEach(chunk => {
+            tokenMap.set(chunk.name, chunk.tokens || 0);
+        });
+        const minAnchorTokens = parseInt(process.env.ANCHOR_MIN_TOKENS) || 50;
+        let skippedSmallChunks = 0;
         for (const targetChunk of targetLogicDb) {
+            const chunkTokens = tokenMap.get(targetChunk.name) || 0;
+            if (chunkTokens > 0 && chunkTokens < minAnchorTokens) {
+                skippedSmallChunks++;
+                continue;
+            }
             let bestMatch = { ref: null, similarity: -1 };
             for (const refChunk of referenceLogicDb) {
                 const targetVecs = resolveVectors(targetChunk);
@@ -550,6 +576,9 @@ async function anchorLogic(targetVersion, referenceVersion = null, baseDir = './
         console.log(`    - Chunks Matched (Already): ${existingMatchedCount}`);
         console.log(`    - Total Aligned Symbols:    ${Object.keys(targetMapping.variables).length + Object.keys(targetMapping.properties).length}`);
         console.log(`    - New Symbols Added:        ${totalNamesAnchored}`);
+        if (skippedSmallChunks > 0) {
+            console.log(`    - Skipped Small Chunks:     ${skippedSmallChunks} (< ${minAnchorTokens} tokens)`);
+        }
     }
 }
 
