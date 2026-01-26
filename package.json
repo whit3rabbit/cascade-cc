@@ -21,6 +21,7 @@
     "refine": "node run refine",
     "full": "node run full",
     "resync-registry": "./sync_registry.sh",
+    "sweep-vendor-founder": "node scripts/vendor_founder_sweep.js --config scripts/sweeps/vendor_founder_2.1.19.json",
     "execute": "npm run analyze && npm run deobfuscate"
   },
   "dependencies": {

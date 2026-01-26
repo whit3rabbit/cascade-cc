@@ -1,0 +1,79 @@
+{
+  "version": "2.1.19",
+  "referenceVersion": null,
+  "outputDir": "cascade_graph_analysis/sweeps/vendor_founder_2.1.19",
+  "baseEnv": {},
+  "runs": [
+    {
+      "name": "baseline",
+      "env": {
+        "ANCHOR_SIMILARITY_THRESHOLD": "0.75"
+      }
+    },
+    {
+      "name": "lib_match_0.70",
+      "env": {
+        "LIBRARY_MATCH_THRESHOLD": "0.70"
+      }
+    },
+    {
+      "name": "lib_match_0.90",
+      "env": {
+        "LIBRARY_MATCH_THRESHOLD": "0.90"
+      }
+    },
+    {
+      "name": "lib_match_0.98",
+      "env": {
+        "LIBRARY_MATCH_THRESHOLD": "0.98"
+      }
+    },
+    {
+      "name": "anchor_sim_0.75",
+      "env": {
+        "ANCHOR_SIMILARITY_THRESHOLD": "0.75"
+      }
+    },
+    {
+      "name": "anchor_sim_0.85",
+      "env": {
+        "ANCHOR_SIMILARITY_THRESHOLD": "0.85"
+      }
+    },
+    {
+      "name": "spread_ratio_0.20",
+      "env": {
+        "SPREADING_THRESHOLD_RATIO": "0.20"
+      }
+    },
+    {
+      "name": "spread_count_1",
+      "env": {
+        "SPREADING_THRESHOLD_COUNT": "1"
+      }
+    },
+    {
+      "name": "spread_ratio_0.40",
+      "env": {
+        "SPREADING_THRESHOLD_RATIO": "0.40"
+      }
+    },
+    {
+      "name": "liberal_combo",
+      "env": {
+        "LIBRARY_MATCH_THRESHOLD": "0.90",
+        "ANCHOR_SIMILARITY_THRESHOLD": "0.75",
+        "SPREADING_THRESHOLD_RATIO": "0.20",
+        "SPREADING_THRESHOLD_COUNT": "1"
+      }
+    },
+    {
+      "name": "strict_combo",
+      "env": {
+        "LIBRARY_MATCH_THRESHOLD": "0.98",
+        "ANCHOR_SIMILARITY_THRESHOLD": "0.85",
+        "SPREADING_THRESHOLD_RATIO": "0.40"
+      }
+    }
+  ]
+}

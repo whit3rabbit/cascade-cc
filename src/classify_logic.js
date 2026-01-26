@@ -66,7 +66,8 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
 
     graphData.chunks.forEach(node => {
         const matchMeta = nnMapping.matches ? nnMapping.matches[node.name] : null;
-        const similarity = matchMeta ? matchMeta.similarity : 0;
+        const libThreshold = parseFloat(process.env.LIBRARY_MATCH_THRESHOLD) || 0.92;
+        const similarity = matchMeta ? (matchMeta.similarity_boosted || matchMeta.similarity) : 0;
 
         // NEW: Custom Gold Detection
         // Checks if the match label indicates our custom proprietary gold standard
@@ -77,13 +78,14 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         const lowerName = (node.displayName || node.name || "").toLowerCase();
         const looksLikeFirstParty = lowerName.includes('claude') || lowerName.includes('theme') || isCustomGold;
 
-        const isProvenLibrary = (similarity > 0.92 || node.isGoldenMatch) && !looksLikeFirstParty;
+        const isProvenLibrary = (similarity >= libThreshold || node.isGoldenMatch) && !looksLikeFirstParty;
 
         // EVIDENCE FOR FOUNDER: 
         // a) Explicit signals (Tengu, Generators, Entry Points)
         const hasHardSignal = node.hasTengu || node.hasGenerator || node.entrySignalCount > 0;
         // b) Architectural importance WITHOUT library identity
-        const isImportantOrphan = node.centrality > 0.01 && !isProvenLibrary;
+        const orphanCentrality = parseFloat(process.env.IMPORTANT_ORPHAN_CENTRALITY) || 0.05;
+        const isImportantOrphan = node.centrality > orphanCentrality && !isProvenLibrary;
 
         if (isCustomGold) {
             node.category = 'founder';
