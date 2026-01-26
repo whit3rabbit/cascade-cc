@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { callLLM, validateKey, PROVIDER, MODEL } = require('./llm_client');
+const parsedConcurrency = Number.parseInt(process.env.LLM_CONCURRENCY || '', 10);
+const LLM_CONCURRENCY = Number.isFinite(parsedConcurrency) && parsedConcurrency > 0 ? parsedConcurrency : 1;
 const { renameIdentifiers: liveRenamer } = require('./rename_chunks');
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
@@ -659,7 +661,7 @@ async function run() {
     if (consolidationGroups.length > 0 && !isDryRun) {
         console.log(`[*] Phase 0.9: Running Consolidation Pass on ${consolidationGroups.length} groups...`);
         const pLimit = require('p-limit');
-        const limit = pLimit(5); // Fast parallel check
+        const limit = pLimit(LLM_CONCURRENCY); // Bound by LLM rate/concurrency
 
         const runConsolidation = (group) => limit(async () => {
             // Skip if we already have good paths for all
@@ -787,7 +789,7 @@ Response JSON:
         console.log(`[*] Skipping Stage 1 (Mapping Generation) as --rename-only is set.`);
     } else {
         const pLimit = require('p-limit');
-        const limit = pLimit(PROVIDER === 'gemini' ? 1 : 3);
+        const limit = pLimit(LLM_CONCURRENCY);
 
         const coreChunks = sortedChunks.filter(c => CORE_LIBS.some(lib => c.displayName?.toLowerCase().includes(lib) || c.proposedPath?.toLowerCase().includes(lib)));
         const otherChunks = sortedChunks.filter(c => !coreChunks.includes(c));

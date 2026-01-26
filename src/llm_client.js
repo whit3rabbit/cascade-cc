@@ -7,6 +7,9 @@ const PROVIDER = process.env.LLM_PROVIDER || 'gemini';
 const MODEL = process.env.LLM_MODEL || (PROVIDER === 'gemini' ? 'gemini-2.0-flash' : 'google/gemini-2.0-flash-exp:free');
 const API_KEY = PROVIDER === 'gemini' ? process.env.GEMINI_API_KEY : process.env.OPENROUTER_API_KEY;
 const LLM_TIMEOUT_MS = 300000; // 5 minutes
+const LLM_RATE_LIMIT_MS = Number.parseInt(process.env.LLM_RATE_LIMIT_MS || '', 10);
+const LLM_CONCURRENCY = Number.parseInt(process.env.LLM_CONCURRENCY || '', 10);
+const DEFAULT_RATE_LIMIT_MS = 7500; // 8 RPM
 
 let geminiClient = null;
 let openaiClient = null; // Renamed to openrouterClient below for clarity if needed, but keeping variable name for minimal diff if preferred. Actually let's rename for correctness.
@@ -35,17 +38,64 @@ const PROVIDER_CONFIG = {
     }
 };
 
+const effectiveRateLimitMs = Number.isFinite(LLM_RATE_LIMIT_MS) && LLM_RATE_LIMIT_MS >= 0
+    ? LLM_RATE_LIMIT_MS
+    : DEFAULT_RATE_LIMIT_MS;
+
+const effectiveConcurrency = Number.isFinite(LLM_CONCURRENCY) && LLM_CONCURRENCY > 0
+    ? LLM_CONCURRENCY
+    : 1;
+
+let lastRequestAtMs = 0;
+let activeRequests = 0;
+const requestWaiters = [];
+
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function callLLM(prompt, retryCount = 0) {
+async function enforceRateLimit() {
+    if (!effectiveRateLimitMs) return;
+    const now = Date.now();
+    const waitMs = Math.max(0, effectiveRateLimitMs - (now - lastRequestAtMs));
+    if (waitMs > 0) {
+        await sleep(waitMs);
+    }
+    lastRequestAtMs = Date.now();
+}
+
+async function acquireSlot() {
+    if (activeRequests < effectiveConcurrency) {
+        activeRequests += 1;
+        return;
+    }
+    await new Promise(resolve => requestWaiters.push(resolve));
+    activeRequests += 1;
+}
+
+function releaseSlot() {
+    activeRequests = Math.max(0, activeRequests - 1);
+    const next = requestWaiters.shift();
+    if (next) next();
+}
+
+async function enqueueRequest(task) {
+    await acquireSlot();
+    try {
+        return await task();
+    } finally {
+        releaseSlot();
+    }
+}
+
+async function callLLMInternal(prompt, retryCount = 0) {
     if (!API_KEY || API_KEY.includes('your_')) {
         throw new Error(`[!] Missing or invalid API key for ${PROVIDER}. Please check your .env file.`);
     }
 
     try {
         if (PROVIDER === 'gemini') {
+            await enforceRateLimit();
             const model = geminiClient.getGenerativeModel({ model: MODEL });
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
@@ -69,11 +119,12 @@ async function callLLM(prompt, retryCount = 0) {
                     const delay = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
                     console.warn(`[!] Gemini Error: ${err.message}. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
                     await sleep(delay);
-                    return callLLM(prompt, retryCount + 1);
+                    return callLLMInternal(prompt, retryCount + 1);
                 }
                 throw err;
             }
         } else {
+            await enforceRateLimit();
             console.log(`[*] ${PROVIDER} Request: Sending prompt to ${MODEL}...`);
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
@@ -101,7 +152,7 @@ async function callLLM(prompt, retryCount = 0) {
                     const delay = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
                     console.warn(`[!] OpenRouter Network Error: ${fetchErr.message}. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
                     await sleep(delay);
-                    return callLLM(prompt, retryCount + 1);
+                    return callLLMInternal(prompt, retryCount + 1);
                 }
                 throw fetchErr;
             }
@@ -136,7 +187,7 @@ async function callLLM(prompt, retryCount = 0) {
                         const delay = Math.pow(2, retryCount) * 3000 + Math.random() * 2000;
                         console.warn(`[!] ${status === 429 ? 'Rate limited' : 'Server error'} (${status}): ${detailedMessage}. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
                         await sleep(delay);
-                        return callLLM(prompt, retryCount + 1);
+                        return callLLMInternal(prompt, retryCount + 1);
                     }
                 }
                 throw new Error(`OpenRouter error (${status}): ${detailedMessage}`);
@@ -153,12 +204,16 @@ async function callLLM(prompt, retryCount = 0) {
             const delay = Math.pow(2, retryCount) * 2000 + Math.random() * 1000;
             console.warn(`[!] Request timed out. Retrying in ${Math.round(delay / 1000)}s... (Attempt ${retryCount + 1})`);
             await sleep(delay);
-            return callLLM(prompt, retryCount + 1);
+            return callLLMInternal(prompt, retryCount + 1);
         }
         console.error(`[!] Unhandled LLM Error (${err.name}): ${err.message}`);
         if (err.stack) console.error(err.stack);
         throw err;
     }
+}
+
+function callLLM(prompt, retryCount = 0) {
+    return enqueueRequest(() => callLLMInternal(prompt, retryCount));
 }
 
 async function validateKey() {
