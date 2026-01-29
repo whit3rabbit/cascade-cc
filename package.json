@@ -13,6 +13,7 @@
     "assemble": "node --max-old-space-size=8192 src/assemble_final.js",
     "anchor": "node --max-old-space-size=8192 src/anchor_logic.js",
     "anchor-classify": "node run anchor-classify",
+    "extract-bun": "node run extract-bun",
     "train": "node run train",
     "ingest-custom": "node src/ingest_custom_gold.js",
     "bootstrap": "node src/ingest_custom_gold.js && node --max-old-space-size=8192 src/bootstrap_libs.js",

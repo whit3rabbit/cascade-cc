@@ -351,7 +351,10 @@ async function main() {
     if (!versionDir) {
         // Auto-detect the latest version from cascade_graph_analysis
         const dirs = fs.readdirSync(baseDir).filter(d => {
-            return fs.statSync(path.join(baseDir, d)).isDirectory() && d !== 'bootstrap';
+            if (d === 'bootstrap' || d === 'sweeps') return false;
+            const fullPath = path.join(baseDir, d);
+            if (!fs.statSync(fullPath).isDirectory()) return false;
+            return /^\d+\.\d+\.\d+/.test(d) || d.startsWith('custom-');
         }).sort().reverse();
 
         if (dirs.length > 0) {

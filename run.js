@@ -52,7 +52,7 @@ const PYTHON_BIN = findPython();
 const command = process.argv[2];
 const args = process.argv.slice(3).map(arg => arg.replace(/[^a-zA-Z0-9.\-_=:/]/g, ''));
 
-const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'anchor-classify', 'classify', 'propagate-names', 'train', 'bootstrap', 'clean', 'refine', 'full'];
+const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anchor', 'anchor-classify', 'classify', 'propagate-names', 'train', 'bootstrap', 'clean', 'refine', 'full', 'extract-bun'];
 
 const scripts = {
     'analyze': {
@@ -119,6 +119,11 @@ const scripts = {
         cmd: 'node',
         args: [],
         desc: 'Run analyze -> anchor -> deobfuscate -> assemble -> refine for a version'
+    },
+    'extract-bun': {
+        cmd: PYTHON_BIN,
+        args: ['scripts/extract_bun_bundle.py', ...args],
+        desc: 'Extract Bun-bundled entrypoints into cascade_graph_analysis/<version>/bun_extracted'
     }
 };
 
@@ -227,6 +232,18 @@ switch (command) {
 
     case 'classify':
     case 'propagate-names': {
+        const child = spawn(config.cmd, config.args, {
+            stdio: 'inherit',
+            shell: true,
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+        });
+        child.on('exit', (code) => {
+            process.exit(code);
+        });
+        break;
+    }
+
+    case 'extract-bun': {
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',
             shell: true,

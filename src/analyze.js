@@ -11,6 +11,8 @@ const { encode } = require('gpt-tokenizer');
 const { webcrack } = require('webcrack');
 const { AAdecode, jjdecode } = require('./deobfuscation_helpers');
 const t = require('@babel/types');
+const https = require('https');
+const crypto = require('crypto');
 
 // --- 0. KNOWLEDGE BASE ---
 const { loadKnowledgeBase } = require('./knowledge_base');
@@ -28,6 +30,7 @@ const ANALYSIS_DIR = './claude-analysis';
 const OUTPUT_ROOT = './cascade_graph_analysis';
 let OUTPUT_BASE = OUTPUT_ROOT; // Will be updated with version
 const IS_BOOTSTRAP = process.argv.includes('--is-bootstrap');
+const GCS_BUCKET = 'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases';
 const SIGNAL_KEYWORDS = ['anthropic', 'claude', 'mcp', 'agent', 'terminal', 'prompt', 'session', 'protocol', 'codeloop'];
 const NATIVE_PROPS = ['toString', 'hasOwnProperty', 'constructor', 'prototype', 'call', 'apply', 'bind'];
 const GLOBAL_VARS = ['console', 'window', 'document', 'process', 'module', 'require', 'exports', 'global', 'Buffer', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'];
@@ -42,9 +45,187 @@ const LOW_SIGNAL_KB_KEYWORDS = new Set([
 ]);
 const KB_LOW_WEIGHT_MULTIPLIER = parseFloat(process.env.KB_LOW_WEIGHT_MULTIPLIER) || 0.1;
 
-function ensureTargetExists() {
+const JS_EXTENSIONS = new Set(['.js', '.mjs']);
+const getFileExtension = filePath => path.extname(filePath || '').toLowerCase();
+const isJsFile = filePath => JS_EXTENSIONS.has(getFileExtension(filePath));
+const getPythonBin = () => {
+    if (process.env.PYTHON_BIN) return process.env.PYTHON_BIN;
+    return process.platform === 'win32' ? 'python' : 'python3';
+};
+
+const getBinaryCliPath = version => path.join(ANALYSIS_DIR, version, 'binary', 'cli.js');
+const getBinaryPath = version => path.join(ANALYSIS_DIR, version, 'binary', process.platform === 'win32' ? 'claude.exe' : 'claude');
+
+const parseSemver = version => {
+    const match = typeof version === 'string'
+        ? version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/)
+        : null;
+    if (!match) return null;
+    return {
+        major: Number(match[1]),
+        minor: Number(match[2]),
+        patch: Number(match[3]),
+        prerelease: match[4] || ''
+    };
+};
+
+const BUN_CUTOFF_VERSION = parseSemver('2.1.23');
+
+const compareSemver = (a, b) => {
+    if (!a || !b) return 0;
+    if (a.major !== b.major) return a.major > b.major ? 1 : -1;
+    if (a.minor !== b.minor) return a.minor > b.minor ? 1 : -1;
+    if (a.patch !== b.patch) return a.patch > b.patch ? 1 : -1;
+    if (a.prerelease && !b.prerelease) return -1;
+    if (!a.prerelease && b.prerelease) return 1;
+    return 0;
+};
+
+const fetchBuffer = (url, redirects = 0) => new Promise((resolve, reject) => {
+    const request = https.get(url, res => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            if (redirects > 5) {
+                reject(new Error(`Too many redirects for ${url}`));
+                return;
+            }
+            resolve(fetchBuffer(res.headers.location, redirects + 1));
+            return;
+        }
+        if (res.statusCode !== 200) {
+            reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+            res.resume();
+            return;
+        }
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+    request.on('error', reject);
+});
+
+const fetchText = async url => (await fetchBuffer(url)).toString('utf8').trim();
+
+const downloadToFile = async (url, outputPath) => {
+    const buffer = await fetchBuffer(url);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, buffer);
+};
+
+const isMusl = () => {
+    if (process.platform !== 'linux') return false;
+    try {
+        const report = process.report && process.report.getReport ? process.report.getReport() : null;
+        if (report && report.header && report.header.glibcVersionRuntime) return false;
+    } catch (err) {
+        // Ignore and fall back to file checks.
+    }
+    const muslFiles = [
+        '/lib/libc.musl-x86_64.so.1',
+        '/lib/libc.musl-aarch64.so.1'
+    ];
+    if (muslFiles.some(p => fs.existsSync(p))) return true;
+    try {
+        const lddPath = '/usr/bin/ldd';
+        if (fs.existsSync(lddPath)) {
+            return fs.readFileSync(lddPath, 'utf8').includes('musl');
+        }
+    } catch (err) {
+        // Ignore.
+    }
+    return false;
+};
+
+const detectPlatformKey = () => {
+    if (process.platform === 'win32') return 'win32-x64';
+
+    let osKey;
+    if (process.platform === 'darwin') osKey = 'darwin';
+    else if (process.platform === 'linux') osKey = 'linux';
+    else throw new Error(`Unsupported platform: ${process.platform}`);
+
+    let archKey;
+    if (process.arch === 'x64') archKey = 'x64';
+    else if (process.arch === 'arm64') archKey = 'arm64';
+    else throw new Error(`Unsupported architecture: ${process.arch}`);
+
+    if (osKey === 'linux' && isMusl()) return `${osKey}-${archKey}-musl`;
+    return `${osKey}-${archKey}`;
+};
+
+const getNpmLatestVersion = () => {
+    try {
+        return execSync(`npm view ${PACKAGE_NAME} version`).toString().trim();
+    } catch (err) {
+        console.warn(`[!] Failed to fetch NPM version: ${err.message}`);
+        return null;
+    }
+};
+
+const downloadClaudeBinary = async requestedVersion => {
+    const rawVersion = requestedVersion || 'latest';
+    const requestedSemver = parseSemver(rawVersion);
+    const resolvedVersion = requestedSemver ? rawVersion : await fetchText(`${GCS_BUCKET}/latest`);
+    const manifestUrl = `${GCS_BUCKET}/${resolvedVersion}/manifest.json`;
+    const manifest = JSON.parse(await fetchText(manifestUrl));
+    const platformKey = detectPlatformKey();
+    const checksum = manifest?.platforms?.[platformKey]?.checksum;
+    if (!checksum) {
+        throw new Error(`Platform ${platformKey} not found in manifest for ${version}`);
+    }
+
+    const binaryName = process.platform === 'win32' ? 'claude.exe' : 'claude';
+    const binaryUrl = `${GCS_BUCKET}/${resolvedVersion}/${platformKey}/${binaryName}`;
+    const binaryPath = path.join(ANALYSIS_DIR, resolvedVersion, 'binary', binaryName);
+    let needsDownload = true;
+
+    if (fs.existsSync(binaryPath)) {
+        const actual = crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex');
+        if (actual === checksum) {
+            needsDownload = false;
+        } else {
+            fs.unlinkSync(binaryPath);
+        }
+    }
+
+    if (needsDownload) {
+        await downloadToFile(binaryUrl, binaryPath);
+        const actual = crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex');
+        if (actual !== checksum) {
+            fs.unlinkSync(binaryPath);
+            throw new Error(`Checksum verification failed for ${binaryName}`);
+        }
+        if (process.platform !== 'win32') {
+            fs.chmodSync(binaryPath, 0o755);
+        }
+    }
+
+    return { binaryPath, version: resolvedVersion };
+};
+
+const extractBunEntrypoint = (version, binaryPath) => {
+    const cliPath = getBinaryCliPath(version);
+    if (fs.existsSync(cliPath)) {
+        console.log(`[*] Bun entrypoint already extracted: ${cliPath}`);
+        return cliPath;
+    }
+
+    const pythonBin = getPythonBin();
+    try {
+        execSync(`${pythonBin} scripts/extract_bun_bundle.py --version ${version}`, { stdio: 'inherit' });
+    } catch (err) {
+        throw new Error(`Bun extraction failed: ${err.message}`);
+    }
+
+    if (!fs.existsSync(cliPath)) {
+        throw new Error(`Expected Bun entrypoint not found after extraction: ${cliPath}`);
+    }
+    return cliPath;
+};
+
+async function ensureTargetExists() {
     let targetFile = null;
     let version = 'unknown';
+    let targetType = 'js';
     const versionIdx = process.argv.indexOf('--version');
     const versionArg = versionIdx !== -1 ? process.argv[versionIdx + 1] : null;
     const rawArgs = process.argv.slice(2);
@@ -78,18 +259,19 @@ function ensureTargetExists() {
             version = 'custom-' + crypto.createHash('md5').update(targetFile).digest('hex').slice(0, 8);
         }
 
-        return { targetFile, version };
+        targetType = isJsFile(targetFile) ? 'js' : 'binary';
+        return { targetFile, version, targetType };
     }
 
     // 2. Use explicit --version if provided, otherwise fetch latest from NPM
+    const npmLatestVersion = getNpmLatestVersion();
     if (versionArg) {
         version = versionArg;
     } else {
-        console.log(`[*] Checking latest version of ${PACKAGE_NAME}...`);
-        try {
-            version = execSync(`npm view ${PACKAGE_NAME} version`).toString().trim();
-        } catch (err) {
-            console.warn(`[!] Failed to fetch NPM version: ${err.message}`);
+        if (npmLatestVersion) {
+            console.log(`[*] Using latest NPM version of ${PACKAGE_NAME}: ${npmLatestVersion}`);
+            version = npmLatestVersion;
+        } else {
             // Fallback to locally existing if any
             if (fs.existsSync(ANALYSIS_DIR)) {
                 const versions = fs.readdirSync(ANALYSIS_DIR).filter(v => /^\d+\.\d+\.\d+/.test(v)).sort().reverse();
@@ -97,10 +279,40 @@ function ensureTargetExists() {
                     const potentialPath = path.join(ANALYSIS_DIR, v, 'cli.js');
                     if (fs.existsSync(potentialPath)) {
                         console.log(`[*] Using locally found version: ${v} (NPM check failed)`);
-                        return { targetFile: potentialPath, version: v };
+                        return { targetFile: potentialPath, version: v, targetType: 'js' };
                     }
                 }
             }
+        }
+    }
+
+    const desiredSemver = parseSemver(version);
+    const isAfterBunCutoff = desiredSemver && compareSemver(desiredSemver, BUN_CUTOFF_VERSION) === 1;
+    const shouldUseBinary = Boolean(
+        (versionArg && !desiredSemver) ||
+        isAfterBunCutoff
+    );
+
+    if (shouldUseBinary) {
+        if (desiredSemver && isAfterBunCutoff) {
+            const existingCli = getBinaryCliPath(version);
+            if (fs.existsSync(existingCli)) {
+                console.log(`[*] Found extracted Bun entrypoint for ${version}. Skipping download.`);
+                return { targetFile: existingCli, version, targetType: 'js' };
+            }
+        }
+
+        console.log(`[*] Using native binary download for ${version} (bun cutoff: 2.1.23)...`);
+        try {
+            const { binaryPath, version: resolvedVersion } = await downloadClaudeBinary(version);
+            if (desiredSemver && compareSemver(parseSemver(resolvedVersion), BUN_CUTOFF_VERSION) === 1) {
+                const cliPath = extractBunEntrypoint(resolvedVersion, binaryPath);
+                return { targetFile: cliPath, version: resolvedVersion, targetType: 'js' };
+            }
+            return { targetFile: binaryPath, version: resolvedVersion, targetType: 'binary' };
+        } catch (err) {
+            console.error(`[!] Failed to download native binary: ${err.message}`);
+            return { targetFile: null, version: 'unknown', targetType: 'binary' };
         }
     }
 
@@ -111,10 +323,23 @@ function ensureTargetExists() {
             path.join(versionPath, 'cli.js'),
             path.join(versionPath, 'cli.mjs')
         ];
+        const isBunVersion = desiredSemver && compareSemver(desiredSemver, BUN_CUTOFF_VERSION) === 1;
+        if (isBunVersion) {
+            const binaryCli = getBinaryCliPath(version);
+            candidates.unshift(binaryCli);
+            const binaryPath = getBinaryPath(version);
+            if (!fs.existsSync(binaryCli) && fs.existsSync(binaryPath)) {
+                try {
+                    extractBunEntrypoint(version, binaryPath);
+                } catch (err) {
+                    throw new Error(`Failed to extract Bun entrypoint for ${version}: ${err.message}`);
+                }
+            }
+        }
         const potentialPath = candidates.find(p => fs.existsSync(p));
         if (potentialPath) {
             console.log(`[*] Version ${version} already present. Skipping download.`);
-            return { targetFile: potentialPath, version };
+            return { targetFile: potentialPath, version, targetType: 'js' };
         }
     }
 
@@ -143,14 +368,23 @@ function ensureTargetExists() {
             ];
             const downloadedCli = candidates.find(p => fs.existsSync(p));
             if (downloadedCli) {
-                return { targetFile: downloadedCli, version };
+                return { targetFile: downloadedCli, version, targetType: 'js' };
             }
         } catch (err) {
             console.error(`\n[!] Failed to download bundle: ${err.message}`);
+            if (versionArg) {
+                console.warn(`[!] Falling back to native binary download for ${version}...`);
+                try {
+                    const { binaryPath, version: resolvedVersion } = await downloadClaudeBinary(version);
+                    return { targetFile: binaryPath, version: resolvedVersion, targetType: 'binary' };
+                } catch (binaryErr) {
+                    console.error(`[!] Native binary download failed: ${binaryErr.message}`);
+                }
+            }
         }
     }
 
-    return { targetFile: null, version: 'unknown' };
+    return { targetFile: null, version: 'unknown', targetType: 'js' };
 }
 
 /**
@@ -190,7 +424,6 @@ function findStrings(node, strings = []) {
 }
 
 // --- NEW: STRUCTURAL AST EXPORT FOR ML ---
-const crypto = require('crypto');
 
 /**
  * Strips identifiers and values from a node to create a "shape-only" representation.
@@ -1304,13 +1537,19 @@ class CascadeGraph {
 
 // --- 3. EXECUTION ---
 async function run() {
-    const { targetFile, version } = ensureTargetExists();
+    const { targetFile, version, targetType } = await ensureTargetExists();
 
     if (!targetFile || !fs.existsSync(targetFile)) {
         console.error(`[!] Error: No input file found.`);
-        console.error(`    Checked: CLI arguments, ./cli.js, and ./claude-analysis/*/cli.js`);
+        console.error(`    Checked: CLI arguments, ./cli.js, and ./claude-analysis/*/cli.js (plus binary/cli.js for Bun versions)`);
         console.error(`    Usage: node analyze.js [path-to-bundle.js]`);
         process.exit(1);
+    }
+
+    if (targetType === 'binary') {
+        console.log(`[*] Native binary downloaded: ${targetFile}`);
+        console.warn(`[!] Binary analysis is not supported yet. This is a download-only test.`);
+        process.exit(0);
     }
 
     console.log(`[*] Target identified: ${targetFile}`);
