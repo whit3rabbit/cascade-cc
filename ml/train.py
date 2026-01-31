@@ -117,6 +117,40 @@ def generate_synthetic_obfuscation(ast_node):
             new_children[left_idx], new_children[right_idx] = children[right_idx], children[left_idx]
             new_node["children"] = new_children
 
+    # 7. Bundler Jitter: Randomly simulate bundler wrappers
+    if random.random() < 0.3:
+        wrapper_type = random.choice(["cjs", "bun", "lazy"])
+        if wrapper_type == "cjs":
+            new_node = {
+                "type": "CallExpression",
+                "call": "__commonJS",
+                "children": [
+                    {
+                        "type": "FunctionExpression",
+                        "children": [new_node],
+                        "slot": "callee"
+                    }
+                ]
+            }
+        elif wrapper_type == "bun":
+            new_node = {
+                "type": "ObjectProperty",
+                "key": "123",
+                "children": [new_node]
+            }
+        else:
+            new_node = {
+                "type": "CallExpression",
+                "call": "__lazyInit",
+                "children": [
+                    {
+                        "type": "FunctionExpression",
+                        "children": [new_node],
+                        "slot": "callee"
+                    }
+                ]
+            }
+
     if "children" in new_node:
         new_node["children"] = [generate_synthetic_obfuscation(c) for c in new_node["children"]]
     return new_node

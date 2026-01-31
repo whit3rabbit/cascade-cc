@@ -188,17 +188,7 @@ def main():
     for raw_path, dest, size in extracted:
         print(f"    - {raw_path} -> {dest} ({size} bytes)")
 
-    if not args.all:
-        # Normalize entrypoint name for downstream analysis.
-        for raw_path, dest, _ in extracted:
-            if raw_path.endswith("/cli.js.jsc"):
-                src = Path(dest)
-                if src.exists():
-                    if cli_dest.exists() and args.force:
-                        cli_dest.unlink()
-                    if not cli_dest.exists():
-                        src.replace(cli_dest)
-                        print(f"[+] Renamed: {src} -> {cli_dest}")
+    # Keep cli.js.jsc intact for bytecode analysis; do not rename to cli.js.
     return 0
 
 

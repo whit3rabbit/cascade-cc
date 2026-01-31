@@ -757,5 +757,9 @@
     {
         "name": "yoga-layout-prebuilt",
         "version": "latest"
+    },
+    {
+        "name": "@azure/msal-node",
+        "version": "latest"
     }
 ]

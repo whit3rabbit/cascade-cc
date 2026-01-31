@@ -18,6 +18,9 @@ Follow these steps to set up the environment and initialize the pre-trained "Bra
 # Install Node dependencies
 npm install
 
+# Install bun-decompile (used to extract Claude bundles)
+bun add -g @shepherdjerred/bun-decompile
+
 # Setup Python environment
 python3 -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
@@ -37,6 +40,18 @@ npm run sync-vocab
 npm run bootstrap
 ./sync_registry.sh
 ```
+
+### 3. Bun Bundle Extraction (automatic)
+For Bun-based Claude versions, `npm run analyze` will automatically run `bun-decompile` and extract the JS bundle.
+Manual extraction is only needed if you want to inspect the bundle directly:
+```bash
+# Example: decompile a bundle and write to an output folder
+bun-decompile ./claude -o claude-out
+```
+Notes:
+- JS output typically lands at `claude-analysis/<version>/binary/claude-out/bundled/claude.js`.
+- JSC bytecode typically lands at `claude-analysis/<version>/binary/claude-out/bytecode/claude.jsc`.
+- The JS file may still appear minified/obfuscated.
 
 ---
 

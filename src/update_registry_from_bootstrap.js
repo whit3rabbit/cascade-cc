@@ -79,7 +79,10 @@ async function updateRegistryFromBootstrap() {
             }
 
             // Group by library and chunk name to avoid collisions
-            const registryKey = `${lib}_${chunk.name}`;
+            const bundlerSuffix = lib.endsWith('_bun') ? 'bun' : (lib.endsWith('_esbuild') ? 'esbuild' : null);
+            const registryKey = bundlerSuffix
+                ? `${lib}_${chunk.name}`
+                : `${lib}_esbuild_${chunk.name}`;
             registry[registryKey] = {
                 lib,
                 chunk_name: chunk.name,

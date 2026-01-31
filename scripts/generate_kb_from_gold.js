@@ -40,6 +40,44 @@ const ERROR_CALLEES = new Set([
     'panic'
 ]);
 
+const STATIC_STRUCTURAL_ANCHORS = [
+    {
+        id: 'anthropic_api_client',
+        regex: 'https://api\\.anthropic\\.com',
+        weight: 10
+    },
+    {
+        id: 'tool_call_handler',
+        pattern: '{type:\"tool_use\",id:',
+        weight: 8
+    },
+    {
+        id: 'bun_binary_check',
+        regex: 'Bun\\.env|Bun\\.main',
+        weight: 5
+    },
+    {
+        id: 'bun_entrypoint',
+        regex: 'Bun\\.main',
+        weight: 4
+    },
+    {
+        id: 'terminal_columns',
+        regex: 'terminal\\.columns|p\\.terminal\\.columns',
+        weight: 4
+    },
+    {
+        id: 'user_agent',
+        regex: 'anthropic-ai/claude-code',
+        weight: 4
+    },
+    {
+        id: 'telemetry_post_stats',
+        regex: 'post-stats',
+        weight: 3
+    }
+];
+
 const STOP_WORDS = new Set([
     'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends',
     'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try',
@@ -113,6 +151,13 @@ function isUsefulString(str) {
     if (!/[A-Za-z]/.test(trimmed)) return false;
     if (trimmed.includes('\n')) return false;
     return true;
+}
+
+function isHighEntropyErrorString(str) {
+    const trimmed = normalizeString(str);
+    if (trimmed.length < 21 || trimmed.length > 200) return false;
+    const uniqueChars = new Set(trimmed).size;
+    return uniqueChars >= 8;
 }
 
 function parseFile(code) {
@@ -333,6 +378,7 @@ function main() {
         });
 
         info.errorStrings.forEach((s) => {
+            if (!isHighEntropyErrorString(s)) return;
             errorAnchors.push({
                 role: 'AUTO_ERROR',
                 content: s
@@ -349,12 +395,25 @@ function main() {
         mergedErrorAnchors.push(e);
     });
 
+    const mergedStructuralAnchors = [];
+    const seenStructuralIds = new Set();
+    const structuralSources = []
+        .concat(previousKb.structural_anchors || [])
+        .concat(STATIC_STRUCTURAL_ANCHORS);
+    structuralSources.forEach((anchor) => {
+        if (!anchor) return;
+        const key = anchor.id || anchor.regex || anchor.pattern || anchor.logic_anchor;
+        if (!key || seenStructuralIds.has(key)) return;
+        seenStructuralIds.add(key);
+        mergedStructuralAnchors.push(anchor);
+    });
+
     const kb = {
         project_structure: buildProjectStructure(fileInfos),
         file_anchors: fileAnchors,
         name_hints: nameHints,
         error_anchors: mergedErrorAnchors,
-        structural_anchors: previousKb.structural_anchors || [],
+        structural_anchors: mergedStructuralAnchors,
         known_packages: previousKb.known_packages || []
     };
 

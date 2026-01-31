@@ -263,6 +263,12 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
                 proposed_path = chunk_data.get("proposedPath")
                 module_id = chunk_data.get("moduleId")
 
+            # Bun IIFE wrapper: drill into the call body for cleaner signals
+            if isinstance(ast_root, list) and len(ast_root) == 1:
+                node = ast_root[0]
+                if isinstance(node, dict) and node.get("type") == "CallExpression" and "children" in node:
+                    ast_root = node["children"]
+
             sequence = []
             symbols = []
             literals = []
