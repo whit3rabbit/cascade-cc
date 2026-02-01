@@ -800,7 +800,7 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
                 for lib, mrr_score in worst_libs:
                     lib_margin = per_lib_margins.get(lib, 0.0)
                     print(f"      - {lib.ljust(20)}: MRR {mrr_score:.4f} | Margin: {lib_margin:.4f}")
-            if checkpoint_dir and (epoch + 1) % checkpoint_interval == 0:
+            if checkpoint_dir and checkpoint_interval and checkpoint_interval > 0 and (epoch + 1) % checkpoint_interval == 0:
                 checkpoint_epoch = effective_epoch
                 checkpoint_path = os.path.join(checkpoint_dir, f"model_epoch_{checkpoint_epoch}.pth")
                 torch.save(model.state_dict(), checkpoint_path)
