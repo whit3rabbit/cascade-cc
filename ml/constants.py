@@ -315,7 +315,11 @@ NODE_TYPES = [
     "Builtin_require",
     "Builtin_defineProperty",
     "Builtin_exports",
-    "Builtin_module"
+    "Builtin_module",
+    "Builtin_ArrayMutation",
+    "Builtin_Crypto",
+    "Builtin_FileSystem",
+    "Builtin_FunctionalIter"
 ]
 
 TYPE_TO_ID = {t: i for i, t in enumerate(NODE_TYPES)}

@@ -127,6 +127,11 @@ def flatten_ast(node, sequence, symbols, literals, stats, path="Root", literal_k
         call_name = node["call"]
         if call_name == "require": node_type = "Builtin_require"
         elif call_name == "defineProperty": node_type = "Builtin_defineProperty"
+        else:
+            if call_name in ["push", "pop", "shift"]: node_type = "Builtin_ArrayMutation"
+            elif call_name in ["encrypt", "hash", "createHash"]: node_type = "Builtin_Crypto"
+            elif call_name in ["readFile", "writeFile"]: node_type = "Builtin_FileSystem"
+            elif call_name in ["map", "filter", "reduce"]: node_type = "Builtin_FunctionalIter"
     elif node_type == "Identifier" and "name" in node:
         name = node["name"]
         if name == "exports": node_type = "Builtin_exports"

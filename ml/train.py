@@ -16,6 +16,19 @@ from constants import NODE_TYPES, MAX_NODES, MAX_LITERALS
 # Suppress transformer nested tensor prototype warnings for cleaner sweep logs.
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.modules.transformer")
 
+def _collect_identifier_names(node, limit=6):
+    names = []
+    stack = [node]
+    while stack and len(names) < limit:
+        cur = stack.pop()
+        if isinstance(cur, dict):
+            if cur.get("type") == "Identifier" and "name" in cur:
+                names.append(cur["name"])
+            stack.extend(cur.get("children", []))
+        elif isinstance(cur, list):
+            stack.extend(cur)
+    return names
+
 def generate_synthetic_obfuscation(ast_node):
     """
     Creates a 'mangled' version of the AST.
@@ -41,8 +54,27 @@ def generate_synthetic_obfuscation(ast_node):
     # 1. Rename Identifiers (Minification)
     if node_type == "Identifier":
         new_node["name"] = random.choice("abcdefghijklmnopqrstuvwxyz") + random.choice("0123456789")
+
+    # 2. Variable Shadowing: Inject a local declaration that reuses an existing identifier
+    if node_type == "BlockStatement" and random.random() < 0.2:
+        shadow_candidates = _collect_identifier_names(new_node)
+        shadow_name = random.choice(shadow_candidates) if shadow_candidates else random.choice(["a", "b", "c", "d"])
+        shadow_decl = {
+            "type": "VariableDeclaration",
+            "kind": "var",
+            "children": [
+                {
+                    "type": "VariableDeclarator",
+                    "children": [{"type": "Identifier", "name": shadow_name, "slot": "id"}]
+                }
+            ]
+        }
+        if "children" in new_node:
+            new_node["children"] = new_node["children"].copy()
+            insert_pos = random.randint(0, len(new_node["children"]))
+            new_node["children"].insert(insert_pos, shadow_decl)
         
-    # 2. Dead Code Injection: Randomly insert if(false){...}
+    # 3. Dead Code Injection: Randomly insert if(false){...}
     if node_type == "BlockStatement" and random.random() < 0.15:
         dead_node = {
             "type": "IfStatement",
@@ -56,7 +88,7 @@ def generate_synthetic_obfuscation(ast_node):
             insert_pos = random.randint(0, len(new_node["children"]))
             new_node["children"].insert(insert_pos, dead_node)
 
-    # 3. Constant Unfolding: Replace true with !0, etc.
+    # 4. Constant Unfolding: Replace true with !0, etc.
     if node_type == "BooleanLiteral" and random.random() < 0.2:
         val = new_node.get("value")
         # Simulate !0 or !1 structure
@@ -69,7 +101,7 @@ def generate_synthetic_obfuscation(ast_node):
         }
         return new_node
 
-    # 4. IIFE Wrapping: Wrap a block or expression in (function(){...})()
+    # 5. IIFE Wrapping: Wrap a block or expression in (function(){...})()
     if node_type in ["BlockStatement", "CallExpression"] and random.random() < 0.05:
         # Simplified representation of an IIFE in our AST logic
         new_node = {
@@ -83,7 +115,7 @@ def generate_synthetic_obfuscation(ast_node):
             ]
         }
 
-    # 5. Structural Noise: IfStatement Swapping (Existing)
+    # 6. Structural Noise: IfStatement Swapping (Existing)
     if node_type == "IfStatement" and random.random() < 0.2:
         children = new_node.get("children", [])
         test_idx, cons_idx, alt_idx = -1, -1, -1
@@ -103,7 +135,7 @@ def generate_synthetic_obfuscation(ast_node):
             }
             new_node["children"] = new_children
 
-    # 6. Commutative Swapping: BinaryExpression / LogicalExpression (Existing)
+    # 7. Commutative Swapping: BinaryExpression / LogicalExpression (Existing)
     if node_type in ["BinaryExpression", "LogicalExpression"] and random.random() < 0.2:
         children = new_node.get("children", [])
         left_idx, right_idx = -1, -1
@@ -117,7 +149,24 @@ def generate_synthetic_obfuscation(ast_node):
             new_children[left_idx], new_children[right_idx] = children[right_idx], children[left_idx]
             new_node["children"] = new_children
 
-    # 7. Bundler Jitter: Randomly simulate bundler wrappers
+    # 8. Simulate String Encryption/Inlining
+    if node_type == "StringLiteral" and random.random() < 0.3:
+        new_node = {
+            "type": "CallExpression",
+            "call": "decrypt_helper",
+            "children": [{"type": "StringLiteral", "valHash": "deadbeef", "valKind": "cipher"}]
+        }
+        node_type = new_node.get("type")
+
+    # 9. Property Access Flattening: obj.prop -> obj['prop']
+    if node_type == "MemberExpression" and not new_node.get("computed") and random.random() < 0.2:
+        new_node["computed"] = True
+
+    # 10. Logic Expansion (Ternary to If/Else simulation)
+    if node_type == "ConditionalExpression" and random.random() < 0.2:
+        new_node["type"] = "IfStatement"
+
+    # 11. Bundler Jitter: Randomly simulate bundler wrappers
     if random.random() < 0.3:
         wrapper_type = random.choice(["cjs", "bun", "lazy"])
         if wrapper_type == "cjs":

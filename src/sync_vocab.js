@@ -7,7 +7,16 @@ const path = require('path');
  * always has the same vocabulary as the parser.
  */
 
-const CUSTOM_TYPES = ["Builtin_require", "Builtin_defineProperty", "Builtin_exports", "Builtin_module"];
+const CUSTOM_TYPES = [
+  "Builtin_require",
+  "Builtin_defineProperty",
+  "Builtin_exports",
+  "Builtin_module",
+  "Builtin_ArrayMutation",
+  "Builtin_Crypto",
+  "Builtin_FileSystem",
+  "Builtin_FunctionalIter",
+];
 const BASE_TYPES = ["PAD", "UNKNOWN"];
 
 // Get all Babel types and sort them for stability
