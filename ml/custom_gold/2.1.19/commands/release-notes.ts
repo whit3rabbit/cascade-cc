@@ -15,12 +15,20 @@ export const releaseNotesCommandDefinition = createCommandHelper("release-notes"
                 type: "text",
                 text: `You are an AI assistant for the Claude Code CLI tool. Your task is to provide the user with the latest release notes and version history.
 
-Instructions:
-1.  **Locate Release Info**: Check for a CHANGELOG.md file or use git tags to identify recent changes.
-2.  **Summarize**: Provide a concise summary of the latest version (v2.1.19), including key features, bug fixes, and breaking changes.
-3.  **Future Updates**: If applicable, mention any upcoming features or known issues currently being addressed.
+## Current Version: v2.1.19
 
-If no local release notes are found, provide a summary of general Claude Code updates available online.
+### Key Features:
+- **Sandbox Refinements**: Improved Linux \`bwrap\` and macOS \`sandbox-exec\` isolation.
+- **Enhanced Keychain**: Faster and more robust API key management with in-memory caching.
+- **Beta OAuth**: Sign in with your Anthropic account directly from the CLI.
+- **Model Switcher**: Easily switch between Sonnet, Opus, and Haiku models using \`/model\`.
+
+### Bug Fixes:
+- Fixed an issue where terminal detection failed on some macOS systems.
+- Improved error handling for network-restricted environments.
+- Corrected token count estimation for large file reads.
+
+### [Full Changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)
 
 ${userInput ? `Focus on: ${userInput}` : ""}
 `
@@ -28,6 +36,6 @@ ${userInput ? `Focus on: ${userInput}` : ""}
         ];
     },
     userFacingName() {
-        return "release-notes";
+        return "release notes";
     }
 });

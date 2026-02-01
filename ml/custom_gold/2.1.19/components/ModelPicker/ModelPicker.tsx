@@ -24,9 +24,21 @@ interface ModelPickerProps {
 }
 
 const DEFAULT_MODELS: ModelOption[] = [
-    { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet", description: "Best overall performance" },
-    { value: "claude-3-opus-20240229", label: "Claude 3 Opus", description: "Most powerful model" },
-    { value: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku", description: "Fastest and most efficient" }
+    {
+        value: "claude-3-5-sonnet-20241022",
+        label: "1. Default (recommended) ✔  Sonnet 4.5 · Best for everyday tasks",
+        description: "Best for everyday tasks"
+    },
+    {
+        value: "claude-3-opus-20240229",
+        label: "2. Opus                     Opus 4.5 · Most capable for complex work",
+        description: "Most capable for complex work"
+    },
+    {
+        value: "claude-3-5-haiku-20241022",
+        label: "3. Haiku                    Haiku 4.5 · Fastest for quick answers",
+        description: "Fastest for quick answers"
+    }
 ];
 
 /**
@@ -42,12 +54,14 @@ export function ModelPicker({
     const [activeValue, setActiveValue] = useState(initialModel || DEFAULT_MODELS[0].value);
 
     const options = useMemo(() => {
-        // Ensure the initial model is in the list if it's custom
+        // We generally use the DEFAULT_MODELS. If initialModel is not in it, we might want to add it,
+        // but for this specific TUI request we mainly want to show the list as requested.
+        // We will stick to DEFAULT_MODELS mostly.
         const list = [...DEFAULT_MODELS];
         if (initialModel && !list.find(m => m.value === initialModel)) {
             list.push({
                 value: initialModel,
-                label: initialModel,
+                label: `4. Custom                   ${initialModel}`,
                 description: "Current model"
             });
         }
@@ -56,16 +70,16 @@ export function ModelPicker({
 
     return (
         <Box flexDirection="column" paddingX={isStandalone ? 1 : 0}>
-            {isStandalone && <Divider color="blue" marginBottom={1} />}
+            {isStandalone && <Divider color="gray" marginBottom={1} />}
 
             <Box flexDirection="column" marginBottom={1}>
-                <Text bold color="cyan">Select model</Text>
+                <Text bold>Select model</Text>
                 <Text dimColor>
-                    Switch between Claude models. Applies to this session and future Claude Code sessions.
+                    Switch between Claude models. Applies to this session and future Claude Code sessions. For other/previous model names, specify with --model.
                 </Text>
                 {sessionModel && (
-                    <Text color="yellow">
-                        Currently using {sessionModel} (set by project config or environment).
+                    <Text dimColor>
+                        Currently using {sessionModel} for this session (set by plan mode). Selecting a model will undo this.
                     </Text>
                 )}
             </Box>
@@ -78,12 +92,9 @@ export function ModelPicker({
                 visibleOptionCount={5}
             />
 
-            {isStandalone && (
-                <Box marginTop={1} flexDirection="row">
-                    <ActionHint shortcut="Enter" action="confirm" />
-                    <ActionHint shortcut="Esc" action="cancel" />
-                </Box>
-            )}
+            <Box marginTop={1} flexDirection="row">
+                <Text dimColor>Enter to confirm · Esc to exit</Text>
+            </Box>
         </Box>
     );
 }

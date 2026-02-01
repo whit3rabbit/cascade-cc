@@ -54,7 +54,10 @@ export const EnterPlanModeTool = {
     outputSchema: {
         message: { type: "string" }
     },
-    async call(): Promise<{ data: EnterPlanModeResult }> {
+    async call(input: any, context: any): Promise<{ data: EnterPlanModeResult }> {
+        if (context && typeof context.setPlanMode === 'function') {
+            context.setPlanMode(true);
+        }
         return {
             data: {
                 message: "Entered plan mode. You should now focus on exploring the codebase."

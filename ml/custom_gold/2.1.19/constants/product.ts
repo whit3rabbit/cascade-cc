@@ -12,7 +12,8 @@ export const ALLOWED_BETA_FEATURES = [
     "claude-3-5-sonnet-20241022",
     "claude-3-opus-20240229",
     "max-tokens-32k",
-    "token-efficient-tools-2024-12-04"
+    "token-efficient-tools-2024-12-04",
+    "oauth-2025-04-20"
 ];
 
 /**
@@ -32,9 +33,17 @@ export const DEPLOYMENT_ENVIRONMENTS = {
 export const HTTP_PROTOCOL = "http://";
 export const LOCALHOST = "127.0.0.1";
 export const CLIENT_ID = "claude-code-cli";
-export const TOKEN_URL = "https://api.anthropic.com/api/auth/token";
-export const ROLES_URL = "https://api.anthropic.com/api/auth/roles";
-export const API_KEY_URL = "https://api.anthropic.com/api/auth/api_key";
-export const CLAUDE_AI_AUTHORIZE_URL = "https://claude.ai/login_oauth";
-export const CONSOLE_AUTHORIZE_URL = "https://console.anthropic.com/login_oauth";
-export const MANUAL_REDIRECT_URL = "urn:ietf:wg:oauth:2.0:oob";
+export const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
+export const ROLES_URL = "https://api.anthropic.com/api/oauth/claude_cli/roles";
+export const PROFILE_URL = "https://api.anthropic.com/api/oauth/profile";
+export const CLAUDE_CLI_PROFILE_URL = "https://api.anthropic.com/api/claude_cli_profile";
+export const API_KEY_URL = "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
+export const CLAUDE_AI_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
+export const CONSOLE_AUTHORIZE_URL = "https://platform.claude.com/oauth/authorize";
+export const MANUAL_REDIRECT_URL = "https://platform.claude.com/oauth/code/callback";
+export const OAUTH_BETA_HEADER = "oauth-2025-04-20";
+
+export const PRODUCT_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude.";
+export const PRODUCT_SYSTEM_PROMPT_SDK = "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.";
+export const AGENT_SYSTEM_PROMPT = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
+

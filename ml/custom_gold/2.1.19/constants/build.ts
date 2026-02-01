@@ -9,11 +9,13 @@ export const BUILD_INFO = {
     README_URL: "https://code.claude.com/docs/en/overview"
 } as const;
 
+import { EnvService } from "../services/config/EnvService.js";
+
 /**
  * Returns a standardized user-agent string for network requests.
  * 
  * @returns The User-Agent string.
  */
 export function getUserAgent(): string {
-    return `claude-cli/${BUILD_INFO.VERSION} (external, ${process.env.CLAUDE_CODE_ENTRYPOINT || 'native'})`;
+    return `claude-cli/${BUILD_INFO.VERSION} (external, ${EnvService.get("CLAUDE_CODE_ENTRYPOINT") || 'native'})`;
 }

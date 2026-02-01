@@ -6,8 +6,9 @@
 export interface Task {
     id: string;
     type: string;
-    status: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
     description?: string;
+    progress?: number; // 0 to 100
     result?: { code: number };
     prompt?: string;
     error?: any;
@@ -17,6 +18,62 @@ export interface Task {
 export interface TaskSnapshot {
     tasks?: Record<string, Task>;
 }
+
+export type TaskListener = (tasks: Task[]) => void;
+
+class GlobalTaskManager {
+    private tasks: Map<string, Task> = new Map();
+    private listeners: Set<TaskListener> = new Set();
+
+    addTask(task: Omit<Task, 'status'> & { status?: Task['status'] }): void {
+        const newTask: Task = {
+            status: 'pending',
+            ...task
+        };
+        this.tasks.set(newTask.id, newTask);
+        this.notify();
+    }
+
+    updateTask(id: string, updates: Partial<Task>): void {
+        const task = this.tasks.get(id);
+        if (task) {
+            this.tasks.set(id, { ...task, ...updates });
+            this.notify();
+        }
+    }
+
+    removeTask(id: string): void {
+        this.tasks.delete(id);
+        this.notify();
+    }
+
+    cancelTask(id: string): void {
+        const task = this.tasks.get(id);
+        if (task && (task.status === 'pending' || task.status === 'running')) {
+            this.updateTask(id, { status: 'failed', error: 'User cancelled' });
+        }
+    }
+
+
+    getTasks(): Task[] {
+        return Array.from(this.tasks.values());
+    }
+
+    subscribe(listener: TaskListener): () => void {
+        this.listeners.add(listener);
+        listener(this.getTasks());
+        return () => this.listeners.delete(listener);
+    }
+
+    private notify(): void {
+        const tasks = this.getTasks();
+        for (const listener of this.listeners) {
+            listener(tasks);
+        }
+    }
+}
+
+export const taskManager = new GlobalTaskManager();
 
 export interface NormalizedTask {
     id: string;

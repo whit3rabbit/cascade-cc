@@ -30,22 +30,27 @@ import {
 import { createAgentId, createRequestId } from "../services/teams/TeamIdentity.js";
 import { TEAM_LEAD_NAME } from "../services/terminal/SwarmConstants.js";
 import { getAgentId, getSessionId } from "../utils/shared/runtimeAndEnv.js";
+import { TmuxBackend } from "../services/terminal/TmuxBackend.js";
+import { notificationQueue } from "../services/terminal/NotificationService.js";
 
 export interface TeammateToolInput {
     operation:
-        | "spawnTeam"
-        | "cleanup"
-        | "write"
-        | "broadcast"
-        | "requestShutdown"
-        | "approveShutdown"
-        | "rejectShutdown"
-        | "approvePlan"
-        | "rejectPlan"
-        | "discoverTeams"
-        | "requestJoin"
-        | "approveJoin"
-        | "rejectJoin";
+    | "spawnTeam"
+    | "cleanup"
+    | "write"
+    | "broadcast"
+    | "requestShutdown"
+    | "approveShutdown"
+    | "rejectShutdown"
+    | "approvePlan"
+    | "rejectPlan"
+    | "discoverTeams"
+    | "requestJoin"
+    | "approveJoin"
+    | "rejectJoin"
+    | "hide"
+    | "show"
+    | "spawn";
     team_name?: string;
     description?: string;
     name?: string;
@@ -67,14 +72,16 @@ export interface TeammateToolResult {
     [key: string]: any;
 }
 
+import { EnvService } from '../services/config/EnvService.js';
+
 const DEFAULT_COLORS = ["cyan", "green", "yellow", "magenta", "blue", "red"];
 
 function getTeamName(input?: TeammateToolInput): string | undefined {
-    return input?.team_name || process.env.CLAUDE_CODE_TEAM_NAME || undefined;
+    return input?.team_name || EnvService.get("CLAUDE_CODE_TEAM_NAME") || undefined;
 }
 
 function getSenderName(input?: TeammateToolInput): string {
-    return process.env.CLAUDE_CODE_AGENT_NAME || input?.name || TEAM_LEAD_NAME;
+    return EnvService.get("CLAUDE_CODE_AGENT_NAME") || input?.name || TEAM_LEAD_NAME;
 }
 
 function pickColor(seed: string): string {
@@ -107,7 +114,7 @@ function parseRequestTarget(requestId: string): string | null {
 }
 
 function isTeamLead(teamName: string): boolean {
-    const agentName = process.env.CLAUDE_CODE_AGENT_NAME || TEAM_LEAD_NAME;
+    const agentName = EnvService.get("CLAUDE_CODE_AGENT_NAME") || TEAM_LEAD_NAME;
     const agentId = getAgentId();
     const config = readTeamConfig(teamName);
     if (!config) return agentName === TEAM_LEAD_NAME;
@@ -166,6 +173,11 @@ export const TeammateTool = {
                             subscriptions: []
                         }
                     ]
+                });
+                notificationQueue.add({
+                    text: `Team "${config.name}" spawned`,
+                    type: 'success',
+                    timeoutMs: 3000
                 });
                 return {
                     data: {
@@ -396,7 +408,7 @@ export const TeammateTool = {
                     };
                 }
                 const sessionId = getSessionId();
-                const requestId = createRequestId("join", sessionId);
+                const requestId = input.request_id || createRequestId("join", targetTeam);
                 const payload = buildJoinRequest({
                     requestId,
                     sessionId,
@@ -529,6 +541,11 @@ export const TeammateTool = {
                     planModeRequired: false
                 });
                 writeToPendingInbox(resolved, sessionId, buildMessage(JSON.stringify(payload), TEAM_LEAD_NAME));
+                notificationQueue.add({
+                    text: `Teammate ${uniqueName} joined`,
+                    type: 'info',
+                    timeoutMs: 3000
+                });
                 return {
                     data: {
                         success: true,
@@ -572,6 +589,119 @@ export const TeammateTool = {
                         success: true,
                         message: `Successfully rejected join request from ${input.target_agent_id}`,
                         requestId: input.request_id
+                    }
+                };
+            }
+            case "hide": {
+                const resolved = requireTeamName(teamName);
+                if (!input.target_agent_id) {
+                    throw new Error("target_agent_id is required for hide operation");
+                }
+                const config = readTeamConfig(resolved);
+                if (!config) throw new Error(`Team "${resolved}" not found`);
+                const member = config.members.find(m => m.agentId === input.target_agent_id || m.name === input.target_agent_id);
+                if (!member || !member.tmuxPaneId) {
+                    throw new Error(`Member ${input.target_agent_id} not found or has no active pane`);
+                }
+                const tmux = new TmuxBackend();
+                const success = await tmux.hidePane(member.tmuxPaneId);
+                return {
+                    data: {
+                        success,
+                        message: success ? `Pane for ${member.name} hidden` : `Failed to hide pane for ${member.name}`
+                    }
+                };
+            }
+            case "show": {
+                const resolved = requireTeamName(teamName);
+                if (!input.target_agent_id) {
+                    throw new Error("target_agent_id is required for show operation");
+                }
+                const config = readTeamConfig(resolved);
+                if (!config) throw new Error(`Team "${resolved}" not found`);
+                const member = config.members.find(m => m.agentId === input.target_agent_id || m.name === input.target_agent_id);
+                if (!member || !member.tmuxPaneId) {
+                    throw new Error(`Member ${input.target_agent_id} not found or has no active pane`);
+                }
+                const tmux = new TmuxBackend();
+                const targetWindow = await tmux.getCurrentWindowTarget();
+                if (!targetWindow) throw new Error("Could not determine current tmux window");
+                const success = await tmux.showPane(member.tmuxPaneId, targetWindow);
+                return {
+                    data: {
+                        success,
+                        message: success ? `Pane for ${member.name} reshown` : `Failed to show pane for ${member.name}`
+                    }
+                };
+            }
+            case "spawn": {
+                const resolved = requireTeamName(teamName);
+                if (!input.proposed_name) {
+                    throw new Error("proposed_name is required for spawn operation");
+                }
+                const senderName = getSenderName(input);
+                if (!isTeamLead(resolved)) {
+                    throw new Error("Only the team lead can spawn new teammates.");
+                }
+
+                const uniqueName = generateMemberName(input.proposed_name, resolved);
+                const agentId = createAgentId(uniqueName, resolved);
+                const color = pickColor(agentId);
+
+                // Initialize Tmux Backend
+                const tmux = new TmuxBackend();
+                if (!(await tmux.isAvailable())) {
+                    throw new Error("tmux is not available in this environment. Cannot spawn teammate.");
+                }
+
+                // Create Pane
+                let paneInfo;
+                try {
+                    paneInfo = await tmux.createTeammatePaneInSwarmView(uniqueName, color);
+                } catch (err: any) {
+                    throw new Error(`Failed to create tmux pane: ${err.message}`);
+                }
+
+                // Construct Command
+                const isDev = EnvService.get("NODE_ENV") === 'development' || process.argv[1].includes('.ts') || process.argv[1].includes('cli.tsx');
+                const requestId = createRequestId("join", resolved);
+                let command;
+                if (isDev) {
+                    command = `npm run dev -- --agent ${uniqueName} --auto-join ${requestId}`;
+                } else {
+                    command = `claude --agent ${uniqueName} --auto-join ${requestId}`;
+                }
+
+                await tmux.sendCommandToPane(paneInfo.paneId, command);
+
+                // Update Config
+                const config = readTeamConfig(resolved);
+                if (config) {
+                    config.members.push({
+                        name: uniqueName,
+                        agentId,
+                        color,
+                        joinedAt: Date.now(),
+                        tmuxPaneId: paneInfo.paneId,
+                        cwd: process.cwd(),
+                        subscriptions: []
+                    });
+                    writeTeamConfig(resolved, config);
+                }
+
+                notificationQueue.add({
+                    text: `Teammate ${uniqueName} spawned in new pane`,
+                    type: 'success',
+                    timeoutMs: 5000
+                });
+
+                return {
+                    data: {
+                        success: true,
+                        message: `Spawned teammate ${uniqueName} in new pane`,
+                        member_name: uniqueName,
+                        member_agent_id: agentId,
+                        pane_id: paneInfo.paneId
                     }
                 };
             }

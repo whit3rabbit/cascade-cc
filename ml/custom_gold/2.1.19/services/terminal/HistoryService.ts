@@ -48,6 +48,8 @@ export async function getProjectHistory(projectPath: string): Promise<HistoryEnt
     }
 }
 
+import { EnvService } from '../config/EnvService.js';
+
 /**
  * Adds a new entry to the command history.
  * 
@@ -56,7 +58,7 @@ export async function getProjectHistory(projectPath: string): Promise<HistoryEnt
  * @param {string} entry.project - The project path.
  */
 export async function addToPromptHistory(entry: HistoryEntry): Promise<void> {
-    if (process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY === "true") return;
+    if (EnvService.isTruthy("CLAUDE_CODE_SKIP_PROMPT_HISTORY")) return;
 
     const historyPath = join(getBaseConfigDir(), HISTORY_FILE);
     const data: HistoryEntry = {

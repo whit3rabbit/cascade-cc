@@ -21,6 +21,8 @@ function shellEscape(value: string): string {
     return JSON.stringify(value);
 }
 
+import { EnvService } from "../config/EnvService.js";
+
 async function runTmuxCommand(args: string[], ignoreTmuxEnv = false): Promise<{ code: number; stdout: string; stderr: string }> {
     const command = ["tmux", ...args].map(shellEscape).join(" ");
     const result: BashResult = await executeBashCommand(command, {
@@ -44,7 +46,7 @@ export class TmuxBackend {
     }
 
     async isRunningInside(): Promise<boolean> {
-        return Boolean(process.env.TMUX);
+        return Boolean(EnvService.get("TMUX"));
     }
 
     async sendCommandToPane(paneId: string, command: string, external = false): Promise<void> {
@@ -108,7 +110,7 @@ export class TmuxBackend {
             return false;
         }
         await runTmuxCommand(["select-layout", "-t", targetWindow, "main-vertical"], external);
-        const panes = await runTmuxCommand(["list-panes", "-t", targetWindow, "-F", "#{pane_id}"] , external);
+        const panes = await runTmuxCommand(["list-panes", "-t", targetWindow, "-F", "#{pane_id}"], external);
         const firstPane = panes.stdout.trim().split("\n").filter(Boolean)[0];
         if (firstPane) {
             await runTmuxCommand(["resize-pane", "-t", firstPane, "-x", "30%"], external);
@@ -131,7 +133,7 @@ export class TmuxBackend {
     async getCurrentWindowPaneCount(windowTarget?: string, external = false): Promise<number | null> {
         const target = windowTarget || (await this.getCurrentWindowTarget());
         if (!target) return null;
-        const res = await runTmuxCommand(["list-panes", "-t", target, "-F", "#{pane_id}"] , external);
+        const res = await runTmuxCommand(["list-panes", "-t", target, "-F", "#{pane_id}"], external);
         if (res.code !== 0) return null;
         return res.stdout.trim().split("\n").filter(Boolean).length;
     }
@@ -174,7 +176,7 @@ export class TmuxBackend {
         const names = windows.stdout.trim().split("\n").filter(Boolean);
         const windowTarget = `${SWARM_SESSION_NAME}:${SWARM_WINDOW_NAME}`;
         if (names.includes(SWARM_WINDOW_NAME)) {
-            const panes = await runTmuxCommand(["list-panes", "-t", windowTarget, "-F", "#{pane_id}"] , true);
+            const panes = await runTmuxCommand(["list-panes", "-t", windowTarget, "-F", "#{pane_id}"], true);
             const paneId = panes.stdout.trim().split("\n").filter(Boolean)[0] || "";
             return { windowTarget, paneId };
         }
@@ -261,7 +263,7 @@ export class TmuxBackend {
         if (isFirstTeammate) {
             await this.enablePaneBorderStatus(session.windowTarget, true);
         } else {
-            const panes = await runTmuxCommand(["list-panes", "-t", session.windowTarget, "-F", "#{pane_id}"] , true);
+            const panes = await runTmuxCommand(["list-panes", "-t", session.windowTarget, "-F", "#{pane_id}"], true);
             const ids = panes.stdout.trim().split("\n").filter(Boolean);
             const idx = Math.floor((ids.length - 1) / 2);
             const targetPane = ids[idx] || ids[ids.length - 1];

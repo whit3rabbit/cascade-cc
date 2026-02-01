@@ -35,11 +35,13 @@ export interface DiffStats {
 
 // --- Constants & Helpers ---
 
+import { EnvService } from "../../services/config/EnvService.js";
+
 /**
  * Checks if file checkpointing is enabled via settings or environment.
  */
 export function isFileCheckpointingEnabled(): boolean {
-    if (process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING === 'true') return false;
+    if (EnvService.isTruthy("CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING")) return false;
     // Additional logic for agent memory paths or specific settings would go here.
     return true;
 }
@@ -48,8 +50,8 @@ export function isFileCheckpointingEnabled(): boolean {
  * Checks if SDK-level file checkpointing is enabled.
  */
 export function isSdkFileCheckpointingEnabled(): boolean {
-    return process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === 'true' &&
-        process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING !== 'true';
+    return EnvService.isTruthy("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING") &&
+        !EnvService.isTruthy("CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING");
 }
 
 /**

@@ -14,17 +14,26 @@ export interface SwarmBackendInfo {
 
 let cachedBackend: SwarmBackendInfo | null = null;
 
+import { EnvService } from '../config/EnvService.js';
+
 function isInsideTmux(): boolean {
-    return Boolean(process.env.TMUX);
+    return Boolean(EnvService.get("TMUX"));
 }
 
 function isInsideIterm2(): boolean {
-    return Boolean(process.env.ITERM_SESSION_ID) ||
-        (process.env.TERM_PROGRAM || "").toLowerCase().includes("iterm");
+    return Boolean(EnvService.get("ITERM_SESSION_ID")) ||
+        (EnvService.get("TERM_PROGRAM") || "").toLowerCase().includes("iterm");
 }
 
 function isWsl(): boolean {
-    return Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP);
+    if (EnvService.get("WSL_DISTRO_NAME") || EnvService.get("WSL_INTEROP")) return true;
+    try {
+        const { readFileSync } = require('node:fs');
+        const version = readFileSync('/proc/version', 'utf8');
+        return version.toLowerCase().includes('microsoft');
+    } catch {
+        return false;
+    }
 }
 
 export function getSwarmSetupErrorMessage(): string {

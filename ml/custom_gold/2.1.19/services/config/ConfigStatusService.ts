@@ -6,6 +6,7 @@
 import { ApiKeyManager } from '../auth/ApiKeyManager.js';
 import { OAuthService } from '../auth/OAuthService.js';
 import { isDemo } from '../../utils/shared/runtime.js';
+import { EnvService } from './EnvService.js';
 
 export interface ConfigDetail {
     label: string;
@@ -37,7 +38,7 @@ export async function getDetailedConfigStatus(): Promise<ConfigDetail[]> {
     }
 
     // 3. Proxy & Network settings (Stubbed placeholders for now)
-    const proxy = process.env.HTTPS_PROXY || process.env.http_proxy;
+    const proxy = EnvService.get("HTTPS_PROXY") || EnvService.get("http_proxy");
     if (proxy) {
         details.push({ label: "Proxy", value: proxy });
     }

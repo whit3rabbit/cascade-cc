@@ -7,6 +7,7 @@ import { PassThrough } from "node:stream";
 import { ControlStreamService, ControlStreamServiceOptions } from "./ControlStreamService.js";
 import { WebSocketTransport } from "./WebSocketTransport.js";
 import { getAuthHeaders } from "../auth/AuthService.js";
+import { EnvService } from '../config/EnvService.js';
 
 /**
  * Client for managing the control stream lifecycle.
@@ -40,8 +41,10 @@ export class ControlStreamClient extends ControlStreamService {
     async initializeConnection(initialInput: string[]): Promise<void> {
         const headers = await getAuthHeaders();
 
+
+
         this.transport = new WebSocketTransport(this.url.toString(),
-            { headers: { ...headers, "x-claude-session-id": process.env.CLAUDE_CODE_SESSION_ID || "" } }
+            { headers: { ...headers, "x-claude-session-id": EnvService.get("CLAUDE_SESSION_ID") || "" } }
         );
 
         this.transport.onData((data: any) => this.inputStream.write(data));

@@ -633,5 +633,68 @@ export const AllToolSchemas: Record<string, any> = {
         },
         required: ["setting"],
         additionalProperties: false
+    },
+    TaskCreate: {
+        type: "object",
+        properties: {
+            subject: {
+                type: "string",
+                description: "The title/subject of the task"
+            },
+            description: {
+                type: "string",
+                description: "Detailed description of the task"
+            }
+        },
+        required: ["subject"],
+        additionalProperties: false
+    },
+    TaskUpdate: {
+        type: "object",
+        properties: {
+            id: {
+                type: "string",
+                description: "The ID of the task to update"
+            },
+            status: {
+                type: "string",
+                enum: ["pending", "in_progress", "completed", "cancelled"],
+                description: "New status"
+            },
+            subject: {
+                type: "string",
+                description: "New subject"
+            },
+            description: {
+                type: "string",
+                description: "New description"
+            }
+        },
+        required: ["id"],
+        additionalProperties: false
+    },
+    TaskList: {
+        type: "object",
+        properties: {
+            status: {
+                type: "string",
+                enum: ["pending", "in_progress", "completed", "cancelled", "all"],
+                description: "Filter by status (default: all)"
+            }
+        },
+        required: [],
+        additionalProperties: false
+    },
+    MCPSearch: {
+        type: "object",
+        properties: {
+            query: {
+                type: "string",
+                description: "Search query for MCP tools/resources"
+            }
+        },
+        required: ["query"],
+        additionalProperties: false
     }
+
 };

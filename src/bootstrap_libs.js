@@ -177,7 +177,35 @@ async function bootstrap() {
                 const bundlePath = path.join(libWorkDir, 'bundled.js');
                 if (bundler === 'bun') {
                     console.log(`  [+] Bundling with Bun...`);
-                    const bunCmd = `bun build "${entryFile}" --minify --target node --outfile "${bundlePath}"`;
+                    const baseExternals = [
+                        'sharp',
+                        'tree-sitter',
+                        'tree-sitter-typescript',
+                        'react-devtools-core',
+                        'fsevents',
+                        'react',
+                        'react/jsx-runtime',
+                        'react/jsx-dev-runtime',
+                        'ink',
+                        '@opentelemetry/api',
+                        '@opentelemetry/sdk-trace-node'
+                    ];
+
+                    const getPackageName = (spec) => {
+                        if (!spec) return spec;
+                        if (spec.startsWith('@')) {
+                            const parts = spec.split('@');
+                            return parts.length >= 3 ? `@${parts[1]}` : spec;
+                        }
+                        return spec.split('@')[0];
+                    };
+
+                    const peerDeps = (lib.peerDeps || []).map(getPackageName);
+                    const externals = [...new Set([...baseExternals, ...peerDeps])]
+                        .filter(ext => ext !== lib.name && !lib.name.startsWith(`${ext}/`));
+
+                    const externalFlags = externals.map(ext => `-e ${ext}`).join(' ');
+                    const bunCmd = `bun build "${entryFile}" --minify --target node --outfile "${bundlePath}" ${externalFlags}`;
                     execSync(bunCmd, { stdio: 'inherit' });
                 } else {
                     console.log(`  [+] Bundling with esbuild...`);

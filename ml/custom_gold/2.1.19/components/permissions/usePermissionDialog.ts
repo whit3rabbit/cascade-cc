@@ -8,7 +8,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useInput } from 'ink';
 
 export interface PermissionOptionValue {
-    type: 'accept-once' | 'accept-session' | 'reject';
+    type: 'accept-once' | 'accept-session' | 'accept-always' | 'reject';
     scope?: string;
     label: string;
     description?: string;
@@ -55,8 +55,12 @@ const getPermissionOptions = (
             label: 'Allow this time'
         },
         {
-            option: { type: 'accept-session', label: 'Allow for this session', feedbackConfig: { type: 'accept' } },
+            option: { type: 'accept-session', scope: 'session', label: 'Allow for this session', feedbackConfig: { type: 'accept' } },
             label: 'Allow for this session'
+        },
+        {
+            option: { type: 'accept-always', label: 'Always allow', feedbackConfig: { type: 'accept' } },
+            label: 'Always allow'
         },
         {
             option: { type: 'reject', label: 'Reject', feedbackConfig: { type: 'reject' } },
@@ -106,7 +110,7 @@ export const usePermissionDialog = (props: UsePermissionDialogProps) => {
             toolUseConfirm.onAllow(value, feedback, {
                 scope: option.scope
             });
-            onDone(value);
+            onDone({ result: value, optionType: option.type });
         }
     }, [onReject, toolUseConfirm, onDone]);
 

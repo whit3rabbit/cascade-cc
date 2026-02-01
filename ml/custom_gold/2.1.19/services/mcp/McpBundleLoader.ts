@@ -3,6 +3,8 @@
  * Role: Handles loading and environment expansion for MCP server bundles.
  */
 
+import { EnvService } from '../config/EnvService.js';
+
 /**
  * Expands environment variables in a string (e.g., "${HOME}/path").
  * 
@@ -11,7 +13,7 @@
  */
 export function expandEnvVars(value: string): string {
     if (typeof value !== 'string') return value;
-    return value.replace(/\${([^}]+)}/g, (_, name) => process.env[name] || "");
+    return value.replace(/\${([^}]+)}/g, (_, name) => EnvService.get(name) || "");
 }
 
 /**

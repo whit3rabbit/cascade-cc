@@ -6,14 +6,22 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useApp } from 'ink';
 import { ConversationService } from '../../services/conversation/ConversationService.js';
+import { checkToolPermissions, handlePermissionResponse } from '../../services/terminal/PermissionService.js';
+import { ToolExecutionManager } from '../../services/tools/ToolExecutionManager.js';
 import { UserPromptMessage } from '../messages/UserPromptMessage.js';
 import { MessageHistory } from '../MessageHistory.js';
+import { UnifiedSearchMenu } from '../menus/UnifiedSearchMenu.js';
+import { TaskMenu } from '../menus/TaskMenu.js';
+
+
+
 
 export interface REPLProps {
     initialPrompt?: string;
     verbose?: boolean;
     model?: string;
     agent?: string;
+    isFirstRun?: boolean;
 }
 
 /**
@@ -24,60 +32,187 @@ import { WorkerPermissionDialog } from '../permissions/WorkerPermissionDialog.js
 import { SandboxPermissionDialog } from '../permissions/SandboxPermissionDialog.js';
 import { CostThresholdDialog } from '../permissions/CostThresholdDialog.js';
 import { IdeOnboardingDialog } from '../onboarding/IdeOnboardingDialog.js';
+import { OnboardingWorkflow } from '../onboarding/OnboardingWorkflow.js';
 import { LspRecommendationDialog } from '../onboarding/LspRecommendationDialog.js';
+import { SettingsMenu } from '../menus/SettingsMenu.js';
+import { McpMenu } from '../menus/McpMenu.js';
+import { AgentsMenu } from '../menus/AgentsMenu.js';
 import { TaskList } from '../TaskList.js';
 import { StatusLine } from './StatusLine.js';
+import { ModelPicker } from '../ModelPicker/ModelPicker.js';
 import Spinner from 'ink-spinner';
 import { DocumentationService } from '../../services/documentation/DocumentationService.js';
 import { useInput } from 'ink';
 import { SlashCommandDispatcher } from '../../commands/SlashCommandDispatcher.js';
 import { Logo } from './Logo.js';
+import { commandRegistry } from '../../services/terminal/CommandRegistry.js';
+import { CORE_TOOLS } from '../../tools/index.js';
+import { EnvService } from '../../services/config/EnvService.js';
+import { getAuthDetails } from '../../services/auth/AuthService.js';
+import { getSettings, updateSettings } from '../../services/config/SettingsService.js';
+import { taskManager, Task } from '../../services/terminal/TaskManager.js';
+import { costService } from '../../services/terminal/CostService.js';
 
-export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent }) => {
+import { hookService } from '../../services/hooks/HookService.js';
+
+export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent, isFirstRun }) => {
     const { exit } = useApp();
     const [messages, setMessages] = useState<any[]>([]);
     const [isTyping, setIsTyping] = useState(false);
     const [history, setHistory] = useState<string[]>([]);
-    const [tasks, setTasks] = useState<string[]>([]);
+    const [tasks, setTasks] = useState<Task[]>([]);
     const [showTasks, setShowTasks] = useState(false);
     const [vimModeEnabled, setVimModeEnabled] = useState(false);
     const [vimMode, setVimMode] = useState<'NORMAL' | 'INSERT'>('INSERT');
     const [planMode, setPlanMode] = useState(false);
+    const [verboseMode, setVerboseMode] = useState(verbose || false);
+    const [lastEscPress, setLastEscPress] = useState(0);
 
     // Permission & Modal States
     const [toolPermissions, setToolPermissions] = useState<any[]>([]);
     const [workerPermissions, setWorkerPermissions] = useState<any[]>([]);
     const [sandboxPermissions, setSandboxPermissions] = useState<any[]>([]);
     const [showCostWarning, setShowCostWarning] = useState(false);
-    const [showIdeOnboarding, setShowIdeOnboarding] = useState(false);
+    const [showIdeOnboarding, setShowIdeOnboarding] = useState(!getSettings().onboardingComplete);
     const [lspRecommendation, setLspRecommendation] = useState<any>(null);
+    const [cost, setCost] = useState(0);
+    const [costThreshold] = useState(0.50); // Default threshold of $0.50
+    const [usage, setUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
+    const [mcpTools, setMcpTools] = useState<any[]>([]);
+    const [currentMenu, setCurrentMenu] = useState<'config' | 'mcp' | 'search' | 'tasks' | 'model' | 'status' | 'agents' | null>(null);
+    const [suggestions, setSuggestions] = useState<string[]>([]);
+    const [exitConfirmation, setExitConfirmation] = useState(false);
+    const [shellSnapshotPath, setShellSnapshotPath] = useState<string | undefined>(undefined);
+    const [subscription, setSubscription] = useState<string>('');
+    const [scrollOffset, setScrollOffset] = useState(0);
+    const [cwd, setCwd] = useState(process.cwd());
+
+    useEffect(() => {
+        // Dispatch SessionStart hook
+        const runSessionHooks = async () => {
+            const results = await hookService.dispatch('SessionStart', {
+                hook_event_name: 'SessionStart',
+                session_id: 'current-session',
+                cwd: process.cwd(),
+                transcript_path: undefined // placeholder
+            });
+
+            // Check for blocking errors or context
+            // Check for blocking errors or context
+            const context = results
+                .map(r => r.hookSpecificOutput)
+                .filter((r): r is NonNullable<typeof r> => !!r && 'additionalContext' in r)
+                .map(r => (r as any).additionalContext)
+                .filter(Boolean);
+            if (context.length > 0) {
+                // Add to messages so it's part of context
+                setMessages(prev => [...prev, {
+                    // Using 'system' role for context
+                    role: 'system',
+                    content: `[SessionStart Context]: ${context.join('\n')}`
+                }]);
+            }
+        };
+        runSessionHooks();
+    }, []);
 
     // Global Shortcuts
     useInput((input, key) => {
         if (input === 't' && key.ctrl) {
-            setShowTasks(prev => !prev);
+            setCurrentMenu('tasks');
         }
+
         if (input === 'l' && key.ctrl) {
             setMessages([]);
+            setScrollOffset(0);
         }
         if (input === 'd' && key.ctrl) {
             exit();
         }
+        if (input === 'c' && key.ctrl) {
+            if (exitConfirmation) {
+                exit();
+            } else {
+                setExitConfirmation(true);
+                setTimeout(() => setExitConfirmation(false), 2000);
+            }
+        }
         if (input === 'b' && key.ctrl) {
-            // Toggle background tasks view or move task to background
-            // For now just toggle tasks
+            // Toggle background tasks view
             setShowTasks(prev => !prev);
+        }
+        if (key.tab && key.shift) {
+            setPlanMode(prev => !prev);
+        }
+        if (input === 'm' && key.meta) {
+            setPlanMode(prev => !prev);
+        }
+
+        if (key.pageUp) {
+            setScrollOffset(prev => prev + 5);
+        }
+        if (key.pageDown) {
+            setScrollOffset(prev => Math.max(0, prev - 5));
+        }
+
+        if (input === 'o' && key.ctrl) {
+            setVerboseMode(prev => !prev);
+        }
+
+        if (input === 'p' && key.meta) {
+            setCurrentMenu('model');
+        }
+
+        if (key.escape) {
+            const now = Date.now();
+            if (now - lastEscPress < 500) {
+                if (messages.length > 0) {
+                    setMessages(prev => prev.length >= 2 ? prev.slice(0, -2) : []);
+                }
+            }
+            setLastEscPress(now);
         }
     });
 
-    // Logo on mount - we now render this conditionally in the JSX
     useEffect(() => {
-        if (messages.length === 0 && !initialPrompt) {
-            // No initial message needed if we render the Logo component explicitly
-        }
-    }, [initialPrompt]);
+        costService.reset();
+        return taskManager.subscribe((newTasks) => {
+            setTasks(newTasks);
+        });
+    }, []);
 
-    // Determine active screen (Priority Order)
+    useEffect(() => {
+        const slashCommands = ['/config', '/mcp', '/compact', '/clear', '/help', '/bug', '/doctor'];
+        setSuggestions([...slashCommands, ...history.slice(-10)]);
+    }, [history]);
+
+    useEffect(() => {
+        const initShell = async () => {
+            const { createShellSnapshot } = await import('../../services/terminal/ShellSnapshotService.js');
+            const path = await createShellSnapshot(EnvService.get("SHELL"));
+            setShellSnapshotPath(path);
+        };
+        initShell();
+    }, []);
+
+    const refreshMcpTools = async () => {
+        const { mcpClientManager } = await import('../../services/mcp/McpClientManager.js');
+        const tools = await mcpClientManager.getTools();
+        setMcpTools(tools);
+    };
+
+    useEffect(() => {
+        refreshMcpTools();
+    }, []);
+
+    useEffect(() => {
+        const fetchAuth = async () => {
+            const details = await getAuthDetails();
+            setSubscription(details.plan);
+        };
+        fetchAuth();
+    }, []);
+
     const getActiveScreen = () => {
         if (showCostWarning) return 'cost';
         if (toolPermissions.length > 0) return 'tool-permission';
@@ -85,6 +220,12 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
         if (sandboxPermissions.length > 0) return 'sandbox-permission';
         if (showIdeOnboarding) return 'ide-onboarding';
         if (lspRecommendation) return 'lsp-recommendation';
+        if (currentMenu === 'config' || currentMenu === 'status') return 'settings-menu';
+        if (currentMenu === 'mcp') return 'mcp-menu';
+        if (currentMenu === 'search') return 'search-menu';
+        if (currentMenu === 'tasks') return 'tasks-menu';
+        if (currentMenu === 'agents') return 'agents-menu';
+        if (currentMenu === 'model') return 'model-menu';
         return 'transcript';
     };
 
@@ -103,7 +244,6 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
     };
 
     const handleCommand = async (input: string) => {
-        // Use external dispatcher for scalability
         return await SlashCommandDispatcher.handleCommand(input, {
             setMessages,
             setPlanMode,
@@ -111,7 +251,20 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
             setShowTasks,
             setIsTyping,
             exit,
-            cwd: process.cwd()
+            cwd: process.cwd(),
+            setCurrentMenu,
+            messages
+        });
+    };
+
+    const handlePermissionRequest = async (request: any) => {
+        return new Promise<string>((resolve) => {
+            setToolPermissions(prev => [...prev, {
+                tool: request.tool,
+                input: request.input,
+                message: request.message,
+                resolve
+            }]);
         });
     };
 
@@ -123,24 +276,61 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
             if (handled) return;
         }
 
-        setMessages(prev => [...prev, { role: 'user', content: input }]);
+        // Hook: UserPromptSubmit
+        let finalInput = input;
+        try {
+            const hookResults = await hookService.dispatch('UserPromptSubmit', {
+                hook_event_name: 'UserPromptSubmit',
+                prompt: input,
+                cwd: process.cwd()
+            });
+
+            const blocked = hookResults.find(r => r.decision === 'block' || r.continue === false);
+            if (blocked) {
+                setMessages(prev => [...prev, { role: 'user', content: input }, { role: 'assistant', content: `[Hook blocked]: ${blocked.stopReason || blocked.reason || 'Blocked by UserPromptSubmit hook'}` }]);
+                return;
+            }
+
+            const context = hookResults
+                .map(r => r.hookSpecificOutput)
+                .filter((r): r is NonNullable<typeof r> => !!r && 'additionalContext' in r)
+                .map(r => (r as any).additionalContext) // Cast to any or specific type because not all variants have it
+                .filter(Boolean)
+                .join('\n');
+
+            if (context) {
+                finalInput = `${input}\n\n<hook_context>\n${context}\n</hook_context>`;
+            }
+        } catch (err) {
+            console.error("Error running UserPromptSubmit hooks:", err);
+            // Non-blocking error?
+        }
+
+        setMessages(prev => [...prev, { role: 'user', content: input }]); // Show original input to user
         setIsTyping(true);
 
         try {
+            // Ensure tools are up to date (Dynamic Registration)
+            await refreshMcpTools();
+
             // Create a generator for the new turn
-            const generator = ConversationService.startConversation(input, {
-                commands: [],
-                tools: [],
+            const generator = ConversationService.startConversation(finalInput, {
+                commands: commandRegistry.getAllCommands(),
+                // ...
+                tools: [...CORE_TOOLS, ...mcpTools],
                 mcpClients: [],
-                cwd: process.cwd(),
-                verbose,
+                cwd: cwd,
+                verbose: verboseMode,
                 model,
                 agent,
-                // Pass plan mode context if supported
+                planMode,
+                setPlanMode,
+                shellSnapshotPath,
+                onPermissionRequest: handlePermissionRequest
             });
 
             for await (const chunk of generator) {
-                if (chunk.type === 'assistant') {
+                if (chunk.type === 'assistant' || chunk.type === 'partial_assistant') {
                     // check if we already have an assistant message pending, if so update it, else add it
                     setMessages(prev => {
                         const last = prev[prev.length - 1];
@@ -152,6 +342,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                         return [...prev, chunk.message];
                     });
                 } else if (chunk.type === 'tool_result') {
+
                     // Add tool results to messages
                     setMessages(prev => [
                         ...prev,
@@ -160,6 +351,33 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                             content: `Tool Output: ${JSON.stringify(chunk.results)}`
                         }
                     ]);
+                } else if (chunk.type === 'stream_event') {
+                    // Track tokens from stream events
+                    const event = chunk.event;
+                    if (event.type === 'message_start' && event.message?.usage) {
+                        const newUsage = {
+                            inputTokens: event.message.usage.input_tokens || 0,
+                            outputTokens: event.message.usage.output_tokens || 0,
+                            cacheReadTokens: event.message.usage.cache_read_input_tokens || 0,
+                            cacheWriteTokens: event.message.usage.cache_creation_input_tokens || 0
+                        };
+                        costService.addUsage(newUsage);
+                        setCost(costService.calculateCost(model));
+                        setUsage(prev => ({
+                            inputTokens: prev.inputTokens + newUsage.inputTokens,
+                            outputTokens: prev.outputTokens + newUsage.outputTokens
+                        }));
+                    } else if (event.type === 'message_delta' && event.usage) {
+                        const newOutput = event.usage.output_tokens || 0;
+                        costService.addUsage({ inputTokens: 0, outputTokens: newOutput });
+                        setCost(costService.calculateCost(model));
+                        setUsage(prev => ({
+                            ...prev,
+                            outputTokens: prev.outputTokens + newOutput
+                        }));
+                    }
+                } else if (chunk.type === 'cwd_update') {
+                    setCwd(chunk.cwd);
                 } else if (chunk.type === 'result') {
                     // Final result
                     if (chunk.subtype === 'success') {
@@ -167,8 +385,16 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                     }
                 }
             }
+            // After turn, check cost threshold
+            if (cost >= costThreshold && !showCostWarning) {
+                setShowCostWarning(true);
+            }
         } catch (error) {
             setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${error}` }]);
+            // Also check on error
+            if (cost >= costThreshold && !showCostWarning) {
+                setShowCostWarning(true);
+            }
         } finally {
             setIsTyping(false);
         }
@@ -176,29 +402,20 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
 
     return (
         <Box flexDirection="column" padding={0} width="100%" height="100%">
-            {/* Header/Title Area */}
-            <Box paddingX={1} marginBottom={0} justifyContent="space-between" borderStyle="single" borderBottom={true} borderTop={false} borderLeft={false} borderRight={false} borderColor="gray">
-                <Text color="cyan" bold>Claude Code</Text>
-                <Text color="gray">{planMode ? 'PLANNING MODE' : 'INTERACTIVE'}</Text>
-            </Box>
-
             {showTasks && <TaskList tasks={tasks} />}
 
             {messages.length === 0 && (
-                <Box flexDirection="column" paddingX={1}>
-                    <Logo version="2.1.23" model={model || "3.5"} cwd={process.cwd()} />
-                    <Box marginTop={1} paddingBottom={1} borderStyle="single" borderTop={true} borderBottom={true} borderLeft={false} borderRight={false} borderColor="gray">
-                        <Text dimColor>❯ Try "fix lint errors"</Text>
-                    </Box>
-                    <Text dimColor>  ? for shortcuts</Text>
+                <Box flexDirection="column" paddingX={2}>
+                    <Logo version="2.1.27" model={model || "Sonnet 4.5"} cwd={process.cwd()} subscription={subscription} />
                 </Box>
             )}
 
-            <Box flexGrow={1} flexDirection="column" overflowY="hidden">
-                <MessageHistory messages={messages} />
+            <Box flexGrow={1} flexDirection="column" overflowY="hidden" paddingX={2}>
+                <MessageHistory messages={messages} scrollOffset={scrollOffset} />
             </Box>
 
-            {isTyping && (
+
+            {isTyping && !planMode && (
                 <Box paddingX={1}>
                     <Text color="green">
                         <Spinner type="dots" /> Claude is thinking...
@@ -209,15 +426,31 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
             {/* Render conditional screens */}
             {activeScreen === 'cost' && (
                 <CostThresholdDialog
-                    onApprove={() => setShowCostWarning(false)}
+                    onApprove={() => {
+                        setShowCostWarning(false);
+                    }}
+                    onExit={() => exit()}
+                    cost={cost}
+                    threshold={costThreshold}
                 />
             )}
 
             {activeScreen === 'tool-permission' && (
                 <PermissionDialog
                     toolUseConfirm={toolPermissions[0]}
-                    onDone={() => setToolPermissions(prev => prev.slice(1))}
-                    onReject={() => setToolPermissions(prev => prev.slice(1))}
+                    onDone={(response: any) => {
+                        const req = toolPermissions[0];
+                        if (response && response.optionType === 'accept-always') {
+                            handlePermissionResponse({ behavior: 'allow', scope: 'always', message: 'User accepted always' }, req.tool, req.input, {});
+                        }
+                        if (req.resolve) req.resolve('allowed');
+                        setToolPermissions(prev => prev.slice(1));
+                    }}
+                    onReject={() => {
+                        const req = toolPermissions[0];
+                        if (req.resolve) req.resolve('denied');
+                        setToolPermissions(prev => prev.slice(1));
+                    }}
                     parseInput={(input) => input}
                 />
             )}
@@ -225,49 +458,131 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
             {activeScreen === 'worker-permission' && (
                 <WorkerPermissionDialog
                     request={workerPermissions[0]}
+                    onApprove={() => setWorkerPermissions(prev => prev.slice(1))}
+                    onReject={() => setWorkerPermissions(prev => prev.slice(1))}
                 />
             )}
 
             {activeScreen === 'sandbox-permission' && (
                 <SandboxPermissionDialog
                     hostPattern={sandboxPermissions[0]}
+                    onDone={() => setSandboxPermissions(prev => prev.slice(1))}
                 />
             )}
 
             {activeScreen === 'ide-onboarding' && (
-                <IdeOnboardingDialog
-                    onDone={() => setShowIdeOnboarding(false)}
+                <OnboardingWorkflow
+                    onDone={() => {
+                        setShowIdeOnboarding(false);
+                    }}
                 />
             )}
 
             {activeScreen === 'lsp-recommendation' && (
                 <LspRecommendationDialog
-                    recommendation={lspRecommendation}
-                    onAccept={() => setLspRecommendation(null)}
+                    onDone={() => setLspRecommendation(null)}
                 />
+            )}
+
+            {activeScreen === 'settings-menu' && (
+                <SettingsMenu
+                    onExit={() => setCurrentMenu(null)}
+                    initialTab={currentMenu === 'config' ? 'Config' : 'Status'}
+                />
+            )}
+
+            {activeScreen === 'mcp-menu' && (
+                <McpMenu onExit={async () => {
+                    setCurrentMenu(null);
+                    await refreshMcpTools();
+                }} />
+            )}
+
+            {activeScreen === 'agents-menu' && (
+                <AgentsMenu onExit={() => setCurrentMenu(null)} />
+            )}
+
+            {activeScreen === 'search-menu' && (
+                <Box paddingX={2} paddingY={1}>
+                    <UnifiedSearchMenu
+                        history={history}
+                        commands={commandRegistry.getAllCommands().map(c => ({
+                            label: c.name,
+                            value: `/${c.name}`,
+                            description: c.description
+                        }))}
+                        onSelect={(val) => {
+                            setCurrentMenu(null);
+                            handleSubmit(val);
+                        }}
+                        onExit={() => setCurrentMenu(null)}
+                    />
+                </Box>
+            )}
+
+            {activeScreen === 'tasks-menu' && (
+                <Box paddingX={2} paddingY={1}>
+                    <TaskMenu onExit={() => setCurrentMenu(null)} />
+                </Box>
+            )}
+
+            {activeScreen === 'model-menu' && (
+                <Box paddingX={2} paddingY={1}>
+                    <ModelPicker
+                        initialModel={model || null}
+                        onSelect={(val) => {
+                            setCurrentMenu(null);
+                            if (val) {
+                                handleSubmit(`/model ${val}`);
+                            }
+                        }}
+                        onCancel={() => setCurrentMenu(null)}
+                        isStandalone={true}
+                    />
+                </Box>
+            )}
+
+
+
+            {activeScreen === 'transcript' && (
+                <Box flexDirection="column" width="100%">
+                    <Box width="100%">
+                        <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
+                    </Box>
+                    <Box paddingX={2} paddingY={0}>
+                        <UserPromptMessage
+                            onSubmit={handleSubmit}
+                            onClear={() => setMessages([])}
+                            history={history}
+                            vimModeEnabled={vimModeEnabled}
+                            onVimModeChange={setVimMode}
+                            planMode={planMode}
+                            suggestions={suggestions}
+                            onCancel={() => {
+                                if (exitConfirmation) {
+                                    exit();
+                                } else {
+                                    setExitConfirmation(true);
+                                    setTimeout(() => setExitConfirmation(false), 2000);
+                                }
+                            }}
+                        />
+                    </Box>
+                </Box>
             )}
 
             {/* Status Line */}
             <StatusLine
                 vimMode={vimMode}
                 vimModeEnabled={vimModeEnabled}
-                model={model || 'default'}
+                model={model || 'Sonnet 4.5'}
                 isTyping={isTyping}
-                cwd={process.cwd()}
+                cwd={cwd}
                 showTasks={showTasks}
+                usage={usage}
+                planMode={planMode}
+                exitConfirmation={exitConfirmation}
             />
-
-            {activeScreen === 'transcript' && (
-                <Box marginTop={0} paddingX={1}>
-                    <UserPromptMessage
-                        onSubmit={handleSubmit}
-                        onClear={() => setMessages([])}
-                        history={history}
-                        vimModeEnabled={vimModeEnabled}
-                        onVimModeChange={setVimMode}
-                    />
-                </Box>
-            )}
         </Box>
     );
 };

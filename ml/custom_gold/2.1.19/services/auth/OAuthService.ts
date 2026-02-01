@@ -255,13 +255,39 @@ export const OAuthService = {
 export class LoopbackServerHandler {
     private server: http.Server | undefined;
 
-    async listenForAuthCode(successMessage?: string, errorMessage?: string): Promise<Record<string, string>> {
+    /**
+     * Starts the loopback server on a random port and returns it.
+     */
+    async start(): Promise<number> {
         if (this.server) {
             throw createLoopbackServerAlreadyExistsError();
         }
 
         return new Promise((resolve, reject) => {
-            this.server = http.createServer((req, res) => {
+            this.server = http.createServer();
+            this.server.on('error', reject);
+            this.server.listen(0, "127.0.0.1", () => {
+                const address = this.server!.address();
+                if (typeof address === 'string' || !address?.port) {
+                    this.closeServer();
+                    reject(createInvalidLoopbackAddressTypeError());
+                    return;
+                }
+                resolve(address.port);
+            });
+        });
+    }
+
+    /**
+     * Listens for the auth code on the current server.
+     */
+    async listenForAuthCode(successMessage?: string, errorMessage?: string): Promise<Record<string, string>> {
+        if (!this.server) {
+            await this.start();
+        }
+
+        return new Promise((resolve, reject) => {
+            this.server!.on('request', (req, res) => {
                 const reqUrl = req.url;
                 if (!reqUrl) {
                     res.end(errorMessage || "Error occurred loading redirectUrl");
@@ -274,22 +300,24 @@ export class LoopbackServerHandler {
                     return;
                 }
 
-                const redirectUri = this.getRedirectUri();
-                const parsedUrl = new URL(reqUrl, redirectUri);
-                const params = Object.fromEntries(parsedUrl.searchParams);
+                try {
+                    const redirectUri = this.getRedirectUri();
+                    const urlObj = new URL(reqUrl, redirectUri);
+                    const params = Object.fromEntries(urlObj.searchParams);
 
-                if (params.code) {
-                    res.writeHead(302, { location: redirectUri });
-                    res.end();
+                    if (params.code) {
+                        res.writeHead(302, { location: redirectUri });
+                        res.end();
+                        resolve(params);
+                    } else if (params.error) {
+                        res.end(errorMessage || `Error occurred: ${params.error}`);
+                        reject(new Error(params.error));
+                    }
+                } catch (e) {
+                    res.end(errorMessage || String(e));
+                    reject(e);
                 }
-
-                if (params.error) {
-                    res.end(errorMessage || `Error occurred: ${params.error}`);
-                }
-                resolve(params);
             });
-
-            this.server.listen(0, "127.0.0.1");
         });
     }
 

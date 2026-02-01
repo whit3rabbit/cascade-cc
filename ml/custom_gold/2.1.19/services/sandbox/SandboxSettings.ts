@@ -5,6 +5,7 @@
 
 import { getToolSettings, getSettings } from '../config/SettingsService.js';
 import { resolve } from 'node:path';
+import { isIPv4 } from 'node:net';
 
 /**
  * Parses a tool permission rule (e.g., "file_read(domain:example.com)").
@@ -106,3 +107,83 @@ export function isSandboxEnabled(): boolean {
     const settings = getSettings();
     return !!settings?.sandbox?.enabled;
 }
+
+export function areUnsandboxedCommandsAllowed(): boolean {
+    const settings = getSettings();
+    return !!settings?.sandbox?.allowUnsandboxedCommands;
+}
+
+export function isDomainAllowed(domain: string): boolean {
+    if (!isSandboxEnabled()) return true;
+    const config = getSandboxConfig();
+
+    if (isMatch(domain, config.network.deniedDomains)) {
+        return false;
+    }
+
+    if (config.network.allowedDomains.length > 0) {
+        return isMatch(domain, config.network.allowedDomains);
+    }
+
+    return true;
+}
+
+/**
+ * Helper to match a domain/IP against a list of patterns (exact, suffix, CIDR, or Regex).
+ */
+function isMatch(domain: string, patterns: string[]): boolean {
+    return patterns.some(pattern => {
+        // 1. Regex Match: if pattern is wrapped in / /
+        if (pattern.startsWith('/') && pattern.endsWith('/')) {
+            try {
+                const regex = new RegExp(pattern.slice(1, -1));
+                return regex.test(domain);
+            } catch {
+                return false;
+            }
+        }
+
+        // 2. CIDR Match: if pattern contains / and is not a regex
+        if (pattern.includes('/')) {
+            const [range, prefixStr] = pattern.split('/');
+            const prefix = parseInt(prefixStr, 10);
+            if (isIPv4(domain) && isIPv4(range) && !isNaN(prefix)) {
+                return matchCIDR(domain, range, prefix);
+            }
+        }
+
+        // 3. Exact match or Suffix match or Wildcard
+        return domain === pattern || domain.endsWith("." + pattern) || pattern === "*";
+    });
+}
+
+/**
+ * Matches an IPv4 address against a CIDR range.
+ */
+function matchCIDR(ip: string, range: string, prefix: number): boolean {
+    const ipNum = ipToLong(ip);
+    const rangeNum = ipToLong(range);
+    const mask = -1 << (32 - prefix);
+    return (ipNum & mask) === (rangeNum & mask);
+}
+
+/**
+ * Converts an IPv4 string to a 32-bit integer.
+ */
+function ipToLong(ip: string): number {
+    return ip.split('.').reduce((acc, part) => (acc << 8) + parseInt(part, 10), 0) >>> 0;
+}
+
+/**
+ * Checks if a URL is allowed.
+ */
+export function isUrlAllowed(urlStr: string): boolean {
+    try {
+        const url = new URL(urlStr);
+        return isDomainAllowed(url.hostname);
+    } catch {
+        // If not a valid URL, we don't block based on domain but maybe based on protocol?
+        return true;
+    }
+}
+

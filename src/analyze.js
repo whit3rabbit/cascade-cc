@@ -14,6 +14,39 @@ const t = require('@babel/types');
 const https = require('https');
 const crypto = require('crypto');
 
+// Utility for inspecting AST nodes programmatically
+const inspectNode = (node, depth = 0, maxDepth = 5, filePath = path.join(process.env.GEMINI_TEMP_DIR, 'ast_inspection_log.jsonl')) => {
+    if (!node || depth > maxDepth) return;
+
+    const relevantProps = {};
+    if (node.type) relevantProps.type = node.type;
+    if (node.name) relevantProps.name = node.name;
+    if (node.value !== undefined) relevantProps.value = node.value;
+    if (node.operator) relevantProps.operator = node.operator;
+    if (node.kind) relevantProps.kind = node.kind;
+    if (node.callee && node.callee.type) relevantProps.calleeType = node.callee.type;
+    if (node.arguments && Array.isArray(node.arguments)) relevantProps.argumentsLength = node.arguments.length;
+    if (node.declarations && Array.isArray(node.declarations)) relevantProps.declarationsLength = node.declarations.length;
+    if (node.expression && node.expression.type) relevantProps.expressionType = node.expression.type;
+    if (node.body && node.body.type) relevantProps.bodyType = node.body.type;
+    if (node.body && node.body.body && Array.isArray(node.body.body)) relevantProps.bodyStatements = node.body.body.length;
+
+
+    fs.appendFileSync(filePath, JSON.stringify({ depth, ...relevantProps }) + '\n');
+
+    for (const key in node) {
+        if (key.startsWith('_') || key === 'loc' || key === 'start' || key === 'end' || key === 'comments' || key === 'tokens' || key === 'extra' || key === 'parentNode') {
+            continue;
+        }
+        const prop = node[key];
+        if (Array.isArray(prop)) {
+            prop.forEach(child => inspectNode(child, depth + 1, maxDepth, filePath));
+        } else if (prop && typeof prop === 'object' && prop.type) {
+            inspectNode(prop, depth + 1, maxDepth, filePath);
+        }
+    }
+};
+
 // --- 0. KNOWLEDGE BASE ---
 const { loadKnowledgeBase } = require('./knowledge_base');
 let KB = null;
@@ -212,6 +245,14 @@ const extractBunEntrypoint = (version, binaryPath) => {
     const pythonBin = getPythonBin();
     try {
         execSync(`${pythonBin} scripts/extract_bun_bundle.py --version ${version}`, { stdio: 'inherit' });
+        const binaryDir = path.dirname(cliPath);
+        const searchDir = path.join(binaryDir, 'src', 'entrypoints');
+        if (fs.existsSync(searchDir)) {
+            const jscFile = fs.readdirSync(searchDir).find(f => f.endsWith('.jsc'));
+            if (jscFile) {
+                fs.renameSync(path.join(searchDir, jscFile), cliPath);
+            }
+        }
     } catch (err) {
         throw new Error(`Bun extraction failed: ${err.message}`);
     }
@@ -345,7 +386,7 @@ async function ensureTargetExists() {
 
     // 4. If not found or if version check succeeded but folder doesn't exist, download latest from npm
     if (version !== 'unknown') {
-        process.stdout.write(`[*] Downloading version ${version} of ${PACKAGE_NAME}...\r`);
+        process.stdout.write(`[*] Downloading version ${version} of ${PACKAGE_NAME}...`);
         try {
             const versionPath = path.join(ANALYSIS_DIR, version);
             if (!fs.existsSync(versionPath)) {
@@ -418,6 +459,15 @@ function findStrings(node, strings = []) {
                     stack.push(child);
                 }
             }
+            if (key === 'callee' && child && child.type) {
+                // Special handling for callee to avoid too much recursion
+                // If it's a MemberExpression or SequenceExpression, we only care about the innermost callee
+                if (child.type === 'MemberExpression' || child.type === 'SequenceExpression') {
+                    // This is already handled by getInnermostCallee
+                } else {
+                    stack.push(child);
+                }
+            }
         }
     }
     return strings;
@@ -437,7 +487,7 @@ function simplifyAST(node) {
         const trimmed = value.trim();
         if (!trimmed) return null;
         if (/^[A-Z0-9_]{3,}$/.test(trimmed)) return 'const';
-        if (/(^\.{1,2}\/)|[\\/]/.test(trimmed)) return 'path';
+        if (/(^\.{1,2}\/)|[\\]/.test(trimmed)) return 'path';
         if (/^[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]{1,6}$/.test(trimmed)) return 'path';
         return null;
     };
@@ -547,7 +597,7 @@ function collapseProxyNodes(nodes) {
         // 3. Code contains a return or call to that neighbor
         if (node.tokens < 50 && node.neighbors.size === 1) {
             const neighbor = Array.from(node.neighbors)[0];
-            const escapedNeighbor = neighbor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const escapedNeighbor = neighbor.replace(/[.*+?^${}()|[\\]/g, '\\$&');
             const regex = new RegExp(`\\b${escapedNeighbor}\\b`);
 
             if (regex.test(node.code)) {
@@ -574,7 +624,7 @@ function collapseProxyNodes(nodes) {
 
 // --- 2. DEOBFUSCATION HEURISTICS ---
 const removeDeadCodeVisitor = {
-    "IfStatement|ConditionalExpression"(path) {
+    "IfStatement|ConditionalExpression": (path) => {
         try {
             const testPath = path.get("test");
             const evaluateTest = testPath.evaluateTruthy();
@@ -740,10 +790,21 @@ class CascadeGraph {
 
     // Step A: Initial Pass - Group logical chunks
     identifyNodes(ast, code) {
-        console.log(`[*] Phase 1: Static Analysis & Chunking...`);
+        const chunkThreshold = parseFloat(process.env.CHUNK_THRESHOLD) || 1500;
+        console.log(`[*] Phase 1: Static Analysis & Chunking (Chunk Threshold: ${chunkThreshold})...`);
         let statements = ast.program.body;
 
         // --- IIFE UNWRAPPING (Drill-down) ---
+        // Helper to get the innermost callee in case of (0, func)() or (void 0, func)()
+        const getInnermostCallee = (callee) => {
+            if (callee.type === 'SequenceExpression') {
+                return getInnermostCallee(callee.expressions[callee.expressions.length - 1]);
+            } else if (callee.type === 'MemberExpression') {
+                return getInnermostCallee(callee.property);
+            }
+            return callee;
+        };
+
         while (statements.length === 1) {
             const node = statements[0];
             if (node.type === 'ExpressionStatement') {
@@ -752,12 +813,16 @@ class CascadeGraph {
                 if (expr.type === 'UnaryExpression' && expr.operator === '!') expr = expr.argument;
 
                 if (expr.type === 'CallExpression') {
-                    const callee = expr.callee;
+                    const callee = getInnermostCallee(expr.callee); // Use the helper
                     if (callee.type === 'FunctionExpression' || callee.type === 'ArrowFunctionExpression') {
                         console.log(`[*] Phase 1.1: Unwrapping IIFE wrapper...`);
                         statements = callee.body.type === 'BlockStatement' ? callee.body.body : [callee.body];
                         continue;
                     }
+                } else if (expr.type === 'FunctionExpression' || expr.type === 'ArrowFunctionExpression') {
+                    console.log(`[*] Phase 1.1: Unwrapping top-level FunctionExpression...`);
+                    statements = expr.body.type === 'BlockStatement' ? expr.body.body : [expr.body];
+                    continue;
                 }
             }
             break;
@@ -1048,132 +1113,109 @@ class CascadeGraph {
 
         if (wrapperNames.size > 0) console.log(`[*] Using detected module wrappers for splitting: ${Array.from(wrapperNames).join(', ')}`);
 
-        statements.forEach((node) => {
-            const nodeCodeApprox = code.slice(node.start, node.end).toLowerCase();
-            const nodeCodeExact = code.slice(node.start, node.end);
+        const processStatements = (statementList, isTopLevelContext) => {
+            statementList.forEach((node) => {
+                const nodeCodeApprox = code.slice(node.start, node.end).toLowerCase();
+                const nodeTokensApprox = nodeCodeApprox.length / 2.5;
 
-            // --- MODULE ENVELOPE DETECTION (Hard Signal) ---
-            // If we see a start of a module wrapper, set the current Module ID
-            const isModuleStart = node.type === 'VariableDeclaration' &&
-                node.declarations.some(d => d.init && d.init.type === 'CallExpression' && wrapperNames.has(d.init.callee.name));
+                const isPotentialModule = node.type === 'VariableDeclaration' &&
+                    node.declarations.length === 1 &&
+                    node.declarations[0].init &&
+                    node.declarations[0].init.type === 'CallExpression';
 
-            if (isModuleStart) {
-                // If we were already in a module, close it first? 
-                // Usually esbuild flattens them, so a new commonJS call means a new module started.
-                const declPrefix = nodeCodeExact.substring(0, 50).replace(/\s+/g, '');
-                // Generate a stable ID based on the variable name or a hash
-                currentModuleId = `mod_${crypto.createHash('md5').update(declPrefix).digest('hex').slice(0, 6)}`;
-            }
+                // Check if the callee of the CallExpression is an identifier (e.g., `_create_common_module`)
+                // or a MemberExpression/SequenceExpression that resolves to one.
+                let actualCallee = isPotentialModule ? getInnermostCallee(node.declarations[0].init.callee) : null;
+                // NEW LOGIC: Trigger recursive dive if it's a structural module wrapper
+                const isStructuralModuleWrapper = isPotentialModule &&
+                    actualCallee && actualCallee.type === 'Identifier' &&
+                    node.declarations[0].init.arguments.some(arg => arg.type === 'ArrowFunctionExpression' || arg.type === 'FunctionExpression');
+                
+                // BUN FIX: If we find a giant module wrapper, recurse into it instead of treating it as one node.
+                // This is now based on structure, not name, and is triggered by a CallExpression with a function argument.
+                if (isStructuralModuleWrapper && nodeTokensApprox > chunkThreshold && isTopLevelContext) {
+                    const callee = node.declarations[0].init;
+                    const moduleFunc = callee.arguments.find(arg => arg.type === 'ArrowFunctionExpression' || arg.type === 'FunctionExpression');
 
-            // Check for end of module (heuristic: closing brace of the wrapper function)
-            // This is hard because the wrapper wraps the *entire* content. 
-            // So strictly speaking, currentModuleId applies to everything INSIDE the wrapper.
-            // But we are processing top-level statements. 
-            // If the parser already unwrapped the IIFE, then we might not see the wrapper calls here?
-            // Wait, analyze.js unwrapIIFE logic (lines 400-418) dives into the body.
-            // If the bundle is: var foo = __commonJS((exports) => { ... });
-            // Then "statements" ARE the body of that commonJS function?
-            // NO. The parser unwraps the IIFE at the very top level (webpack style), but esbuild often has:
-            // var require_a = __commonJS(...)
-            // var require_b = __commonJS(...)
-            // So "statements" contains these VariableDeclarations.
+                    if (moduleFunc && moduleFunc.body.type === 'BlockStatement') {
+                        console.log(`    [+] Detected large structural module wrapper. Diving in...`);
+                        finalizeChunk();
+                        currentChunkHasContent = false;
 
-            // The challenge: The *content* of require_a is inside the arrow function passed to __commonJS.
-            // If `statements` is iterating over the TOP LEVEL, then `node` IS the entire module `var a = ...`
-            // If that is the case, `shouldSplit` will eventually split this huge node if it's too big?
-            // Wait, `isInsideLargeDeclaration` (line 658) prevents splitting INSIDE a variable declaration if it's > 250 tokens?
-            // NO, `!isInsideLargeDeclaration` in the split condition means "Do NOT split if we are inside a large declaration".
-            // Actually it means "shouldSplit" is FALSE if `isInsideLargeDeclaration` is true? 
-            // Line 664: `!isInsideLargeDeclaration`. Correct.
-            // So if `var a = __commonJS(...)` is 10k lines, we define it as ONE chunk. 
-            // We want to force split it BUT keep the moduleId.
+                        const moduleStatements = moduleFunc.body.body;
+                        // Create a chunk for the wrapper itself, but without the body.
+                        const declCopy = { ...node.declarations[0] };
+                        const funcCopy = { ...moduleFunc, body: t.blockStatement([]) };
+                        const argsCopy = callee.arguments.map(arg => arg === moduleFunc ? funcCopy : arg);
+                        const calleeCopy = { ...callee, arguments: argsCopy };
+                        declCopy.init = calleeCopy;
+                        const wrapperNode = { ...node, declarations: [declCopy] };
 
-            // Refined Logic:
-            // If `isModuleStart` is true, we are about to process a node that IS a module wrapper.
-            // Use specific logic for `isModuleWrapperCall` to ALLOW splitting inside it if we modify the traverse?
-            // AST traversal here is flat over top-level statements. 
-            // If the node is `var a = ...`, it's ONE node. 
-            // We cannot split *inside* a node using this `forEach(statement)` loop.
-            // To split a large commonJS module, we must have entered its body.
-            // But we only entered the body if `unwrapIIFE` did so.
+                        currentChunkNodes.push(wrapperNode);
+                        currentTokens += 50; // Approx token count for wrapper
+                        finalizeChunk();
 
-            // If the bundle is standard esbuild (flat list of commonJS wrappers), we actually WANT to treat each wrapper as a chunk (or set of chunks).
-            // Currently `isModuleWrapperCall` is used to FORCE split (line 666).
-            // This means we treat `var a = ...` as a split point.
-            // But if `var a = ...` is 500kb, it's still one AST node in `statements`.
-            // The current logic CANNOT split a single huge AST node. 
-            // UNLESS we recursively traverse into it.
+                        // Recurse into the actual module body
+                        processStatements(moduleStatements, false);
+                        finalizeChunk();
+                        currentChunkHasContent = false;
+                        return; // Done with this node, continue to the next in forEach.
+                    }
+                }
 
-            // Modification: The current analyzer assumes reasonably sized top-level nodes.
-            // If `webcrack` runs (Phase 0), it might have unpacked things? 
-            // Webcrack usually converts `var a = __commonJS(...)` into distinct files or ESM.
-            // If webcrack failed or didn't unpack, we are stuck with huge nodes.
+                // --- MODULE ENVELOPE DETECTION (Hard Signal) ---
+                // Update currentModuleId based on the new structural check
+                if (isStructuralModuleWrapper) { 
+                    const declPrefix = nodeCodeApprox.substring(0, 50).replace(/\s+/g, '');
+                    currentModuleId = `mod_${crypto.createHash('md5').update(declPrefix).digest('hex').slice(0, 6)}`;
+                }
 
-            // Assuming for now we are dealing with chunks that *have* been somewhat split or we accept them as units.
-            // If `currentModuleId` is set, we tag the chunk.
+                const hasSignal = SIGNAL_KEYWORDS.some(kw => nodeCodeApprox.includes(kw));
+                const nodeCategory = hasSignal ? 'priority' : 'vendor';
 
-            // If this node IS the module wrapper, we should probably check if we need to reset moduleId after it unique to this node?
-            if (isModuleStart) {
-                // The module ID applies effectively just to this node (and any chunks we form from it if we could split it).
-                // Since we can't split inside this node in this loop, the entire node gets this ID.
-                // But wait, if we have sequential small nodes that belong to a logical module (e.g. "lazy init" pattern where logic is spread),
-                // we might see `var A = ...; A.prototype.foo = ...;`
-                // In that case, `currentModuleId` should persist.
-            }
+                const isImport = node.type === 'ImportDeclaration' ||
+                    (node.type === 'VariableDeclaration' && nodeCodeApprox.includes('require('));
 
-            // ... (rest of logic)
-            // Performance Optimization: Rough token estimate (length / 2.5)
-            // Obfuscated code has many short identifiers, making length/4 too optimistic.
-            const nodeTokensApprox = nodeCodeApprox.length / 2.5;
-            const hasSignal = SIGNAL_KEYWORDS.some(kw => nodeCodeApprox.includes(kw));
-            const nodeCategory = hasSignal ? 'priority' : 'vendor';
+                // The old isModuleWrapperCall is still used here for smaller, non-recursive wrappers.
+                // Re-evaluate its definition if it should also be purely structural, or if it's still good for NPM.
+                // For now, let's keep it based on wrapperNames to distinguish if needed.
+                const isNamedModuleWrapperCall = wrapperNames.has(node.declarations?.[0]?.init?.callee?.name);
 
-            const isImport = node.type === 'ImportDeclaration' ||
-                (node.type === 'VariableDeclaration' && nodeCodeApprox.includes('require('));
+                const isBanal = node.type === 'ExpressionStatement' &&
+                    node.expression.type === 'StringLiteral' &&
+                    (node.expression.value === 'use strict' || node.expression.value.startsWith('__esModule'));
 
-            const isModuleWrapperCall = node.type === 'VariableDeclaration' &&
-                node.declarations.length === 1 &&
-                node.declarations[0].init &&
-                node.declarations[0].init.type === 'CallExpression' &&
-                wrapperNames.has(node.declarations[0].init.callee.name);
+                const isUtility = node.type === 'VariableDeclaration' &&
+                    node.declarations.some(d => d.id.name && (NATIVE_PROPS.includes(d.id.name) || d.id.name.startsWith('_')));
 
-            const isBanal = node.type === 'ExpressionStatement' &&
-                node.expression.type === 'StringLiteral' &&
-                (node.expression.value === 'use strict' || node.expression.value.startsWith('__esModule'));
+                const isInsideLargeDeclaration = node.type === 'VariableDeclaration' && nodeTokensApprox > 250;
 
-            const isUtility = node.type === 'VariableDeclaration' &&
-                node.declarations.some(d => d.id.name && (NATIVE_PROPS.includes(d.id.name) || d.id.name.startsWith('_')));
+                const shouldSplit = currentChunkNodes.length > 0 && isTopLevelContext && !isInsideLargeDeclaration && (
+                    (isImport && currentChunkHasContent) ||
+                    (isNamedModuleWrapperCall && currentTokens > 3000) || // Use named for smaller cases
+                    (nodeCategory === 'priority' && currentCategory === 'vendor' && currentTokens > 1500) ||
+                    (currentTokens + nodeTokensApprox > chunkThreshold) ||
+                    (isUtility && currentTokens > chunkThreshold)
+                );
 
-            const isInsideLargeDeclaration = node.type === 'VariableDeclaration' && nodeTokensApprox > 250;
+                if (shouldSplit) {
+                    finalizeChunk();
+                    currentChunkHasContent = false;
+                }
 
-            // Only allow splitting at the Top Level of the program
-            const isTopLevel = statements.includes(node);
+                currentChunkNodes.push(node);
+                currentTokens += nodeTokensApprox;
 
-            const chunkThreshold = parseInt(process.env.CHUNKING_TOKEN_THRESHOLD) || 2000;
-            const shouldSplit = currentChunkNodes.length > 0 && isTopLevel && !isInsideLargeDeclaration && (
-                (isImport && currentChunkHasContent) ||
-                (isModuleWrapperCall && currentTokens > 3000) ||
-                (nodeCategory === 'priority' && currentCategory === 'vendor' && currentTokens > 1500) ||
-                (currentTokens + nodeTokensApprox > chunkThreshold) || // threshold*4 = approx 8k tokens
-                (isUtility && currentTokens > chunkThreshold)
-            );
+                if (!isImport && !isBanal) {
+                    currentChunkHasContent = true;
+                }
 
-            if (shouldSplit) {
-                finalizeChunk();
-                currentChunkHasContent = false;
-            }
+                if (nodeCategory === 'priority') currentCategory = 'priority';
+                else if (currentCategory === 'unknown') currentCategory = 'vendor';
+            });
+        };
 
-            currentChunkNodes.push(node);
-            currentTokens += nodeTokensApprox;
-
-            if (!isImport && !isBanal) {
-                currentChunkHasContent = true;
-            }
-
-            if (nodeCategory === 'priority') currentCategory = 'priority';
-            else if (currentCategory === 'unknown') currentCategory = 'vendor';
-        });
-
+        processStatements(statements, true);
         finalizeChunk();
     }
 
@@ -1208,7 +1250,7 @@ class CascadeGraph {
                     if (chunkName === targetChunk) return;
 
                     if (nodeData.code.includes(definedName)) {
-                        const escapedName = definedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const escapedName = definedName.replace(/[.*+?^${}()|[\\]/g, '\\$&');
                         const regex = new RegExp(`\\b${escapedName}\\b`);
                         if (regex.test(nodeData.code)) {
                             nodeData.neighbors.add(targetChunk);
@@ -1573,6 +1615,14 @@ async function run() {
         plugins: ['jsx', 'typescript', 'decorators-legacy', 'classProperties', 'dynamicImport', 'topLevelAwait'],
         errorRecovery: true
     });
+
+    // Determine tempDir
+    const tempDir = process.env.GEMINI_TEMP_DIR || '/Users/whit3rabbit/.gemini/tmp/00150962b70d3731010c9badd4003d7d7023e6e06d18dde520c44bbc52c5c1d0'; // Fallback to hardcoded path
+
+    // Write AST inspection log
+    fs.writeFileSync(path.join(tempDir, 'ast_inspection_log.jsonl'), '');
+    inspectNode(ast, 0, 5, path.join(tempDir, 'ast_inspection_log.jsonl'));
+    console.log(`[*] AST inspection log written to ${path.join(tempDir, 'ast_inspection_log.jsonl')}`);
 
     const graph = new CascadeGraph();
 

@@ -35,7 +35,7 @@ export function handleCliErrorAndExit(error: any, action: string): never {
 export async function installPluginCli(pluginId: string, scope: string = "user") {
     try {
         console.log(`Installing plugin "${pluginId}"...`);
-        const result = await installPlugin(pluginId, scope) as PluginActionResult;
+        const result = await installPlugin(pluginId, scope as any) as PluginActionResult;
         if (!result.success) {
             throw new Error(result.message);
         }

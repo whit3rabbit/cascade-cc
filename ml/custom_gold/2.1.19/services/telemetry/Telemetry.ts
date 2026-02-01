@@ -3,7 +3,11 @@
  * Role: Telemetry Service Interface
  */
 
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { appendFile, mkdir, readFile, unlink, readdir } from 'node:fs/promises';
 import { Log } from '../statsig/StatsigService.js';
+import { request } from 'undici';
 
 // Internal telemetry queue or buffer
 interface TelemetryEvent {
@@ -14,6 +18,75 @@ interface TelemetryEvent {
 
 const telemetryBuffer: TelemetryEvent[] = [];
 let isInitialized = false;
+let flushInterval: any = null;
+
+import { EnvService } from '../config/EnvService.js';
+
+const TELEMETRY_DIR = join(EnvService.get('CLAUDE_CONFIG_DIR'), 'telemetry');
+const TELEMETRY_FILE = join(TELEMETRY_DIR, 'events.jsonl');
+
+async function flushEvents() {
+    if (telemetryBuffer.length === 0) return;
+
+    const eventsToWrite = [...telemetryBuffer];
+    telemetryBuffer.length = 0; // Clear buffer immediately
+
+    try {
+        await mkdir(TELEMETRY_DIR, { recursive: true });
+        const data = eventsToWrite.map(e => JSON.stringify(e)).join('\n') + '\n';
+        await appendFile(TELEMETRY_FILE, data, 'utf8');
+
+        if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
+            console.log(`[Telemetry] Flushed ${eventsToWrite.length} events to disk`);
+        }
+
+        // Attempt to upload everything from disk
+        await uploadEvents();
+    } catch (error) {
+        console.error('[Telemetry] Failed to flush events:', error);
+    }
+}
+
+const TELEMETRY_ENDPOINT = EnvService.get("CLAUDE_TELEMETRY_URL") || "https://statsigapi.net/v1/log_event";
+
+async function uploadEvents() {
+    try {
+        const data = await readFile(TELEMETRY_FILE, 'utf8');
+        if (!data.trim()) return;
+
+        const events = data.trim().split('\n').map(l => JSON.parse(l));
+
+        const response = await request(TELEMETRY_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'STATSIG-API-KEY': EnvService.get("STATSIG_CLIENT_KEY") || "client-claude-key"
+            },
+            body: JSON.stringify({
+                events,
+                statsigMetadata: {
+                    sdkType: 'node-lite',
+                    sdkVersion: '1.0.0'
+                }
+            })
+        });
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+            await unlink(TELEMETRY_FILE);
+            if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
+                console.log(`[Telemetry] Successfully uploaded ${events.length} events`);
+            }
+        } else {
+            if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
+                console.warn(`[Telemetry] Failed to upload events. Status: ${response.statusCode}`);
+            }
+        }
+    } catch (error) {
+        if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
+            console.error('[Telemetry] Upload error:', error);
+        }
+    }
+}
 
 export function track(eventName: string, properties: Record<string, any> = {}) {
     const event: TelemetryEvent = {
@@ -22,9 +95,7 @@ export function track(eventName: string, properties: Record<string, any> = {}) {
         timestamp: Date.now()
     };
 
-    // In a real implementation, this would send data to a backend (Statsig, Segment, etc.)
-    // For now, we log it or buffer it.
-    if (process.env.DEBUG_TELEMETRY) {
+    if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
         console.log(`[Telemetry] ${eventName}`, properties);
     }
 
@@ -35,16 +106,19 @@ export function initializeTelemetry() {
     if (isInitialized) return;
     isInitialized = true;
 
-    // Flush buffer or start background sender
+    // Start background flusher (every 30s)
+    flushInterval = setInterval(flushEvents, 30000);
+
     Log.info("Telemetry Service Initialized");
 }
 
-export function shutdownTelemetry() {
-    // Flush remaining events
-    const count = telemetryBuffer.length;
-    telemetryBuffer.length = 0; // Clear
-    Log.info(`Telemetry Service Shutdown. Flushed ${count} events.`);
+export async function shutdownTelemetry() {
+    if (flushInterval) {
+        clearInterval(flushInterval);
+        flushInterval = null;
+    }
+    await flushEvents();
+    Log.info(`Telemetry Service Shutdown.`);
 }
 
-// Re-export for convenience if needed, though direct import is preferred
 export { Log } from '../statsig/StatsigService.js';

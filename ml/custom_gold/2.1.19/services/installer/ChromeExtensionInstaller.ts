@@ -7,13 +7,15 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
+import { EnvService } from "../config/EnvService.js";
+
 /**
  * Returns platform-specific paths for Chrome Native Host manifests.
  */
 function getNativeHostManifestPaths(): string[] {
     const platform = process.platform;
     if (platform === "win32") {
-        const appData = process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
+        const appData = EnvService.get("LOCALAPPDATA") || join(homedir(), "AppData", "Local");
         return [join(appData, "Claude Code", "NativeMessagingHosts")];
     }
     if (platform === "darwin") {

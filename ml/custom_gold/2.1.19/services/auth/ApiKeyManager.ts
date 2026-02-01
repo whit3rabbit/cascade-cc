@@ -3,18 +3,45 @@
  * Role: Manages API key based authentication and OAuth-related error factories.
  */
 
+import { exec } from "child_process";
+import { promisify } from "util";
+import { getSettings } from '../config/SettingsService.js';
+
+const execAsync = promisify(exec);
+
 /**
  * Singleton implementation for managing API key based authentication.
  */
 class ApiKeyManagerImpl {
     private apiKey: string | null = null;
+    private helperKey: string | null = null;
+    private lastHelperFetch: number = 0;
+    private readonly HELPER_TTL = 5 * 60 * 1000; // 5 minutes
 
     /**
      * Gets the current API key.
-     * @returns {string | null}
+     * @returns {Promise<string | null>}
      */
-    getApiKey(): string | null {
-        return this.apiKey;
+    async getApiKey(): Promise<string | null> {
+        if (this.apiKey) return this.apiKey;
+
+        const envKey = process.env.ANTHROPIC_API_KEY;
+        if (envKey) return envKey;
+
+        // Check for helper command in settings
+        const settings = getSettings();
+        const helperCommand = settings.apiKeyHelper;
+
+        if (helperCommand) {
+            const now = Date.now();
+            if (this.helperKey && now - this.lastHelperFetch < this.HELPER_TTL) {
+                return this.helperKey;
+            }
+
+            return await this.getApiKeyFromHelper(helperCommand);
+        }
+
+        return null;
     }
 
     /**
@@ -23,6 +50,29 @@ class ApiKeyManagerImpl {
      */
     setApiKey(key: string | null): void {
         this.apiKey = key;
+    }
+
+    /**
+     * Executes the apiKeyHelper command to retrieve the API key.
+     * @param {string} helperCommand The shell command to execute.
+     * @param {number} timeoutMs Timeout in milliseconds (default 5 minutes).
+     * @returns {Promise<string | null>} The retrieved API key or null on failure.
+     */
+    async getApiKeyFromHelper(helperCommand: string, timeoutMs: number = 300000): Promise<string | null> {
+        try {
+            const { stdout } = await execAsync(helperCommand, { timeout: timeoutMs, encoding: 'utf8' });
+            const key = stdout.trim();
+            if (!key) {
+                console.error("apiKeyHelper returned empty output");
+                return null;
+            }
+            this.helperKey = key;
+            this.lastHelperFetch = Date.now();
+            return key;
+        } catch (error) {
+            console.error(`Error executing apiKeyHelper: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+        }
     }
 }
 

@@ -49,9 +49,10 @@ function HelpComponent({ onDone }: ComponentProps) {
     );
 }
 
-export const helpCommandDefinition = {
-    name: "help",
-    description: "Show available commands and help",
+
+import { createCommandHelper } from './helpers.js';
+
+export const helpCommandDefinition = createCommandHelper("help", "Show available commands and help", {
     type: "local-jsx",
     async call(onDone: () => void) {
         return <HelpComponent onDone={onDone} />;
@@ -59,7 +60,7 @@ export const helpCommandDefinition = {
     userFacingName() {
         return "help";
     }
-};
+});
 
 /**
  * Renders a display for the mobile app download links.
@@ -111,10 +112,8 @@ function MobileComponent({ onDone }: ComponentProps) {
     );
 }
 
-export const mobileCommandDefinition = {
-    name: "mobile",
+export const mobileCommandDefinition = createCommandHelper("mobile", "Download the Claude mobile app", {
     aliases: ["ios", "android"],
-    description: "Download the Claude mobile app",
     type: "local-jsx",
     async call(onDone: () => void) {
         return <MobileComponent onDone={onDone} />;
@@ -122,4 +121,4 @@ export const mobileCommandDefinition = {
     userFacingName() {
         return "mobile";
     }
-};
+});

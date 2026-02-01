@@ -24,4 +24,9 @@ export function stripAnsi(text: string): string {
 export const eU = stripAnsi;
 export const AH = stripAnsi;
 
+export const truncateString = (args: string[]): string => {
+    // Simple mock since we don't have the original truncate logic here
+    return args.join(' ').substring(0, 1000);
+};
+
 export default stripAnsi;

@@ -53,9 +53,16 @@ export class PluginManager {
     /**
      * Installs a new plugin.
      */
-    static async installPlugin(pluginId: string, scope: string) {
-        console.log(`[Plugins] Installing ${pluginId} in scope ${scope}`);
-        return { success: true, message: `Installed plugin ${pluginId}`, pluginId };
+    static async installPlugin(plugin: any, scope: "project" | "user" | "local" = "user") {
+        console.log(`[Plugins] Installing ${plugin.id} in scope ${scope}`);
+
+        if (plugin.mcp) {
+            const { McpServerManager } = await import('./McpServerManager.js');
+            await McpServerManager.addMcpServer(plugin.id, plugin.mcp, scope);
+            return { success: true, message: `Installed MCP server: ${plugin.name}`, pluginId: plugin.id };
+        }
+
+        return { success: true, message: `Installed plugin ${plugin.id}`, pluginId: plugin.id };
     }
 
     /**

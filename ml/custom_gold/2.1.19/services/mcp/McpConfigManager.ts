@@ -7,7 +7,9 @@ import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const MCP_TEMP_DIR = process.env.USE_MCP_CLI_DIR || join(tmpdir(), "claude-code-mcp-cli");
+import { EnvService } from '../config/EnvService.js';
+
+const MCP_TEMP_DIR = EnvService.get("USE_MCP_CLI_DIR");
 
 export interface McpServerConfig {
     command: string;

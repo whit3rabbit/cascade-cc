@@ -57,7 +57,7 @@ const VALID_COMMANDS = ['analyze', 'visualize', 'deobfuscate', 'assemble', 'anch
 const scripts = {
     'analyze': {
         cmd: 'node',
-        args: ['--max-old-space-size=8192', 'src/analyze.js', ...args],
+        args: ['--max-old-space-size=8192', 'src/analyze_pipeline.js', ...args],
         desc: 'Run CASCADE analysis'
     },
     'visualize': {
@@ -174,21 +174,23 @@ console.log(`[*] Running: ${config.cmd} ${config.args.join(' ')}`);
 // and fall back to the generic spawn for others.
 
 switch (command) {
-    case 'analyze':
-    case 'visualize':
-    case 'clean':
-    case 'deobfuscate':
-    case 'assemble':
-    case 'refine':
-    case 'anchor': {
-        const child = spawn(config.cmd, config.args, {
-            stdio: 'inherit',
-            shell: true,
-            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
-        });
-        child.on('exit', (code) => {
-            if (code !== 0) process.exit(code);
-
+        case 'analyze':
+        case 'visualize':
+        case 'clean':
+        case 'deobfuscate':
+        case 'assemble':
+        case 'refine':
+        case 'anchor': {
+            const result = spawnSync(config.cmd, config.args, {
+                stdio: 'inherit',
+                shell: true,
+                env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
+            });
+    
+            if (result.status !== 0) {
+                process.exit(result.status);
+            }
+    
             const extractTargetVersion = (argv) => {
                 const versionIdx = argv.indexOf('--version');
                 const nonFlagArgs = [];
@@ -203,39 +205,39 @@ switch (command) {
                 }
                 return versionIdx !== -1 ? argv[versionIdx + 1] : nonFlagArgs[0];
             };
-
+    
             const targetVersion = extractTargetVersion(args);
             if (!targetVersion) {
                 console.warn('[!] No target version detected for propagate-names; skipping.');
                 process.exit(0);
             }
-
-            const classifyChild = spawn('node', ['src/classify_logic.js', targetVersion], {
+    
+            const classifyResult = spawnSync('node', ['src/classify_logic.js', targetVersion], {
                 stdio: 'inherit',
                 shell: true,
-                env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+                env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
             });
-            classifyChild.on('exit', (classifyCode) => {
-                if (classifyCode !== 0) process.exit(classifyCode);
-                const propagateChild = spawn('node', ['src/propagate_names.js', targetVersion], {
-                    stdio: 'inherit',
-                    shell: true,
-                    env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
-                });
-                propagateChild.on('exit', (propCode) => {
-                    process.exit(propCode);
-                });
+    
+            if (classifyResult.status !== 0) {
+                process.exit(classifyResult.status);
+            }
+    
+            const propagateResult = spawnSync('node', ['src/propagate_names.js', targetVersion], {
+                stdio: 'inherit',
+                shell: true,
+                env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
             });
-        });
-        break;
-    }
+    
+            process.exit(propagateResult.status);
+            break;
+        }
 
     case 'classify':
     case 'propagate-names': {
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',
             shell: true,
-            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
         });
         child.on('exit', (code) => {
             process.exit(code);
@@ -247,7 +249,7 @@ switch (command) {
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',
             shell: true,
-            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
         });
         child.on('exit', (code) => {
             process.exit(code);
@@ -289,21 +291,20 @@ switch (command) {
         const anchorChild = spawn('node', ['src/anchor_logic.js', ...args], {
             stdio: 'inherit',
             shell: true,
-            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
         });
             anchorChild.on('exit', (code) => {
                 if (code !== 0) process.exit(code);
-                const classifyChild = spawn('node', ['src/classify_logic.js', targetVersion], {
-                    stdio: 'inherit',
-                    shell: true,
-                    env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
-                });
-                classifyChild.on('exit', (classifyCode) => {
+                            const classifyChild = spawn('node', ['src/classify_logic.js', targetVersion], {
+                                stdio: 'inherit',
+                                shell: true,
+                                env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
+                            });                classifyChild.on('exit', (classifyCode) => {
                     if (classifyCode !== 0) process.exit(classifyCode);
                     const propagateChild = spawn('node', ['src/propagate_names.js', targetVersion], {
                         stdio: 'inherit',
                         shell: true,
-                        env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+                        env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
                     });
                     propagateChild.on('exit', (propCode) => {
                         process.exit(propCode);
@@ -338,7 +339,7 @@ switch (command) {
             const result = spawnSync(cmd, stepArgs, {
                 stdio: 'inherit',
                 shell: true,
-                env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+                env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
             });
             const code = typeof result.status === 'number' ? result.status : 1;
             if (code !== 0) process.exit(code);
@@ -412,7 +413,8 @@ switch (command) {
         }
         const child = spawn(PYTHON_BIN, ['ml/train.py', bootstrapDir, ...args], {
             stdio: 'inherit',
-            shell: true
+            shell: true,
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
         });
         child.on('exit', (code) => {
             process.exit(code);
@@ -424,7 +426,7 @@ switch (command) {
         const child = spawn(config.cmd, config.args, {
             stdio: 'inherit',
             shell: true,
-            env: { ...process.env, PYTHON_BIN: PYTHON_BIN }
+            env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
         });
         child.on('exit', (code) => {
             process.exit(code);

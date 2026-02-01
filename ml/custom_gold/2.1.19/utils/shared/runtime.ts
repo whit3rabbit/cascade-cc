@@ -139,12 +139,14 @@ export const createNumberSchema = z.number;
 export const createBooleanSchema = z.boolean;
 export const createObjectSchema = z.object;
 
+import { EnvService } from '../../services/config/EnvService.js';
+
 /**
  * Checks if the current environment is running in demo mode.
  * @returns {boolean}
  */
 export function isDemo(): boolean {
-    return process.env.CLAUDE_CODE_DEMO === 'true';
+    return EnvService.isTruthy('CLAUDE_CODE_DEMO');
 }
 
 /**
@@ -168,8 +170,6 @@ export function createContextKey(description: string): symbol {
 
 /**
  * Logs a message to the terminal.
- * @param {string} message - The message to log.
- * @param {string} level - Optional log level.
  */
 export function terminalLog(message: string, level: string = "info"): void {
     if (level === "error") {
@@ -180,3 +180,7 @@ export function terminalLog(message: string, level: string = "info"): void {
         console.log(message);
     }
 }
+
+export const errorLog = (err: Error | string) => console.error(err);
+export const infoLog = (msg: string, ...args: any[]) => console.info(msg, ...args);
+export const m1 = () => process.cwd();

@@ -52,6 +52,8 @@ function generateSnapshotScript(shellPath: string, snapshotFile: string): string
     return script;
 }
 
+import { EnvService } from '../config/EnvService.js';
+
 /**
  * Creates a shell snapshot file and returns its path.
  */
@@ -66,7 +68,7 @@ export async function createShellSnapshot(shellPath: string): Promise<string | u
     return new Promise((resolve) => {
         spawnBashCommand(shellPath, ["-c", script], {
             timeout: SHELL_SNAPSHOT_TIMEOUT,
-            env: { ...process.env, CLAUDECODE: "1" }
+            env: { ...process.env, CLAUDECODE: "1" } // In this case process.env is fine for spreading, but could be centralized.
         }, (error) => {
             if (error) {
                 console.error(`[ShellSnapshot] Failed to create shell snapshot: ${error.message}`);

@@ -5,10 +5,29 @@
 
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { readFileSync, existsSync } from 'node:fs';
 import { getProductName, getSystemUser } from './product.js';
 import { KeychainService } from '../../services/auth/KeychainService.js';
+import { EnvService } from '../../services/config/EnvService.js';
 
 export { getProductName, getSystemUser, KeychainService };
+
+/**
+ * Returns the content of the configured JS environment loading script.
+ * Checks CLAUDE_ENV_FILE and optionally session-env hooks (simplified here).
+ */
+export function getSessionEnvScript(): string | null {
+    const envFile = EnvService.get('CLAUDE_ENV_FILE');
+    if (envFile && existsSync(envFile)) {
+        try {
+            const content = readFileSync(envFile, 'utf8').trim();
+            if (content) return content;
+        } catch (error) {
+            console.error(`Failed to read CLAUDE_ENV_FILE: ${envFile}`, error);
+        }
+    }
+    return null;
+}
 
 /**
  * Normalizes a value to a boolean.
@@ -26,7 +45,7 @@ export function toBoolean(value: any): boolean {
  * Returns the base configuration directory.
  */
 export function getBaseConfigDir(): string {
-    return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+    return EnvService.get('CLAUDE_CONFIG_DIR');
 }
 
 /**
@@ -40,21 +59,21 @@ export function getChatHistoryDir(): string {
  * Checks if running in a CI environment.
  */
 export function isCI(): boolean {
-    return !!(process.env.CI || process.env.GITHUB_ACTIONS || process.env.TRAVIS || process.env.CIRCLECI);
+    return EnvService.isTruthy("CI") || EnvService.isTruthy("GITHUB_ACTIONS") || !!process.env.TRAVIS || !!process.env.CIRCLECI;
 }
 
 /**
  * Returns the current session ID.
  */
 export function getSessionId(): string {
-    return process.env.CLAUDE_SESSION_ID || `session_${process.pid}_${Date.now()}`;
+    return EnvService.get("CLAUDE_SESSION_ID");
 }
 
 /**
  * Returns the parent session ID if applicable.
  */
 export function getParentSessionId(): string | undefined {
-    return process.env.CLAUDE_PARENT_SESSION_ID;
+    return EnvService.get("CLAUDE_PARENT_SESSION_ID");
 }
 
 /**
@@ -62,9 +81,9 @@ export function getParentSessionId(): string | undefined {
  */
 export function getAgentContext(): any {
     return {
-        agentId: process.env.CLAUDE_AGENT_ID,
+        agentId: EnvService.get("CLAUDE_AGENT_ID"),
         parentSessionId: getParentSessionId(),
-        agentType: isTeammate() ? "teammate" : (process.env.CLAUDE_AGENT_ID ? "standalone" : "cli")
+        agentType: isTeammate() ? "teammate" : (EnvService.get("CLAUDE_AGENT_ID") ? "standalone" : "cli")
     };
 }
 
@@ -72,14 +91,14 @@ export function getAgentContext(): any {
  * Checks if the user is a teammate (via env flag).
  */
 export function isTeammate(): boolean {
-    return toBoolean(process.env.CLAUDE_TEAMMATE);
+    return EnvService.isTruthy("CLAUDE_TEAMMATE");
 }
 
 /**
  * Returns the agent ID.
  */
 export function getAgentId(): string | undefined {
-    return process.env.CLAUDE_AGENT_ID;
+    return EnvService.get("CLAUDE_AGENT_ID");
 }
 
 /**
@@ -87,7 +106,7 @@ export function getAgentId(): string | undefined {
  */
 export function getBetaFlags(model?: string): string[] {
     // Returns empty or comma-separated list of flags from env
-    const flags = process.env.CLAUDE_BETA_FLAGS || "";
+    const flags = EnvService.get("CLAUDE_BETA_FLAGS") || "";
     return flags.split(',').filter(Boolean);
 }
 
@@ -95,7 +114,7 @@ export function getBetaFlags(model?: string): string[] {
  * Returns the entrypoint model name.
  */
 export function getEntrypoint(): string {
-    return process.env.CLAUDE_CODE_ENTRYPOINT || "claude-3-5-sonnet-latest";
+    return EnvService.get("CLAUDE_CODE_ENTRYPOINT");
 }
 
 /**
@@ -114,7 +133,7 @@ export async function getEnvContext(): Promise<any> {
  * Returns the client type for Claude Code.
  */
 export function getClaudeCodeClientType(): string {
-    return process.env.CLAUDE_CODE_CLIENT_TYPE || "cli";
+    return EnvService.get("CLAUDE_CODE_CLIENT_TYPE");
 }
 
 /**
@@ -124,8 +143,8 @@ export function getDataDir(): string {
     const home = homedir();
     switch (process.platform) {
         case 'darwin': return join(home, 'Library', 'Application Support');
-        case 'win32': return process.env.APPDATA || join(home, 'AppData', 'Roaming');
-        default: return process.env.XDG_DATA_HOME || join(home, '.local', 'share');
+        case 'win32': return EnvService.get("APPDATA") || join(home, 'AppData', 'Roaming');
+        default: return EnvService.get("XDG_DATA_HOME") || join(home, '.local', 'share');
     }
 }
 
@@ -136,8 +155,8 @@ export function getCacheDir(): string {
     const home = homedir();
     switch (process.platform) {
         case 'darwin': return join(home, 'Library', 'Caches');
-        case 'win32': return process.env.LOCALAPPDATA || join(home, 'AppData', 'Local');
-        default: return process.env.XDG_CACHE_HOME || join(home, '.cache');
+        case 'win32': return EnvService.get("LOCALAPPDATA") || join(home, 'AppData', 'Local');
+        default: return EnvService.get("XDG_CACHE_HOME") || join(home, '.cache');
     }
 }
 
@@ -148,8 +167,8 @@ export function getConfigDir(): string {
     const home = homedir();
     switch (process.platform) {
         case 'darwin': return join(home, 'Library', 'Application Support');
-        case 'win32': return process.env.APPDATA || join(home, 'AppData', 'Roaming');
-        default: return process.env.XDG_CONFIG_HOME || join(home, '.config');
+        case 'win32': return EnvService.get("APPDATA") || join(home, 'AppData', 'Roaming');
+        default: return EnvService.get("XDG_CONFIG_HOME") || join(home, '.config');
     }
 }
 
@@ -180,7 +199,7 @@ export function getClaudePaths() {
  * Returns the installation method.
  */
 export function getInstallMethod(): string {
-    if (process.env.CLAUDE_CODE_INSTALL_METHOD) return process.env.CLAUDE_CODE_INSTALL_METHOD;
+    if (EnvService.get("CLAUDE_CODE_INSTALL_METHOD")) return EnvService.get("CLAUDE_CODE_INSTALL_METHOD");
     const mainFile = require.main?.filename;
     if (mainFile?.includes('node_modules')) return 'npm';
     return 'native';
@@ -190,14 +209,14 @@ export function getInstallMethod(): string {
  * Gets a string from an environment variable.
  */
 export function getStringFromEnv(key: string): string | undefined {
-    return process.env[key];
+    return EnvService.get(key);
 }
 
 /**
  * Gets a parsed number from an environment variable.
  */
 export function getNumberFromEnv(key: string): number | undefined {
-    const val = process.env[key];
+    const val = EnvService.get(key);
     if (!val) return undefined;
     const num = Number(val);
     return isNaN(num) ? undefined : num;

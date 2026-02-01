@@ -341,6 +341,8 @@ export function parseCommandWithRedirections(commandString: string): CommandPars
     };
 }
 
+import { EnvService } from '../../services/config/EnvService.js';
+
 /**
  * Recursively expands environment variables in a string and identifies missing ones.
  */

@@ -26,11 +26,13 @@ export function isDocker(): boolean {
     }
 }
 
+import { EnvService } from '../../services/config/EnvService.js';
+
 /**
  * Checks if the environment is a Bubblewrap sandbox.
  */
 export function isBubblewrapSandbox(): boolean {
-    return process.platform === "linux" && process.env.CLAUDE_CODE_BUBBLEWRAP === "1";
+    return process.platform === "linux" && EnvService.get("CLAUDE_CODE_BUBBLEWRAP") === "1";
 }
 
 /**
@@ -59,12 +61,12 @@ export function isMusl(): boolean {
  * Attempts to detect the current terminal emulator.
  */
 export function getTerminalEmulator(): string | undefined {
-    if (process.env.TERMINAL_EMULATOR === "JetBrains-JediTerm") {
+    if (EnvService.get("TERMINAL_EMULATOR") === "JetBrains-JediTerm") {
         if (getPlatform() !== "darwin") {
             return detectJetBrainsProduct() || "jetbrains";
         }
     }
-    return process.env.TERM_PROGRAM || process.env.TERM;
+    return EnvService.get("TERM_PROGRAM") || EnvService.get("TERM");
 }
 
 /**
@@ -72,8 +74,8 @@ export function getTerminalEmulator(): string | undefined {
  */
 function detectJetBrainsProduct(): string | null {
     // Simplified detection; could be expanded to check process tree or specific JB env vars.
-    if (process.env.PYCHARM_VM_OPTIONS) return "pycharm";
-    if (process.env.WEBIDE_VM_OPTIONS) return "webstorm";
-    if (process.env.IDEA_VM_OPTIONS) return "intellij";
+    if (EnvService.get("PYCHARM_VM_OPTIONS")) return "pycharm";
+    if (EnvService.get("WEBIDE_VM_OPTIONS")) return "webstorm";
+    if (EnvService.get("IDEA_VM_OPTIONS")) return "intellij";
     return null;
 }

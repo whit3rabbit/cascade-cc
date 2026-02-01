@@ -3,7 +3,7 @@
  * Role: Context provider and hook for managing ephemeral notifications in the terminal UI.
  */
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 
 export interface Notification {
     key?: string;
@@ -19,6 +19,21 @@ interface NotificationContextValue {
     clearNotifications: () => void;
 }
 
+type NotificationListener = (n: Notification) => void;
+class NotificationQueue {
+    private listeners: Set<NotificationListener> = new Set();
+
+    subscribe(l: NotificationListener) {
+        this.listeners.add(l);
+        return () => { this.listeners.delete(l); };
+    }
+
+    add(n: Notification) {
+        this.listeners.forEach(l => l(n));
+    }
+}
+
+export const notificationQueue = new NotificationQueue();
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
 /**
@@ -26,6 +41,10 @@ const NotificationContext = createContext<NotificationContextValue | null>(null)
  */
 export function NotificationProvider({ children }: { children: ReactNode }) {
     const [notifications, setNotifications] = useState<Notification[]>([]);
+
+    const removeNotification = useCallback((key: string) => {
+        setNotifications((prev) => prev.filter((n) => n.key !== key));
+    }, []);
 
     const addNotification = useCallback((notif: Notification) => {
         const key = notif.key || Math.random().toString(36).substring(7);
@@ -37,11 +56,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             }, notif.timeoutMs);
         }
         return key;
-    }, []);
+    }, [removeNotification]);
 
-    const removeNotification = useCallback((key: string) => {
-        setNotifications((prev) => prev.filter((n) => n.key !== key));
-    }, []);
+    useEffect(() => {
+        return notificationQueue.subscribe((n) => {
+            addNotification(n);
+        });
+    }, [addNotification]);
 
     const clearNotifications = useCallback(() => {
         setNotifications([]);

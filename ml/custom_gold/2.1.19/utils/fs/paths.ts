@@ -44,13 +44,15 @@ export function joinPaths(...paths: string[]): string {
  */
 export const getRelativeFilePath = joinPaths;
 
+import { EnvService } from "../../services/config/EnvService.js";
+
 /**
  * Reads an environment variable.
  * @param key - Environment variable key.
  * @returns Value if found, otherwise undefined.
  */
 export function readEnvVar(key: string): string | undefined {
-    return process.env[key];
+    return EnvService.get(key);
 }
 
 /**

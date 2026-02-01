@@ -5,30 +5,48 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import { THEME } from '../../constants/theme.js';
+import { useTheme } from '../../services/terminal/ThemeService.js';
+import { EnvService } from '../../services/config/EnvService.js';
+import os from 'os';
 
 interface LogoProps {
     version: string;
     model: string;
     cwd: string;
+    subscription?: string;
 }
 
-export const Logo: React.FC<LogoProps> = ({ version, model, cwd }) => {
+export const Logo: React.FC<LogoProps> = ({ version, model, cwd, subscription }) => {
+    const theme = useTheme();
     // Colors from theme
-    const bodyColor = THEME.colors.clawd_body;
-    const bgColor = THEME.colors.clawd_background;
+    const bodyColor = theme.clawd_body;
+    const bgColor = theme.clawd_background;
 
-    // In a real implementation this would come from a billing context
-    const billing = "Claude API";
 
-    // Reconstruction of the ASCII art from chunk1339
-    // Row 1:  ▐▛███▜▌
-    // Row 2: ▝▜█████▛▘
-    // Row 3:   ▘▘ ▝▝
+    // Shorten cwd
+    const home = os.homedir();
+    const displayCwd = cwd.startsWith(home) ? cwd.replace(home, '~') : cwd;
 
-    return (
-        <Box flexDirection="row" gap={2} alignItems="center" paddingY={1}>
-            {/* The Icon */}
+    const billing = subscription || "Not Authenticated";
+
+    const isAppleTerminal = EnvService.get("TERM_PROGRAM") === 'Apple_Terminal';
+
+    const renderIcon = () => {
+        if (isAppleTerminal) {
+            return (
+                <Box flexDirection="column" alignItems="center">
+                    <Box>
+                        <Text color={bodyColor}>▗</Text>
+                        <Text color={bgColor} backgroundColor={bodyColor}> ▗   ▖ </Text>
+                        <Text color={bodyColor}>▖</Text>
+                    </Box>
+                    <Text backgroundColor={bodyColor}>       </Text>
+                    <Text color={bodyColor}>▘▘ ▝▝</Text>
+                </Box>
+            );
+        }
+
+        return (
             <Box flexDirection="column">
                 <Box>
                     <Text color={bodyColor}> ▐</Text>
@@ -41,11 +59,16 @@ export const Logo: React.FC<LogoProps> = ({ version, model, cwd }) => {
                     <Text color={bodyColor}>▛▘</Text>
                 </Box>
                 <Box>
-                    <Text>  </Text>
-                    <Text color={bodyColor}>▘▘ ▝▝</Text>
-                    <Text>  </Text>
+                    <Text color={bodyColor}>  ▘▘ ▝▝  </Text>
                 </Box>
             </Box>
+        );
+    };
+
+    return (
+        <Box flexDirection="row" gap={2} alignItems="center" paddingY={1}>
+            {/* The Icon */}
+            {renderIcon()}
 
             {/* The Text Info */}
             <Box flexDirection="column">
@@ -57,7 +80,7 @@ export const Logo: React.FC<LogoProps> = ({ version, model, cwd }) => {
                     <Text dimColor>{model} · {billing}</Text>
                 </Box>
                 <Box>
-                    <Text dimColor>{cwd}</Text>
+                    <Text dimColor>{displayCwd}</Text>
                 </Box>
             </Box>
         </Box>

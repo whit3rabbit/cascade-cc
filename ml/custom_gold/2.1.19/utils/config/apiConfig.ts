@@ -7,8 +7,10 @@ export interface ApiConfig {
     BASE_API_URL: string;
 }
 
+import { EnvService } from "../../services/config/EnvService.js";
+
 export const apiConfig: ApiConfig = {
-    BASE_API_URL: process.env.CLAUDE_BASE_URL || "https://api.anthropic.com",
+    BASE_API_URL: EnvService.get("CLAUDE_BASE_URL"),
 };
 
 /**

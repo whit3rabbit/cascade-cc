@@ -8,6 +8,7 @@ import chalk from "chalk";
 import { ConversationService } from "../services/conversation/ConversationService.js";
 import { initializeApp } from "../services/terminal/AppInitializer.js";
 import { terminalLog } from "../utils/shared/runtime.js";
+import { commandRegistry } from "../services/terminal/CommandRegistry.js";
 
 async function main() {
     const program = new Command();
@@ -56,18 +57,40 @@ async function main() {
         .option("--strict-mcp-config", "Only use MCP servers from --mcp-config, ignoring all other MCP configurations")
         .option("--system-prompt <prompt>", "System prompt to use for the session")
         .option("--tools <tools...>", "Specify the list of available tools from the built-in set. Use \"\" to disable all tools, \"default\" to use all tools, or specify tool names (e.g. \"Bash,Edit,Read\").")
+        .option("--auto-join <requestId>", "Automatically send a join request to a team leader on startup")
         .option("--verbose", "Override verbose mode setting from config")
         .action(async (prompt, options) => {
             terminalLog("Claude Code starting...");
 
             // 1. Initialize services
-            await initializeApp();
+            const { isFirstRun } = await initializeApp();
 
-            // 2. Decide flow: Interactive or Print
+            // 2. Handle auto-join if requested
+            if (options.autoJoin) {
+                const { TeammateTool } = await import("../tools/TeammateTool.js");
+                const match = options.autoJoin.match(/@([^@]+)$/);
+                const teamName = match?.[1];
+                if (teamName) {
+                    terminalLog(`Auto-joining team "${teamName}"...`);
+                    try {
+                        await TeammateTool.call({
+                            operation: "requestJoin",
+                            team_name: teamName,
+                            proposed_name: options.agent || "teammate",
+                            request_id: options.autoJoin,
+                            timeout_ms: 10000
+                        });
+                    } catch (err) {
+                        terminalLog(`Auto-join failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+                    }
+                }
+            }
+
+            // 3. Decide flow: Interactive or Print
             if (options.print || prompt) {
                 await runPrintMode(prompt, options);
             } else {
-                await runInteractiveMode(options);
+                await runInteractiveMode(options, isFirstRun);
             }
         });
 
@@ -103,8 +126,20 @@ async function main() {
 
     program.command('update')
         .description('Check for updates and install if available')
-        .action(() => {
-            console.log("Update command initialized.");
+        .action(async () => {
+            const { UpdaterService } = await import("../services/updater/UpdaterService.js");
+            console.log("Checking for updates...");
+            const update = await UpdaterService.checkForUpdates();
+
+            if (update && update.hasUpdate) {
+                console.log(chalk.green(`Update available: ${update.currentVersion} -> ${update.latestVersion}`));
+                console.log(`Run ${chalk.cyan('npm install -g @anthropic-ai/claude-code')} to update.`);
+                // Optionally execute the install command if permissions allow
+                // import { execSync } from 'child_process';
+                // execSync('npm install -g @anthropic-ai/claude-code', { stdio: 'inherit' });
+            } else {
+                console.log(chalk.green("You are using the latest version."));
+            }
         });
 
     await program.parseAsync(process.argv);
@@ -118,7 +153,7 @@ async function runPrintMode(prompt: string, options: any) {
     terminalLog(`Running in print mode with prompt: ${prompt || "standard input"}`);
 
     const generator = ConversationService.startConversation(prompt, {
-        commands: [],
+        commands: commandRegistry.getAllCommands(),
         tools: [],
         mcpClients: [],
         cwd: process.cwd(),
@@ -128,7 +163,16 @@ async function runPrintMode(prompt: string, options: any) {
 
     for await (const chunk of generator) {
         if (chunk.type === "assistant") {
-            process.stdout.write(chunk.message.content);
+            const content = chunk.message.content;
+            if (Array.isArray(content)) {
+                const text = content
+                    .filter((b: any) => b.type === 'text')
+                    .map((b: any) => b.text)
+                    .join('');
+                process.stdout.write(text);
+            } else {
+                process.stdout.write(content);
+            }
         } else if (chunk.type === "result") {
             console.log(chalk.green(`\n\nSession completed in ${chunk.num_turns} turns.`));
         }
@@ -144,7 +188,7 @@ import { REPL } from "../components/terminal/REPL.js";
  * Interactive REPL mode.
  * Uses REPL.tsx components via Ink render.
  */
-async function runInteractiveMode(options: any) {
+async function runInteractiveMode(options: any, isFirstRun: boolean = false) {
     terminalLog("Entering interactive mode...");
 
     const { unmount } = render(
@@ -153,6 +197,7 @@ async function runInteractiveMode(options: any) {
             verbose={options.verbose}
             model={options.model}
             agent={options.agent}
+            isFirstRun={isFirstRun}
         />
     );
 

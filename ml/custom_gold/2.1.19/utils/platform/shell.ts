@@ -121,3 +121,12 @@ export async function createShellConfigSnapshot(shellPath: string): Promise<stri
     fs.writeFileSync(snapshotPath, content, { encoding: "utf8", mode: 0o600 });
     return snapshotPath;
 }
+export function getGitBashPath(): string | null {
+    if (process.platform !== "win32") return null;
+    const commonPaths = [
+        "C:\\Program Files\\Git\\bin\\bash.exe",
+        "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+        join(os.homedir(), "AppData\\Local\\Programs\\Git\\bin\\bash.exe")
+    ];
+    return commonPaths.find(p => fs.existsSync(p)) || null;
+}

@@ -7,7 +7,9 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { createHash } from "node:crypto";
 
-const FIXTURES_ROOT = process.env.CLAUDE_CODE_TEST_FIXTURES_ROOT || join(process.cwd(), "tests", "fixtures");
+import { EnvService } from "../../services/config/EnvService.js";
+
+const FIXTURES_ROOT = EnvService.get("CLAUDE_CODE_TEST_FIXTURES_ROOT");
 
 /**
  * Generates a stable key for an input object.
@@ -21,7 +23,7 @@ export function generateFixtureKey(input: any): string {
  * Wraps an operation with fixture support.
  */
 export async function withFixtures<T>(key: string, operation: () => Promise<T>): Promise<T> {
-    if (!process.env.CLAUDE_CODE_USE_FIXTURES) {
+    if (!EnvService.isTruthy("CLAUDE_CODE_USE_FIXTURES")) {
         return operation();
     }
 

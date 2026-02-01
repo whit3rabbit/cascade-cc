@@ -1,39 +1,23 @@
-/**
- * File: src/utils/text/MarkdownRenderer.ts
- * Role: Custom Markdown renderer based on the original 2.1.19 chunk620 logic.
- * Adapts 'marked' to work with Ink components.
- */
-
 import { Lexer } from 'marked';
 import { highlight } from 'cli-highlight';
 import chalk from 'chalk';
 
-// Types for our custom renderer
 interface RenderOptions {
     width?: number;
     showLineNumbers?: boolean;
 }
 
-/**
- * Custom renderer class that mimics the structure seen in chunk620.
- * It primarily handles code blocks with highlighting and text formatting.
- */
 export class TerminalMarkdownRenderer {
-    constructor(private options: RenderOptions = {}) { }
+    private lexer: Lexer;
 
-    /**
-     * Renders markdown content to a string format suitable for Ink Text/Box components.
-     * Note: Ink doesn't use HTML, so we parse tokens and return a structure
-     * that MessageRenderer can use to create component trees.
-     */
-    public parse(content: string): ReturnType<Lexer['lex']> {
-        const lexer = new Lexer();
-        return lexer.lex(content);
+    constructor(private options: RenderOptions = {}) {
+        this.lexer = new Lexer();
     }
 
-    /**
-     * Highlights code blocks using cli-highlight (as seen in the deobfuscated code's dependencies).
-     */
+    public parse(content: string): any[] {
+        return this.lexer.lex(content);
+    }
+
     public highlightCode(code: string, lang: string): string {
         try {
             return highlight(code, {
@@ -46,15 +30,47 @@ export class TerminalMarkdownRenderer {
     }
 
     /**
-     * Formats inline styles (bold, italic, code) using chalk.
+     * More robust inline formatter using 'marked' to correctly handle nested styles.
      */
     public formatInline(text: string): string {
-        // Simple regex-based formatter for demonstration
-        // iterating on tokens would be more robust but this covers 90%
-        return text
-            .replace(/\*\*(.*?)\*\*/g, (_, p1) => chalk.bold(p1))
-            .replace(/\*(.*?)\*/g, (_, p1) => chalk.italic(p1))
-            .replace(/`([^`]+)`/g, (_, p1) => chalk.cyan(p1));
+        const tokens = this.lexer.inlineTokens(text);
+        return this.renderInlineTokens(tokens);
+    }
+
+    private renderInlineTokens(tokens: any[]): string {
+        return tokens.map(token => {
+            switch (token.type) {
+                case 'strong':
+                    return chalk.bold(this.renderInlineTokens(token.tokens || []));
+                case 'em':
+                    return chalk.italic(this.renderInlineTokens(token.tokens || []));
+                case 'codespan':
+                    return chalk.cyan(token.text);
+                case 'link':
+                    return chalk.blue.underline(token.text);
+                case 'text':
+                    return token.text;
+                case 'escape':
+                    return token.text;
+                case 'br':
+                    return '\n';
+                default:
+                    return token.text || '';
+            }
+        }).join('');
+    }
+
+    /**
+     * Helper to render lists and other block elements as strings if needed.
+     */
+    public renderBlockAsString(token: any): string {
+        if (token.type === 'list') {
+            return token.items.map((item: any, i: number) => {
+                const bullet = token.ordered ? `${i + 1}. ` : '• ';
+                return `${bullet}${this.formatInline(item.text)}`;
+            }).join('\n');
+        }
+        return token.text || '';
     }
 }
 

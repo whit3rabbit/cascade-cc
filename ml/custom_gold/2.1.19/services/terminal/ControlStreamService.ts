@@ -18,6 +18,7 @@ import {
     ToolPermissionResponseSchema as uv1,
     HookCallbackSchema as PV1
 } from "./schemas.js";
+import { EnvService } from '../config/EnvService.js';
 
 interface PendingRequest {
     request: any;
@@ -121,9 +122,10 @@ export class ControlStreamService {
             switch (message.type) {
                 case "keep_alive":
                     return;
+
                 case "update_environment_variables":
                     for (const [key, value] of Object.entries(message.variables as Record<string, string>)) {
-                        process.env[key] = value;
+                        EnvService.set(key, value);
                     }
                     return;
                 case "control_response":
@@ -263,7 +265,6 @@ export class ControlStreamService {
             }
 
             try {
-                preCheck?.();
                 const response = await this.sendRequest(
                     {
                         subtype: "can_use_tool",
@@ -271,7 +272,7 @@ export class ControlStreamService {
                         input: input,
                         permission_suggestions: permissionResult.suggestions,
                         blocked_path: permissionResult.blockedPath,
-                        decision_reason: formatDecisionReasonAlias((permissionResult as any).decisionReason) || "Tool use request",
+                        decision_reason: formatDecisionReasonAlias(permissionResult.decisionReason) || "Tool use request",
                         toolUseId: rest.find(item => typeof item === 'string'),
                         agent_id: agentId,
                     },

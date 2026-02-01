@@ -119,6 +119,8 @@ export function getProcessMetrics(): any {
     return undefined;
 }
 
+import { EnvService } from '../../services/config/EnvService.js';
+
 /**
  * Gathers the full telemetry context.
  */
@@ -133,13 +135,13 @@ export async function getTelemetryContext(options: { model?: string } = {}): Pro
         userType: "external",
         ...(betas.length > 0 ? { betas: betas.join(",") } : {}),
         envContext: coreEnvContext,
-        ...(process.env.CLAUDE_CODE_ENTRYPOINT && { entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT }),
-        ...(process.env.CLAUDE_AGENT_SDK_VERSION && { agentSdkVersion: process.env.CLAUDE_AGENT_SDK_VERSION }),
-        isInteractive: String(toBoolean(process.env.CLAUDE_CODE_INTERACTIVE)),
+        ...(EnvService.get("CLAUDE_CODE_ENTRYPOINT") && { entrypoint: EnvService.get("CLAUDE_CODE_ENTRYPOINT") }),
+        ...(EnvService.get("CLAUDE_AGENT_SDK_VERSION") && { agentSdkVersion: EnvService.get("CLAUDE_AGENT_SDK_VERSION") }),
+        isInteractive: String(EnvService.isTruthy("CLAUDE_CODE_INTERACTIVE")),
         clientType: getClaudeCodeClientType(),
-        sweBenchRunId: process.env.SWE_BENCH_RUN_ID || "",
-        sweBenchInstanceId: process.env.SWE_BENCH_INSTANCE_ID || "",
-        sweBenchTaskId: process.env.SWE_BENCH_TASK_ID || "",
+        sweBenchRunId: EnvService.get("SWE_BENCH_RUN_ID") || "",
+        sweBenchInstanceId: EnvService.get("SWE_BENCH_INSTANCE_ID") || "",
+        sweBenchTaskId: EnvService.get("SWE_BENCH_TASK_ID") || "",
         ...getAgentContext(),
     };
 }

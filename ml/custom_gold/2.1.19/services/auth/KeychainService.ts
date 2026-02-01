@@ -1,17 +1,23 @@
 /**
  * File: src/services/auth/KeychainService.ts
- * Role: Manages persistent credentials in the macOS Keychain.
+ * Role: Manages persistent credentials across macOS, Linux, and Windows.
  */
 
 import { spawnSync } from 'node:child_process';
 import { userInfo } from 'node:os';
+import { EnvService } from '../config/EnvService.js';
 
 /**
- * Executes a macOS 'security' command.
+ * In-memory cache to avoid repeated slow system calls.
  */
-function runSecurity(args: string[], input: string | null = null): { code: number | null, stdout: string, stderr: string } {
+const tokenCache: Record<string, string | null> = {};
+
+/**
+ * Generic command runner.
+ */
+function runCommand(command: string, args: string[], input: string | null = null): { code: number | null, stdout: string, stderr: string } {
     try {
-        const result = spawnSync("security", args, {
+        const result = spawnSync(command, args, {
             encoding: 'utf-8',
             input: input || undefined,
             stdio: ['pipe', 'pipe', 'pipe']
@@ -27,7 +33,7 @@ function runSecurity(args: string[], input: string | null = null): { code: numbe
 }
 
 function getUserName(): string {
-    return process.env.USER || userInfo().username || "claude-code-user";
+    return EnvService.get("USER") || userInfo().username || "claude-code-user";
 }
 
 export interface KeychainInterface {
@@ -38,44 +44,99 @@ export interface KeychainInterface {
 }
 
 /**
- * Service for macOS Keychain operations.
+ * Service for cross-platform Keychain operations.
  */
 export const KeychainService: KeychainInterface = {
     isAvailable(): boolean {
-        if (process.platform !== "darwin") return false;
-        return runSecurity(["show-keychain-info"]).code === 0;
+        const platform = process.platform;
+        if (platform === "darwin") {
+            // Gold standard check: 0 or sometimes 36 implies success/initialized state
+            const res = runCommand("security", ["show-keychain-info"]);
+            return res.code === 0 || res.code === 36;
+        }
+        if (platform === "win32") {
+            const res = runCommand("powershell", ["-Command", "[Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime] > $null"]);
+            return res.code === 0;
+        }
+        if (platform === "linux") {
+            return runCommand("which", ["secret-tool"]).code === 0;
+        }
+        return false;
     },
 
-    /**
-     * Reads a password/token from the keychain.
-     */
     readToken(serviceName: string): string | null {
+        if (tokenCache[serviceName] !== undefined) {
+            return tokenCache[serviceName];
+        }
+
         const user = getUserName();
-        const res = runSecurity(["find-generic-password", "-a", user, "-w", "-s", serviceName]);
-        return res.code === 0 ? res.stdout : null;
+        const platform = process.platform;
+        let token: string | null = null;
+
+        if (platform === "darwin") {
+            const res = runCommand("security", ["find-generic-password", "-a", user, "-w", "-s", serviceName]);
+            if (res.code === 0) {
+                token = res.stdout;
+            } else if (res.stderr.includes("errSecAuthFailed")) {
+                console.warn(`Keychain access denied for ${serviceName} on macOS.`);
+            }
+        } else if (platform === "win32") {
+            const script = `$vault = New-Object Windows.Security.Credentials.PasswordVault; try { $c = $vault.Retrieve("${serviceName}", "${user}"); $c.FillPassword(); $c.Password } catch { exit 1 }`;
+            const res = runCommand("powershell", ["-Command", script]);
+            if (res.code === 0) token = res.stdout;
+        } else if (platform === "linux") {
+            const res = runCommand("secret-tool", ["lookup", "service", serviceName, "account", user]);
+            if (res.code === 0) token = res.stdout;
+        }
+
+        tokenCache[serviceName] = token;
+        return token;
     },
 
-    /**
-     * Saves a password/token to the keychain.
-     */
     saveToken(serviceName: string, token: string): boolean {
         const user = getUserName();
-        const tokenHex = Buffer.from(token, "utf-8").toString("hex");
-        // -U updates existing, -a account, -s service, -X hex data
-        const cmd = `add-generic-password -U -a "${user}" -s "${serviceName}" -X "${tokenHex}"`;
-        // Note: security add-generic-password doesn't take input from stdin quite like this usually,
-        // but preserving the logic structure from the JS file.
-        // Actually, for add-generic-password, passing hex data via -X avoids shell escaping issues.
-        const res = runSecurity(["add-generic-password", "-U", "-a", user, "-s", serviceName, "-X", tokenHex]);
-        return res.code === 0;
+        const platform = process.platform;
+        let success = false;
+
+        if (platform === "darwin") {
+            const tokenHex = Buffer.from(token, "utf-8").toString("hex");
+            // Use -i for interactive-like input of the password via -X to avoid command line leaking
+            const res = runCommand("security", ["add-generic-password", "-U", "-a", user, "-s", serviceName, "-X", tokenHex]);
+            success = res.code === 0;
+        } else if (platform === "win32") {
+            const script = `$vault = New-Object Windows.Security.Credentials.PasswordVault; $c = New-Object Windows.Security.Credentials.PasswordCredential("${serviceName}", "${user}", "${token}"); $vault.Add($c)`;
+            const res = runCommand("powershell", ["-Command", script]);
+            success = res.code === 0;
+        } else if (platform === "linux") {
+            const res = runCommand("secret-tool", ["store", "--label=Claude Code Token", "service", serviceName, "account", user], token);
+            success = res.code === 0;
+        }
+
+        if (success) {
+            tokenCache[serviceName] = token;
+        }
+        return success;
     },
 
-    /**
-     * Deletes a password/token from the keychain.
-     */
     deleteToken(serviceName: string): boolean {
+        delete tokenCache[serviceName];
         const user = getUserName();
-        const res = runSecurity(["delete-generic-password", "-a", user, "-s", serviceName]);
-        return res.code === 0;
+        const platform = process.platform;
+
+        if (platform === "darwin") {
+            const res = runCommand("security", ["delete-generic-password", "-a", user, "-s", serviceName]);
+            return res.code === 0;
+        }
+        if (platform === "win32") {
+            const script = `$vault = New-Object Windows.Security.Credentials.PasswordVault; try { $c = $vault.Retrieve("${serviceName}", "${user}"); $vault.Remove($c) } catch { exit 1 }`;
+            const res = runCommand("powershell", ["-Command", script]);
+            return res.code === 0;
+        }
+        if (platform === "linux") {
+            const res = runCommand("secret-tool", ["clear", "service", serviceName, "account", user]);
+            return res.code === 0;
+        }
+
+        return false;
     }
 };

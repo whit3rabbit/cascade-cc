@@ -27,6 +27,8 @@ const IDE_TO_DIR_NAME: Record<string, string[]> = {
     androidstudio: ["AndroidStudio"]
 };
 
+import { EnvService } from '../config/EnvService.js';
+
 /**
  * Finds potential installation paths for an IDE based on the platform.
  */
@@ -37,8 +39,8 @@ export function findIdeInstallationPaths(ideName: string): string[] {
 
     if (!directoryNames) return installPaths;
 
-    const appData = process.env.APPDATA || path.join(homeDir, "AppData", "Roaming");
-    const localAppData = process.env.LOCALAPPDATA || path.join(homeDir, "AppData", "Local");
+    const appData = EnvService.get("APPDATA") || path.join(homeDir, "AppData", "Roaming");
+    const localAppData = EnvService.get("LOCALAPPDATA") || path.join(homeDir, "AppData", "Local");
 
     switch (os.platform()) {
         case "darwin":
