@@ -29,7 +29,7 @@ const detectLatestVersion = () => {
       if (d === 'bootstrap' || d === 'sweeps') return false;
       const fullPath = path.join(baseDir, d);
       if (!fs.statSync(fullPath).isDirectory()) return false;
-      return /^\\d+\\.\\d+\\.\\d+/.test(d) || d.startsWith('custom-');
+      return /^\d+\.\d+\.\d+/.test(d) || d.startsWith('custom-');
     })
     .sort()
     .reverse();

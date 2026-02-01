@@ -341,6 +341,8 @@ switch (command) {
         if (process.env.CI === 'true' && !bootstrapArgs.includes('--yes')) {
             bootstrapArgs.push('--yes');
         }
+        spawnSync('node', ['src/ingest_custom_gold.js'], { stdio: 'inherit' });
+        spawnSync('node', ['src/bootstrap_custom_gold.js', ...bootstrapArgs], { stdio: 'inherit' });
         spawnSync('node', ['src/bootstrap_libs.js', ...bootstrapArgs], { stdio: 'inherit' });
 
         console.log(`[*] Vectorizing Bootstrap Data...`);

@@ -543,6 +543,20 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
             val_indices = rng.sample(range(val_size), val_max_chunks)
             val_dataset = Subset(val_dataset, val_indices)
 
+    # Guard against empty training set (e.g., when leave-library-out selects all libs).
+    if len(train_dataset) == 0:
+        print("[!] Warning: Training set is empty after validation selection; falling back to 80/20 split.")
+        full_dataset = TripletDataset(patterns, max_nodes=effective_max_nodes)
+        train_size = int(0.8 * len(full_dataset))
+        val_size = len(full_dataset) - train_size
+        train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
+        val_libraries = []
+        val_is_split = True
+        if val_max_chunks and val_size > val_max_chunks:
+            rng = random.Random(42)
+            val_indices = rng.sample(range(val_size), val_max_chunks)
+            val_dataset = Subset(val_dataset, val_indices)
+
     use_cuda = device.type == 'cuda'
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=use_cuda)
     # Shuffle val batches when masking same-library to ensure cross-lib negatives exist.
