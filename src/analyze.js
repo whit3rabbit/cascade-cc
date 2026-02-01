@@ -15,8 +15,8 @@ const https = require('https');
 const crypto = require('crypto');
 
 // Utility for inspecting AST nodes programmatically
-const inspectNode = (node, depth = 0, maxDepth = 5, filePath = path.join(process.env.GEMINI_TEMP_DIR, 'ast_inspection_log.jsonl')) => {
-    if (!node || depth > maxDepth) return;
+const inspectNode = (node, depth = 0, maxDepth = 5, filePath = null) => {
+    if (!node || depth > maxDepth || !filePath) return;
 
     const relevantProps = {};
     if (node.type) relevantProps.type = node.type;
@@ -79,6 +79,7 @@ const LOW_SIGNAL_KB_KEYWORDS = new Set([
 const KB_LOW_WEIGHT_MULTIPLIER = parseFloat(process.env.KB_LOW_WEIGHT_MULTIPLIER) || 0.1;
 
 const JS_EXTENSIONS = new Set(['.js', '.mjs']);
+const ENABLE_AST_INSPECTION = process.argv.includes('--ast-inspection') || process.env.AST_INSPECTION === '1';
 const getFileExtension = filePath => path.extname(filePath || '').toLowerCase();
 const isJsFile = filePath => JS_EXTENSIONS.has(getFileExtension(filePath));
 const getPythonBin = () => {
@@ -88,6 +89,21 @@ const getPythonBin = () => {
 
 const getBinaryCliPath = version => path.join(ANALYSIS_DIR, version, 'binary', 'cli.js');
 const getBinaryPath = version => path.join(ANALYSIS_DIR, version, 'binary', process.platform === 'win32' ? 'claude.exe' : 'claude');
+
+const readArgValue = (flag) => {
+    const direct = process.argv.find(arg => arg.startsWith(`${flag}=`));
+    if (direct) return direct.split('=').slice(1).join('=');
+    const idx = process.argv.indexOf(flag);
+    if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
+    return null;
+};
+
+const resolveGeminiTempDir = () => {
+    const cliValue = readArgValue('--gemini-temp-dir');
+    const envValue = process.env.GEMINI_TEMP_DIR;
+    const baseDir = cliValue || envValue || '/tmp/gemini';
+    return baseDir;
+};
 
 const parseSemver = version => {
     const match = typeof version === 'string'
@@ -1617,12 +1633,23 @@ async function run() {
     });
 
     // Determine tempDir
-    const tempDir = process.env.GEMINI_TEMP_DIR || '/Users/whit3rabbit/.gemini/tmp/00150962b70d3731010c9badd4003d7d7023e6e06d18dde520c44bbc52c5c1d0'; // Fallback to hardcoded path
+    if (ENABLE_AST_INSPECTION) {
+        let tempDir = resolveGeminiTempDir();
+        try {
+            fs.mkdirSync(tempDir, { recursive: true });
+            process.env.GEMINI_TEMP_DIR = tempDir;
+        } catch (err) {
+            console.warn(`[!] Failed to create GEMINI temp dir (${tempDir}): ${err.message}`);
+            tempDir = os.tmpdir();
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
 
-    // Write AST inspection log
-    fs.writeFileSync(path.join(tempDir, 'ast_inspection_log.jsonl'), '');
-    inspectNode(ast, 0, 5, path.join(tempDir, 'ast_inspection_log.jsonl'));
-    console.log(`[*] AST inspection log written to ${path.join(tempDir, 'ast_inspection_log.jsonl')}`);
+        // Write AST inspection log
+        const astLogPath = path.join(tempDir, 'ast_inspection_log.jsonl');
+        fs.writeFileSync(astLogPath, '');
+        inspectNode(ast, 0, 5, astLogPath);
+        console.log(`[*] AST inspection log written to ${astLogPath}`);
+    }
 
     const graph = new CascadeGraph();
 

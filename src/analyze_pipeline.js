@@ -1,6 +1,7 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const args = process.argv.slice(2);
 const baseDir = './cascade_graph_analysis';
@@ -48,7 +49,7 @@ const runStep = (script, stepArgs) => {
 const { targetVersion: initialTarget, referenceVersion } = parseArgs(args);
 
 // Ensure GEMINI_TEMP_DIR is passed down as a command-line argument for analyze.js
-const geminiTempDir = process.env.GEMINI_TEMP_DIR || '/Users/whit3rabbit/.gemini/tmp/00150962b70d3731010c9badd4003d7d7023e6e06d18dde520c44bbc52c5c1d0'; // Fallback for testing
+const geminiTempDir = process.env.GEMINI_TEMP_DIR || '/tmp/gemini';
 runStep('src/analyze.js', [...args, `--gemini-temp-dir=${geminiTempDir}`]);
 
 let resolvedTarget = initialTarget;

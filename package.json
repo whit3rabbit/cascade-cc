@@ -18,6 +18,7 @@
     "ingest-custom": "node src/ingest_custom_gold.js",
     "bootstrap": "node src/ingest_custom_gold.js && node src/bootstrap_custom_gold.js && node --max-old-space-size=8192 src/bootstrap_libs.js",
     "generate-kb": "node scripts/generate_kb_from_gold.js",
+    "verify-versions": "node scripts/verify_version_detection.js",
     "sync-vocab": "node src/sync_vocab.js",
     "refine": "node run refine",
     "full": "node run full",
