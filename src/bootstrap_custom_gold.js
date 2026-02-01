@@ -210,9 +210,13 @@ const mirrorSources = (rootDir, workDir, files) => {
         };
 
         let match;
+        importRe.lastIndex = 0;
         while ((match = importRe.exec(contents)) !== null) collectReplacement(match[3]);
+        sideEffectRe.lastIndex = 0;
         while ((match = sideEffectRe.exec(contents)) !== null) collectReplacement(match[2]);
+        requireRe.lastIndex = 0;
         while ((match = requireRe.exec(contents)) !== null) collectReplacement(match[2]);
+        dynamicImportRe.lastIndex = 0;
         while ((match = dynamicImportRe.exec(contents)) !== null) collectReplacement(match[2]);
 
         if (replacements.size) {
@@ -223,15 +227,19 @@ const mirrorSources = (rootDir, workDir, files) => {
         }
 
         const requests = [];
+        importRe.lastIndex = 0;
         while ((match = importRe.exec(contents)) !== null) {
             requests.push({ spec: match[3], clause: match[1] });
         }
+        sideEffectRe.lastIndex = 0;
         while ((match = sideEffectRe.exec(contents)) !== null) {
             requests.push({ spec: match[2], clause: '' });
         }
+        requireRe.lastIndex = 0;
         while ((match = requireRe.exec(contents)) !== null) {
             requests.push({ spec: match[2], clause: '' });
         }
+        dynamicImportRe.lastIndex = 0;
         while ((match = dynamicImportRe.exec(contents)) !== null) {
             requests.push({ spec: match[2], clause: '' });
         }
@@ -338,6 +346,9 @@ const bootstrapCustomGold = () => {
             }
 
             const workDir = path.join(BOOTSTRAP_DIR, '_custom_gold_work', safeName);
+            if (fs.existsSync(workDir)) {
+                fs.rmSync(workDir, { recursive: true, force: true });
+            }
             fs.mkdirSync(workDir, { recursive: true });
 
             console.log(`\n[CUSTOM_GOLD ${root.version || 'root'} | ${bundler}]`);
