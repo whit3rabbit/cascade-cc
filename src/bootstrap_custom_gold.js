@@ -58,7 +58,12 @@ const walkFiles = (dir, out) => {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
             if (!SKIP_DIRS.has(entry.name)) walkFiles(fullPath, out);
-        } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.js')) {
+        } else if (
+            entry.name.endsWith('.ts') ||
+            entry.name.endsWith('.tsx') ||
+            entry.name.endsWith('.js') ||
+            entry.name.endsWith('.jsx')
+        ) {
             out.push(fullPath);
         }
     }
@@ -113,8 +118,56 @@ const DEFAULT_EXTERNALS = [
     'fflate',
     'js-yaml',
     'turndown',
-    'ws'
+    'ws',
+    'cli-table3',
+    'figures',
+    'ink-link',
+    'highlight.js'
 ];
+
+const mirrorSources = (rootDir, workDir, files) => {
+    const shadowRoot = path.join(workDir, 'shadow');
+    const copied = new Map();
+
+    for (const file of files) {
+        const rel = path.relative(rootDir, file);
+        const dest = path.join(shadowRoot, rel);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.copyFileSync(file, dest);
+        copied.set(file, dest);
+    }
+
+    const stubbed = new Set();
+    const importRe = /(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)(['"])(\.[^'"]+)\1/g;
+    const exts = ['.ts', '.tsx', '.jsx'];
+
+    for (const [, shadowPath] of copied) {
+        const contents = fs.readFileSync(shadowPath, 'utf8');
+        let match;
+        while ((match = importRe.exec(contents)) !== null) {
+            const spec = match[2];
+            if (!spec.endsWith('.js') && !spec.endsWith('.mjs')) continue;
+            const resolved = path.resolve(path.dirname(shadowPath), spec);
+            if (fs.existsSync(resolved)) continue;
+
+            const base = resolved.replace(/\.m?js$/, '');
+            const target = exts.map(ext => `${base}${ext}`).find(p => fs.existsSync(p));
+            if (!target) continue;
+
+            if (stubbed.has(resolved)) continue;
+            fs.mkdirSync(path.dirname(resolved), { recursive: true });
+            const relTarget = `./${path.relative(path.dirname(resolved), target).replace(/\\/g, '/')}`;
+            const stub = [
+                `export * from ${JSON.stringify(relTarget)};`,
+                `export { default } from ${JSON.stringify(relTarget)};`
+            ].join('\n');
+            fs.writeFileSync(resolved, stub);
+            stubbed.add(resolved);
+        }
+    }
+
+    return { shadowRoot, copied };
+};
 
 const buildExternalFlags = (bundler) => {
     const raw = process.env.CUSTOM_GOLD_EXTERNALS;
@@ -176,7 +229,9 @@ const bootstrapCustomGold = () => {
 
             console.log(`\n[CUSTOM_GOLD ${root.version || 'root'} | ${bundler}]`);
 
-            const entryFile = writeEntryFile(workDir, files);
+            const { shadowRoot, copied } = mirrorSources(root.dir, workDir, files);
+            const shadowFiles = Array.from(copied.values());
+            const entryFile = writeEntryFile(workDir, shadowFiles);
             const bundlePath = path.join(workDir, 'bundled.js');
             const externalFlags = buildExternalFlags(bundler);
 
@@ -187,7 +242,7 @@ const bootstrapCustomGold = () => {
                     execSync(bunCmd, { stdio: 'inherit' });
                 } else {
                     console.log(`  [+] Bundling with esbuild...`);
-                    const esbuildCmd = `npx -y esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --outfile="${bundlePath}" ${externalFlags}`;
+                    const esbuildCmd = `npx -y esbuild "${entryFile}" --bundle --minify-whitespace --minify-syntax --platform=node --format=esm --target=node18 --log-override:import-is-not-an-export=warning --outfile="${bundlePath}" ${externalFlags}`;
                     execSync(esbuildCmd, { stdio: 'inherit' });
                 }
 
