@@ -190,45 +190,6 @@ switch (command) {
             if (result.status !== 0) {
                 process.exit(result.status);
             }
-    
-            const extractTargetVersion = (argv) => {
-                const versionIdx = argv.indexOf('--version');
-                const nonFlagArgs = [];
-                for (let i = 0; i < argv.length; i++) {
-                    const arg = argv[i];
-                    if (arg === '--version') {
-                        i += 1;
-                        continue;
-                    }
-                    if (arg.startsWith('--')) continue;
-                    nonFlagArgs.push(arg);
-                }
-                return versionIdx !== -1 ? argv[versionIdx + 1] : nonFlagArgs[0];
-            };
-    
-            const targetVersion = extractTargetVersion(args);
-            if (!targetVersion) {
-                console.warn('[!] No target version detected for propagate-names; skipping.');
-                process.exit(0);
-            }
-    
-            const classifyResult = spawnSync('node', ['src/classify_logic.js', targetVersion], {
-                stdio: 'inherit',
-                shell: true,
-                env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
-            });
-    
-            if (classifyResult.status !== 0) {
-                process.exit(classifyResult.status);
-            }
-    
-            const propagateResult = spawnSync('node', ['src/propagate_names.js', targetVersion], {
-                stdio: 'inherit',
-                shell: true,
-                env: { ...process.env, PYTHON_BIN: PYTHON_BIN, GEMINI_TEMP_DIR: process.env.GEMINI_TEMP_DIR }
-            });
-    
-            process.exit(propagateResult.status);
             break;
         }
 
@@ -346,7 +307,7 @@ switch (command) {
         };
 
         let resolvedVersion = targetVersion || null;
-        const analysisArgs = ['--max-old-space-size=8192', 'src/analyze.js'];
+        const analysisArgs = ['--max-old-space-size=8192', 'src/analyze_pipeline.js'];
         if (resolvedVersion) analysisArgs.push('--version', resolvedVersion);
         runStep('analyze', 'node', analysisArgs);
 
@@ -359,9 +320,6 @@ switch (command) {
             console.log(`[*] No version specified. Using latest: ${resolvedVersion}`);
         }
 
-        runStep('anchor', 'node', ['--max-old-space-size=8192', 'src/anchor_logic.js', resolvedVersion, ...(referenceVersion ? [referenceVersion] : [])]);
-        runStep('classify', 'node', ['src/classify_logic.js', resolvedVersion]);
-        runStep('propagate-names', 'node', ['src/propagate_names.js', resolvedVersion]);
         const deobfuscateArgs = ['--max-old-space-size=8192', 'src/deobfuscate_pipeline.js', resolvedVersion];
         if (!args.includes('--skip-vendor')) {
             deobfuscateArgs.push('--skip-vendor');

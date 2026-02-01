@@ -62,4 +62,5 @@ if (!resolvedTarget) {
 
 runStep('src/anchor_logic.js', [resolvedTarget, ...(referenceVersion ? [referenceVersion] : [])]);
 runStep('src/classify_logic.js', [resolvedTarget]);
+runStep('src/propagate_names.js', [resolvedTarget]);
 runStep('src/rename_chunks.js', [resolvedTarget]);

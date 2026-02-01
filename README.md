@@ -68,13 +68,15 @@ Breakdown of the full pipeline:
 Once initialized, use this sequence to analyze any new version of Claude:
 
 ```bash
-# 1. Fetch the latest Claude bundle and chunk it
+# 1. Fetch the latest Claude bundle, chunk it, and run ML anchoring/classification/renaming
 npm run analyze
 #npm run analyze -- --version <version>
 
-# 2. Anchor, classify roles, and propagate name hints (Replace <version> with output from step 1)
-# anchor-classify now chains classify + propagate-names automatically
-npm run anchor-classify -- <version>
+# 2. (Optional) Run ML steps manually instead of analyze chaining
+#npm run anchor -- <version> [reference_version]
+#npm run classify -- <version>
+#npm run propagate-names -- <version>
+#node src/rename_chunks.js <version>
 
 # 3. (Optional) Iterative Discovery
 # Use the frontier crawler to find unanalyzed chunks connected to your code.
@@ -91,7 +93,7 @@ npm run refine -- <version>
 ```
 
 Notes:
-- `npm run anchor` now runs `classify` and `propagate-names` automatically.
+- `npm run analyze` chains ML anchoring, classification, name propagation, and renaming.
 
 ---
 
