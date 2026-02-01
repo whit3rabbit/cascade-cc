@@ -26,7 +26,7 @@ export async function getDetailedConfigStatus(): Promise<ConfigDetail[]> {
     if (oauthToken) {
         details.push({ label: "Login method", value: "OAuth (Browser)" });
     } else {
-        const apiKey = ApiKeyManager.getApiKey();
+        const apiKey = await ApiKeyManager.getApiKey();
         if (apiKey) {
             details.push({ label: "Login method", value: "API Key (Manual)" });
         }

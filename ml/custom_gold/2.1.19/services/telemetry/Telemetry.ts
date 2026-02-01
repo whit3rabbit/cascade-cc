@@ -102,6 +102,24 @@ export function track(eventName: string, properties: Record<string, any> = {}) {
     telemetryBuffer.push(event);
 }
 
+export class Telemetry {
+    private static instance: Telemetry | null = null;
+
+    static getInstance(): Telemetry {
+        if (!Telemetry.instance) {
+            Telemetry.instance = new Telemetry();
+        }
+        return Telemetry.instance;
+    }
+
+    add(durationSeconds: number, properties: Record<string, any> = {}): void {
+        track("tengu_wait_time", {
+            duration_seconds: durationSeconds,
+            ...properties
+        });
+    }
+}
+
 export function initializeTelemetry() {
     if (isInitialized) return;
     isInitialized = true;

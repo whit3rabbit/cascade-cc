@@ -51,13 +51,10 @@ export class CliActivityTracker {
         if (!this.isCLIActive && this.lastUserActivityTime !== 0) {
             const timeDiff = (Date.now() - this.lastUserActivityTime) / 1000;
             if (timeDiff > 0) {
-                const telemetry = Telemetry.getInstance(); // Assuming singleton accessor exists or similar
-                // Note: The original chunk calls Mk1() which likely returns a metrics collector or similar.
-                // We'll assume Telemetry has something similar or just log it for now if method doesn't exist
-                // logic from chunk: q.add(K, { type: "user" });
-
-                // Placeholder for actual telemetry call if needed
-                // telemetry.recordWaitTime(timeDiff, "user");
+                const telemetry = Telemetry.getInstance();
+                if (timeDiff < this.USER_ACTIVITY_TIMEOUT_MS / 1000) {
+                    telemetry.add(timeDiff, { type: "user" });
+                }
             }
         }
         this.lastUserActivityTime = Date.now();
@@ -81,8 +78,8 @@ export class CliActivityTracker {
             const now = Date.now();
             const timeDiff = (now - this.lastCLIRecordedTime) / 1000;
             if (timeDiff > 0) {
-                // const telemetry = Telemetry.getInstance();
-                // telemetry.recordWaitTime(timeDiff, "cli");
+                const telemetry = Telemetry.getInstance();
+                telemetry.add(timeDiff, { type: "cli" });
             }
             this.lastCLIRecordedTime = now;
             this.isCLIActive = false;

@@ -177,6 +177,8 @@ const parseDestructuredImportNames = (contents) => {
 const mirrorSources = (rootDir, workDir, files) => {
     const shadowRoot = path.join(workDir, 'shadow');
     const copied = new Map();
+    const neededNamesBySpec = new Map();
+    const needsDefaultBySpec = new Set();
 
     for (const file of files) {
         const rel = path.relative(rootDir, file);
@@ -192,6 +194,32 @@ const mirrorSources = (rootDir, workDir, files) => {
     const requireRe = /require\s*\(\s*(['"])(\.[^'"]+\.m?js)\1\s*\)/g;
     const dynamicImportRe = /import\(\s*(['"])(\.[^'"]+\.m?js)\1\s*\)/g;
     const exts = ['.ts', '.tsx', '.jsx'];
+
+    const addNeededNames = (spec, names, hasDefault) => {
+        if (!spec) return;
+        if (hasDefault) needsDefaultBySpec.add(spec);
+        if (!names || !names.size) return;
+        const existing = neededNamesBySpec.get(spec) || new Set();
+        names.forEach(name => existing.add(name));
+        neededNamesBySpec.set(spec, existing);
+    };
+
+    const writeStub = (resolved, spec, names, includeDefault) => {
+        const lines = [];
+        if (includeDefault) {
+            lines.push('const __default = {};');
+            lines.push('export default __default;');
+        }
+        if (names && names.size) {
+            names.forEach(name => {
+                lines.push(`export const ${name} = {};`);
+            });
+        }
+        if (!lines.length) {
+            lines.push('export default {};');
+        }
+        fs.writeFileSync(resolved, lines.join('\n'));
+    };
 
     for (const [, shadowPath] of copied) {
         let contents = fs.readFileSync(shadowPath, 'utf8');
@@ -252,7 +280,6 @@ const mirrorSources = (rootDir, workDir, files) => {
             const base = resolved.replace(/\.m?js$/, '');
             const target = exts.map(ext => `${base}${ext}`).find(p => fs.existsSync(p));
 
-            if (stubbed.has(resolved)) continue;
             fs.mkdirSync(path.dirname(resolved), { recursive: true });
 
             if (target) {
@@ -271,18 +298,11 @@ const mirrorSources = (rootDir, workDir, files) => {
             if (dynamicNames) {
                 dynamicNames.forEach(name => names.add(name));
             }
-            const lines = [];
-            if (hasDefaultImport(req.clause)) {
-                lines.push('const __default = {};');
-                lines.push('export default __default;');
-            }
-            for (const name of names) {
-                lines.push(`export const ${name} = {};`);
-            }
-            if (!lines.length) {
-                lines.push('export default {};');
-            }
-            fs.writeFileSync(resolved, lines.join('\n'));
+
+            addNeededNames(spec, names, hasDefaultImport(req.clause));
+            const finalNames = neededNamesBySpec.get(spec) || new Set();
+            const includeDefault = needsDefaultBySpec.has(spec);
+            writeStub(resolved, spec, finalNames, includeDefault);
             stubbed.add(resolved);
         }
     }
