@@ -122,8 +122,37 @@ const DEFAULT_EXTERNALS = [
     'cli-table3',
     'figures',
     'ink-link',
-    'highlight.js'
+    'highlight.js',
+    '@commander-js/extra-typings',
+    'ansi-escapes',
+    'ink-spinner',
+    'ink-select-input',
+    'ink-text-input',
+    'fuse.js'
 ];
+
+const parseNamedExports = (importClause) => {
+    const names = new Set();
+    const braceMatch = importClause.match(/\{([^}]+)\}/);
+    if (braceMatch) {
+        braceMatch[1]
+            .split(',')
+            .map(part => part.trim())
+            .filter(Boolean)
+            .forEach(part => {
+                const [orig] = part.split(/\s+as\s+/i);
+                if (orig) names.add(orig.trim());
+            });
+    }
+    return names;
+};
+
+const hasDefaultImport = (importClause) => {
+    if (!importClause) return false;
+    if (importClause.trim().startsWith('{')) return false;
+    if (importClause.includes('* as')) return false;
+    return true;
+};
 
 const mirrorSources = (rootDir, workDir, files) => {
     const shadowRoot = path.join(workDir, 'shadow');
@@ -138,30 +167,60 @@ const mirrorSources = (rootDir, workDir, files) => {
     }
 
     const stubbed = new Set();
-    const importRe = /(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)(['"])(\.[^'"]+)\1/g;
+    const importRe = /import\s+([^'"]+)\s+from\s+(['"])(\.[^'"]+\.m?js)\2/g;
+    const sideEffectRe = /import\s+(['"])(\.[^'"]+\.m?js)\1/g;
+    const requireRe = /require\s*\(\s*(['"])(\.[^'"]+\.m?js)\1\s*\)/g;
     const exts = ['.ts', '.tsx', '.jsx'];
 
     for (const [, shadowPath] of copied) {
         const contents = fs.readFileSync(shadowPath, 'utf8');
         let match;
+        const requests = [];
         while ((match = importRe.exec(contents)) !== null) {
-            const spec = match[2];
-            if (!spec.endsWith('.js') && !spec.endsWith('.mjs')) continue;
+            requests.push({ spec: match[3], clause: match[1] });
+        }
+        while ((match = sideEffectRe.exec(contents)) !== null) {
+            requests.push({ spec: match[2], clause: '' });
+        }
+        while ((match = requireRe.exec(contents)) !== null) {
+            requests.push({ spec: match[2], clause: '' });
+        }
+
+        for (const req of requests) {
+            const spec = req.spec;
             const resolved = path.resolve(path.dirname(shadowPath), spec);
             if (fs.existsSync(resolved)) continue;
 
             const base = resolved.replace(/\.m?js$/, '');
             const target = exts.map(ext => `${base}${ext}`).find(p => fs.existsSync(p));
-            if (!target) continue;
 
             if (stubbed.has(resolved)) continue;
             fs.mkdirSync(path.dirname(resolved), { recursive: true });
-            const relTarget = `./${path.relative(path.dirname(resolved), target).replace(/\\/g, '/')}`;
-            const stub = [
-                `export * from ${JSON.stringify(relTarget)};`,
-                `export { default } from ${JSON.stringify(relTarget)};`
-            ].join('\n');
-            fs.writeFileSync(resolved, stub);
+
+            if (target) {
+                const relTarget = `./${path.relative(path.dirname(resolved), target).replace(/\\/g, '/')}`;
+                const stub = [
+                    `export * from ${JSON.stringify(relTarget)};`,
+                    `export { default } from ${JSON.stringify(relTarget)};`
+                ].join('\n');
+                fs.writeFileSync(resolved, stub);
+                stubbed.add(resolved);
+                continue;
+            }
+
+            const names = parseNamedExports(req.clause);
+            const lines = [];
+            if (hasDefaultImport(req.clause)) {
+                lines.push('const __default = {};');
+                lines.push('export default __default;');
+            }
+            for (const name of names) {
+                lines.push(`export const ${name} = {};`);
+            }
+            if (!lines.length) {
+                lines.push('export default {};');
+            }
+            fs.writeFileSync(resolved, lines.join('\n'));
             stubbed.add(resolved);
         }
     }
