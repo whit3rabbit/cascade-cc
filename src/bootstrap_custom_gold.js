@@ -64,10 +64,63 @@ const walkFiles = (dir, out) => {
     }
 };
 
+const DEFAULT_EXTERNALS = [
+    'react',
+    'react/jsx-runtime',
+    'react/jsx-dev-runtime',
+    'ink',
+    '@inkjs/ui',
+    'lodash-es',
+    'lodash',
+    'shell-quote',
+    'marked',
+    'cli-highlight',
+    'env-paths',
+    'diff',
+    'spawn-rx',
+    'glob',
+    'zod-to-json-schema',
+    '@sentry/node',
+    '@statsig/js-client',
+    '@anthropic-ai/sdk',
+    '@anthropic-ai/sdk/shims/node',
+    '@anthropic-ai/bedrock-sdk',
+    '@anthropic-ai/vertex-sdk',
+    '@modelcontextprotocol/sdk/client/index.js',
+    '@modelcontextprotocol/sdk/client/stdio.js',
+    '@modelcontextprotocol/sdk/client/sse.js',
+    '@modelcontextprotocol/sdk/client/websocket.js',
+    '@modelcontextprotocol/sdk/server/index.js',
+    '@modelcontextprotocol/sdk/server/stdio.js',
+    '@modelcontextprotocol/sdk/types.js',
+    'micromatch',
+    'gray-matter',
+    'axios',
+    'undici',
+    '@azure/msal-node',
+    'open',
+    'chokidar',
+    '@opentelemetry/api',
+    '@opentelemetry/resources',
+    '@opentelemetry/semantic-conventions',
+    '@opentelemetry/sdk-trace-node',
+    '@opentelemetry/sdk-metrics',
+    '@opentelemetry/sdk-logs',
+    '@opentelemetry/exporter-trace-otlp-http',
+    '@opentelemetry/exporter-metrics-otlp-http',
+    '@opentelemetry/exporter-logs-otlp-http',
+    'proper-lockfile',
+    'fflate',
+    'js-yaml',
+    'turndown',
+    'ws'
+];
+
 const buildExternalFlags = (bundler) => {
     const raw = process.env.CUSTOM_GOLD_EXTERNALS;
-    if (!raw) return '';
-    const externals = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    const externals = raw
+        ? raw.split(',').map((s) => s.trim()).filter(Boolean)
+        : DEFAULT_EXTERNALS;
     if (!externals.length) return '';
     if (bundler === 'bun') {
         return externals.map((ext) => `-e ${ext}`).join(' ');
