@@ -154,6 +154,26 @@ const hasDefaultImport = (importClause) => {
     return true;
 };
 
+const parseDestructuredImportNames = (contents) => {
+    const results = new Map();
+    const re = /const\s+\{([^}]+)\}\s*=\s*await\s+import\(\s*(['"])(\.[^'"]+\.m?js)\2\s*\)/g;
+    let match;
+    while ((match = re.exec(contents)) !== null) {
+        const spec = match[3];
+        const names = match[1]
+            .split(',')
+            .map(part => part.trim())
+            .filter(Boolean)
+            .map(part => part.split(/\s+as\s+/i)[0].trim());
+        if (!results.has(spec)) results.set(spec, new Set());
+        const set = results.get(spec);
+        names.forEach(name => {
+            if (name) set.add(name);
+        });
+    }
+    return results;
+};
+
 const mirrorSources = (rootDir, workDir, files) => {
     const shadowRoot = path.join(workDir, 'shadow');
     const copied = new Map();
@@ -170,11 +190,38 @@ const mirrorSources = (rootDir, workDir, files) => {
     const importRe = /import\s+([^'"]+)\s+from\s+(['"])(\.[^'"]+\.m?js)\2/g;
     const sideEffectRe = /import\s+(['"])(\.[^'"]+\.m?js)\1/g;
     const requireRe = /require\s*\(\s*(['"])(\.[^'"]+\.m?js)\1\s*\)/g;
+    const dynamicImportRe = /import\(\s*(['"])(\.[^'"]+\.m?js)\1\s*\)/g;
     const exts = ['.ts', '.tsx', '.jsx'];
 
     for (const [, shadowPath] of copied) {
-        const contents = fs.readFileSync(shadowPath, 'utf8');
+        let contents = fs.readFileSync(shadowPath, 'utf8');
+        const destructured = parseDestructuredImportNames(contents);
+        const replacements = new Map();
+
+        const collectReplacement = (spec) => {
+            if (!spec) return;
+            const resolved = path.resolve(path.dirname(shadowPath), spec);
+            const base = resolved.replace(/\.m?js$/, '');
+            const target = exts.map(ext => `${base}${ext}`).find(p => fs.existsSync(p));
+            if (target) {
+                const relTarget = `./${path.relative(path.dirname(shadowPath), target).replace(/\\/g, '/')}`;
+                replacements.set(spec, relTarget);
+            }
+        };
+
         let match;
+        while ((match = importRe.exec(contents)) !== null) collectReplacement(match[3]);
+        while ((match = sideEffectRe.exec(contents)) !== null) collectReplacement(match[2]);
+        while ((match = requireRe.exec(contents)) !== null) collectReplacement(match[2]);
+        while ((match = dynamicImportRe.exec(contents)) !== null) collectReplacement(match[2]);
+
+        if (replacements.size) {
+            for (const [spec, replacement] of replacements.entries()) {
+                contents = contents.split(spec).join(replacement);
+            }
+            fs.writeFileSync(shadowPath, contents);
+        }
+
         const requests = [];
         while ((match = importRe.exec(contents)) !== null) {
             requests.push({ spec: match[3], clause: match[1] });
@@ -183,6 +230,9 @@ const mirrorSources = (rootDir, workDir, files) => {
             requests.push({ spec: match[2], clause: '' });
         }
         while ((match = requireRe.exec(contents)) !== null) {
+            requests.push({ spec: match[2], clause: '' });
+        }
+        while ((match = dynamicImportRe.exec(contents)) !== null) {
             requests.push({ spec: match[2], clause: '' });
         }
 
@@ -201,7 +251,7 @@ const mirrorSources = (rootDir, workDir, files) => {
                 const relTarget = `./${path.relative(path.dirname(resolved), target).replace(/\\/g, '/')}`;
                 const stub = [
                     `export * from ${JSON.stringify(relTarget)};`,
-                    `export { default } from ${JSON.stringify(relTarget)};`
+                    'export default {};'
                 ].join('\n');
                 fs.writeFileSync(resolved, stub);
                 stubbed.add(resolved);
@@ -209,6 +259,10 @@ const mirrorSources = (rootDir, workDir, files) => {
             }
 
             const names = parseNamedExports(req.clause);
+            const dynamicNames = destructured.get(spec);
+            if (dynamicNames) {
+                dynamicNames.forEach(name => names.add(name));
+            }
             const lines = [];
             if (hasDefaultImport(req.clause)) {
                 lines.push('const __default = {};');
