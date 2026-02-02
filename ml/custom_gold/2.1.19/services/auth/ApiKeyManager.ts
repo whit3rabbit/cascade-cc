@@ -22,7 +22,7 @@ class ApiKeyManagerImpl {
      * Gets the current API key.
      * @returns {Promise<string | null>}
      */
-    async getApiKey(): Promise<string | null> {
+    async asyncGetApiKey(): Promise<string | null> {
         if (this.apiKey) return this.apiKey;
 
         const envKey = process.env.ANTHROPIC_API_KEY;
@@ -41,7 +41,32 @@ class ApiKeyManagerImpl {
             return await this.getApiKeyFromHelper(helperCommand);
         }
 
+        // Automatic Keychain check on macOS (aligning with 2.1.19 pUA)
+        if (process.platform === 'darwin') {
+            try {
+                const { KeychainService } = await import('./KeychainService.js');
+                const { getProductName } = await import('../../utils/shared/product.js');
+
+                if (KeychainService.isAvailable()) {
+                    const serviceName = getProductName(); // No suffix
+                    const key = KeychainService.readToken(serviceName);
+                    if (key) {
+                        return key;
+                    }
+                }
+            } catch (e) {
+                // Ignore errors during automatic check
+            }
+        }
+
         return null;
+    }
+
+    /**
+     * Gets the current API key (synchronous wrapper if needed, but usually async).
+     */
+    async getApiKey(): Promise<string | null> {
+        return this.asyncGetApiKey();
     }
 
     /**
@@ -63,14 +88,26 @@ class ApiKeyManagerImpl {
             const { stdout } = await execAsync(helperCommand, { timeout: timeoutMs, encoding: 'utf8' });
             const key = stdout.trim();
             if (!key) {
-                console.error("apiKeyHelper returned empty output");
+                console.error(`Error: apiKeyHelper "${helperCommand}" returned empty output.`);
+                console.info("Tip: Ensure the command prints only the API key to stdout.");
                 return null;
             }
             this.helperKey = key;
             this.lastHelperFetch = Date.now();
             return key;
         } catch (error) {
-            console.error(`Error executing apiKeyHelper: ${error instanceof Error ? error.message : String(error)}`);
+            const msg = error instanceof Error ? error.message : String(error);
+            const errCode = (error as any)?.code;
+            console.error(`Error executing apiKeyHelper (${helperCommand}): ${msg}`);
+            if (errCode === 'ENOENT' || msg.includes('ENOENT') || msg.includes('command not found')) {
+                console.error("The command could not be found. Please check your apiKeyHelper setting in settings.json or ~/.claude.json.");
+                const platform = process.platform;
+                if (platform === 'darwin') {
+                    console.info("Example macOS helper: security find-generic-password -s 'Anthropic API Key' -w");
+                } else if (platform === 'linux') {
+                    console.info("Example Linux helper: pass anthropic/api-key or secret-tool lookup service anthropic-api-key account user");
+                }
+            }
             return null;
         }
     }

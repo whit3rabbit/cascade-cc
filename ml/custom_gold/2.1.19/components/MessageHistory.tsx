@@ -86,15 +86,13 @@ const renderContent = (content: any) => {
     });
 };
 
-export const MessageHistory: React.FC<MessageHistoryProps> = ({ messages, scrollOffset = 0, terminalHeight: terminalHeightOverride }) => {
-    const { stdout } = useStdout();
-    const rows = terminalHeightOverride || stdout?.rows || 24;
-
+export const MessageHistory: React.FC<MessageHistoryProps> = ({ messages, scrollOffset = 0 }) => {
     return (
         <Box
             flexDirection="column"
-            height={rows - 5}
+            flexGrow={1}
             overflowY="hidden"
+            width="100%"
         >
             <Box flexDirection="column" gap={1} marginTop={-scrollOffset}>
                 {messages.map((msg, index) => (

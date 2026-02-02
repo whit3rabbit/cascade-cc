@@ -15,6 +15,7 @@ export interface FileReadInput {
 export const FileReadTool = {
     name: "FileRead",
     description: "Read the contents of a file.",
+    isConcurrencySafe: true,
     prompt: `
 Read the contents of a file from the local filesystem.
 - You can read the entire file or a specific range of lines.

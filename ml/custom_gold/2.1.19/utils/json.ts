@@ -105,7 +105,15 @@ export function parse(input: string, options: ParseOptions = DEFAULT_OPTIONS): a
                         else if (next === 'n') result += '\n';
                         else if (next === 'r') result += '\r';
                         else if (next === 't') result += '\t';
-                        // Unicode \uXXXX logic omitted for brevity, but should be here
+                        else if (next === 'u') {
+                            let hex = input.slice(position, position + 4);
+                            if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+                                result += String.fromCharCode(parseInt(hex, 16));
+                                position += 4;
+                            } else {
+                                throw new Error(`Invalid Unicode escape sequence \\u${hex}`);
+                            }
+                        }
                     } else {
                         result += c;
                     }

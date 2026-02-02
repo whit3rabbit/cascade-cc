@@ -24,13 +24,11 @@ export function ReconnectMcpServer({ serverName, onComplete }: ReconnectMcpServe
 
         const attemptReconnect = async () => {
             try {
-                // In a real implementation, this would call the actual McpManager/State
-                // For now, we simulate a connection attempt
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                const { mcpClientManager } = await import('../../services/mcp/McpClientManager.js');
+                await mcpClientManager.restart(serverName);
 
                 if (!mounted) return;
 
-                // Success mock
                 onComplete(`Successfully reconnected to ${serverName}`);
             } catch (err) {
                 if (mounted) {

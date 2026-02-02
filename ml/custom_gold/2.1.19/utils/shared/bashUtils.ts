@@ -64,21 +64,20 @@ export interface BashResult {
 /**
  * Executes a bash command and returns the result as a promise.
  */
-export async function executeBashCommand(command: string, options: ExecOptions = {}): Promise<BashResult> {
-    try {
-        const { stdout, stderr } = await execPromise(command, options);
-        return {
-            exitCode: 0,
-            stdout: stdout.toString(),
-            stderr: stderr.toString()
-        };
-    } catch (error: any) {
-        return {
-            exitCode: error.code || 1,
-            stdout: error.stdout || "",
-            stderr: error.stderr || error.message
-        };
-    }
+export async function executeBashCommand(command: string, options: ExecOptions = {}, onProcess?: (pid: number) => void): Promise<BashResult> {
+    return new Promise((resolve) => {
+        const child = exec(command, options, (error: any, stdout: any, stderr: any) => {
+            resolve({
+                exitCode: error?.code || 0,
+                stdout: stdout?.toString() || "",
+                stderr: stderr?.toString() || (error ? error.message : "")
+            });
+        });
+
+        if (child.pid && onProcess) {
+            onProcess(child.pid);
+        }
+    });
 }
 
 /**

@@ -15,7 +15,8 @@ export interface FileEditInput {
 
 export const FileEditTool = {
     name: "FileEdit",
-    description: "Edit a file by replacing a text string.",
+    description: "Edit an existing file.",
+    isConcurrencySafe: false,
     async call(input: FileEditInput, context: any) {
         let { file_path, old_string, new_string, replace_all } = input;
         const cwd = context.cwd || process.cwd();

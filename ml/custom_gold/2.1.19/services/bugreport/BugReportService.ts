@@ -54,9 +54,17 @@ export class BugReportService {
     }
 
     private static async getRecentLogs(): Promise<string> {
-        // Attempt to read recent logs from standard location
-        // Assuming ./claude/logs or similar
-        // For now, return a placeholder or in-memory logs
-        return "Log collection implementation pending.\n[INFO] Bug report generation started.";
+        try {
+            const configDir = EnvService.get('CLAUDE_CONFIG_DIR');
+            const logPath = join(configDir, 'logs.jsonl');
+            try {
+                const data = await fs.readFile(logPath, 'utf8');
+                return data;
+            } catch (e) {
+                return `Log file not found at ${logPath}`;
+            }
+        } catch (error) {
+            return `Error collecting logs: ${error}`;
+        }
     }
 }

@@ -13,6 +13,7 @@ export interface Task {
     prompt?: string;
     error?: any;
     command?: string;
+    pid?: number;
 }
 
 export interface TaskSnapshot {
@@ -52,6 +53,18 @@ class GlobalTaskManager {
         if (task && (task.status === 'pending' || task.status === 'running')) {
             this.updateTask(id, { status: 'failed', error: 'User cancelled' });
         }
+    }
+
+    killTask(id: string): void {
+        const task = this.tasks.get(id);
+        if (task && task.pid) {
+            try {
+                process.kill(task.pid, 'SIGKILL');
+            } catch (e) {
+                console.error(`Failed to kill process ${task.pid}:`, e);
+            }
+        }
+        this.cancelTask(id);
     }
 
 

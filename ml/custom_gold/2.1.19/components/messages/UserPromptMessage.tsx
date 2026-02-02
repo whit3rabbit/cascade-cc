@@ -39,16 +39,35 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
     const [cursorPos, setCursorPos] = useState(0);
     const [undoStack, setUndoStack] = useState<string[]>([]);
     const [commandValue, setCommandValue] = useState('');
+    const [lastChar, setLastChar] = useState('');
 
-    // Emacs-style Kill Ring
+    // Visual Mode
+    const [selectionStart, setSelectionStart] = useState<number | null>(null);
+
+    // Macro Recording
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordingRegister, setRecordingRegister] = useState<string | null>(null);
+    const [recordingPending, setRecordingPending] = useState(false);
+    const [macroBuffer, setMacroBuffer] = useState<{ input: string, key: any }[]>([]);
+    const [recordedMacros, setRecordedMacros] = useState<Record<string, { input: string, key: any }[]>>({});
+    const [playingMacro, setPlayingMacro] = useState(false);
+    const [playingMacroPending, setPlayingMacroPending] = useState(false);
+
+    // Buffer Search
+    const [isBufferSearching, setIsBufferSearching] = useState(false);
+    const [bufferSearchQuery, setBufferSearchQuery] = useState('');
+    const [bufferSearchDirection, setBufferSearchDirection] = useState<'forward' | 'backward'>('forward');
+    const [lastSearchQuery, setLastSearchQuery] = useState('');
+
+    // ... existing kill ring ...
     const [killRing, setKillRing] = useState<string[]>([]);
     const [yankPointer, setYankPointer] = useState(0);
 
-    // Fuse instances for suggestions
+    // ... existing suggestions ...
     const fuseSuggestions = useMemo(() => new Fuse(props.suggestions || [], { threshold: 0.4 }), [props.suggestions]);
     const fuseHistory = useMemo(() => new Fuse(history, { threshold: 0.4 }), [history]);
 
-    // Effect to update suggestion based on input (Fuzzyish)
+    // ... existing effect ...
     useEffect(() => {
         if (value && props.suggestions) {
             const results = fuseSuggestions.search(value);
@@ -79,7 +98,26 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
         return -1;
     };
 
-    useInput((input, key) => {
+    const playMacro = (register: string) => {
+        const macro = recordedMacros[register];
+        if (macro) {
+            setPlayingMacro(true);
+            // In a real terminal, keys are processed sequentially.
+            // Here, we'll try to process them. 
+            // Note: This might have issues with state batching if not careful.
+            for (const m of macro) {
+                handleKey(m.input, m.key, true);
+            }
+            setPlayingMacro(false);
+        }
+    };
+
+    const handleKey = (input: string, key: any, bypassRecording = false) => {
+        // Macro Recording
+        if (isRecording && !playingMacro && !bypassRecording) {
+            setMacroBuffer(prev => [...prev, { input, key }]);
+        }
+
         // Multi-line Editing (Shift + Enter or Option + Enter)
         if ((key.return && key.shift) || (key.return && key.meta)) {
             setValue(prev => prev + '\n');
@@ -92,18 +130,105 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 const editor = process.env.EDITOR || 'vim';
                 const tempFile = join(tmpdir(), `claude-prompt-${Date.now()}.txt`);
                 writeFileSync(tempFile, value);
-
-                // We need to be careful with 'spawn' in ink as it might mess with the TUI.
-                // However, many ink apps do this by suspending or just spawning sync.
-                // spawnSync with { stdio: 'inherit' } is common for editors.
                 spawnSync(editor, [tempFile], { stdio: 'inherit' });
-
                 const newValue = readFileSync(tempFile, 'utf8');
                 setValue(newValue);
                 setCursorPos(newValue.length);
                 unlinkSync(tempFile);
-            } catch (err) {
-                // Fail silently or log? Let's just avoid crashing.
+            } catch (err) { }
+            return;
+        }
+
+        // Buffer Search Input Mode
+        if (isBufferSearching) {
+            if (key.return) {
+                setIsBufferSearching(false);
+                setLastSearchQuery(bufferSearchQuery);
+                performBufferSearch(bufferSearchQuery, bufferSearchDirection);
+                return;
+            }
+            if (key.escape) {
+                setIsBufferSearching(false);
+                return;
+            }
+            if (key.backspace) {
+                setBufferSearchQuery(prev => prev.slice(0, -1));
+                return;
+            }
+            if (!key.ctrl && !key.meta && input) {
+                setBufferSearchQuery(prev => prev + input);
+                return;
+            }
+            return;
+        }
+
+        // Macro Register Selection
+        if (recordingPending) {
+            if (input && !key.ctrl && !key.meta) {
+                setRecordingRegister(input);
+                setRecordingPending(false);
+                setIsRecording(true);
+                setMacroBuffer([]);
+            }
+            return;
+        }
+
+        // Macro Playback Selection
+        if (playingMacroPending) {
+            if (input && !key.ctrl && !key.meta) {
+                setPlayingMacroPending(false);
+                playMacro(input);
+            }
+            return;
+        }
+
+        // Vim Visual Mode Handling
+        if (props.vimModeEnabled && vimMode === 'VISUAL') {
+            if (key.escape) {
+                setVimMode('NORMAL');
+                setSelectionStart(null);
+                return;
+            }
+            if (input === 'h') setCursorPos(Math.max(0, cursorPos - 1));
+            if (input === 'l') setCursorPos(Math.min(value.length, cursorPos + 1));
+            if (input === 'w') {
+                const nextSpace = value.indexOf(' ', cursorPos);
+                setCursorPos(nextSpace === -1 ? value.length : nextSpace + 1);
+            }
+            if (input === 'b') {
+                const prevSpace = value.lastIndexOf(' ', cursorPos - 2);
+                setCursorPos(prevSpace === -1 ? 0 : prevSpace + 1);
+            }
+            if (input === '0' || input === '^') setCursorPos(0);
+            if (input === '$') setCursorPos(value.length);
+
+            if (input === 'y') {
+                const start = Math.min(selectionStart!, cursorPos);
+                const end = Math.max(selectionStart!, cursorPos) + 1;
+                const selected = value.slice(start, end);
+                setKillRing(prev => [selected, ...prev.slice(0, 9)]);
+                setVimMode('NORMAL');
+                setSelectionStart(null);
+            }
+            if (input === 'd' || input === 'x') {
+                const start = Math.min(selectionStart!, cursorPos);
+                const end = Math.max(selectionStart!, cursorPos) + 1;
+                setUndoStack(prev => [...prev.slice(-49), value]);
+                const newValue = value.slice(0, start) + value.slice(end);
+                setValue(newValue);
+                setCursorPos(start);
+                setVimMode('NORMAL');
+                setSelectionStart(null);
+            }
+            if (input === 'c') {
+                const start = Math.min(selectionStart!, cursorPos);
+                const end = Math.max(selectionStart!, cursorPos) + 1;
+                setUndoStack(prev => [...prev.slice(-49), value]);
+                const newValue = value.slice(0, start) + value.slice(end);
+                setValue(newValue);
+                setCursorPos(start);
+                setVimMode('INSERT');
+                setSelectionStart(null);
             }
             return;
         }
@@ -121,6 +246,65 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 setCursorPos(Math.min(value.length, cursorPos + 1));
                 return;
             }
+            if (input === 'v') {
+                setVimMode('VISUAL');
+                setSelectionStart(cursorPos);
+                return;
+            }
+            if (input === 'q') {
+                if (isRecording) {
+                    setIsRecording(false);
+                    const finalBuffer = macroBuffer.slice(0, -1); // remove the q if needed, but handleKey is called after
+                    setRecordedMacros(prev => ({
+                        ...prev,
+                        [recordingRegister!]: finalBuffer
+                    }));
+                    setRecordingRegister(null);
+                } else {
+                    setRecordingPending(true);
+                }
+                return;
+            }
+            if (input === '@') {
+                // Play macro pending
+                return;
+            }
+            if (input === '@') {
+                setPlayingMacroPending(true);
+                return;
+            }
+            if (input === '/') {
+                setIsBufferSearching(true);
+                setBufferSearchQuery('');
+                setBufferSearchDirection('forward');
+                return;
+            }
+            if (input === '?') {
+                setIsBufferSearching(true);
+                setBufferSearchQuery('');
+                setBufferSearchDirection('backward');
+                return;
+            }
+            if (input === 'n') {
+                performBufferSearch(lastSearchQuery, bufferSearchDirection);
+                return;
+            }
+            if (input === 'N') {
+                performBufferSearch(lastSearchQuery, bufferSearchDirection === 'forward' ? 'backward' : 'forward');
+                return;
+            }
+
+            if (input === 'g') {
+                if (lastChar === 'g') {
+                    setCursorPos(0);
+                    setLastChar('');
+                } else {
+                    setLastChar('g');
+                }
+                return;
+            }
+            setLastChar('');
+
             if (input === 'w') {
                 const nextSpace = value.indexOf(' ', cursorPos);
                 setCursorPos(nextSpace === -1 ? value.length : nextSpace + 1);
@@ -152,12 +336,20 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 setValue(newValue);
                 return;
             }
+            if (input === 'p') {
+                if (killRing.length > 0) {
+                    const toPaste = killRing[0];
+                    const newValue = value.slice(0, cursorPos + 1) + toPaste + value.slice(cursorPos + 1);
+                    setValue(newValue);
+                    setCursorPos(cursorPos + toPaste.length);
+                }
+                return;
+            }
             if (input === ':') {
                 setVimMode('COMMAND');
                 setCommandValue('');
                 return;
             }
-            // Navigate history with k/j in Normal mode
             if (input === 'k') {
                 if (historyIndex < history.length - 1) {
                     const newIndex = historyIndex + 1;
@@ -187,18 +379,13 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 setCursorPos(value.length);
                 return;
             }
-            if (input === 'g') {
-                // gg detection would require state, assuming G for now as per docs stub for simplicity in one-shot
-                // or just handle 'G' below.
-            }
             if (input === 'G') {
-                setCursorPos(value.length); // End of input
+                setCursorPos(value.length);
                 return;
             }
 
             // Editing
             if (input === 'd') {
-                // dd delete line
                 setUndoStack(prev => [...prev.slice(-49), value]);
                 setValue('');
                 setCursorPos(0);
@@ -220,14 +407,13 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 setSearchQuery('');
                 setSearchMatchIndex(-1);
             } else {
-                // Continue searching for next match
                 const nextIdx = history.slice().reverse().slice(searchMatchIndex + 1).findIndex(h => h.includes(searchQuery));
                 if (nextIdx !== -1) setSearchMatchIndex(searchMatchIndex + 1 + nextIdx);
             }
             return;
         }
 
-        // Insert Mode / Standard Search Handling
+        // Search Mode
         if (isSearching) {
             if (key.return) {
                 setIsSearching(false);
@@ -280,7 +466,7 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
             }
         }
 
-        // macOS style word navigation (Option + Arrow)
+        // macOS style word navigation
         if (key.meta && key.leftArrow) {
             const prevSpace = value.lastIndexOf(' ', cursorPos - 2);
             setCursorPos(prevSpace === -1 ? 0 : prevSpace + 1);
@@ -296,7 +482,6 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
             setCursorPos(start);
         }
 
-        // Interrupt current process or clear line
         if (key.ctrl && input === 'c') {
             if (value.length > 0) {
                 setValue('');
@@ -306,10 +491,9 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
             }
         }
 
-        // Emacs / Standard Shortcuts
+        // Emacs Shortcuts
         if (key.ctrl) {
             if (input === 'k') {
-                // Kill to end of line
                 const killed = value.slice(cursorPos);
                 setValue(value.slice(0, cursorPos));
                 if (killed) {
@@ -319,7 +503,6 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 return;
             }
             if (input === 'u') {
-                // Kill entire line (as per docs)
                 const killed = value;
                 setValue('');
                 setCursorPos(0);
@@ -330,7 +513,6 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 return;
             }
             if (input === 'y') {
-                // Yank
                 if (killRing.length > 0) {
                     const toPaste = killRing[yankPointer] || '';
                     const newValue = value.slice(0, cursorPos) + toPaste + value.slice(cursorPos);
@@ -339,22 +521,11 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 }
                 return;
             }
-            if (input === 'g') {
-                // Cancel / Clear
-                setValue('');
-                setCursorPos(0);
-                return;
-            }
         }
 
         if (key.meta) {
             if (input === 'y') {
-                // Cycle yank (pop/rotate)
-                // This is complex to implement perfectly without "last command was yank" state
-                // For now, let's just rotate the pointer if we want
                 if (killRing.length > 1) {
-                    // Undo last yank? That implies we track it. 
-                    // Simplified: Just rotate pointer for next yank
                     setYankPointer(prev => (prev + 1) % killRing.length);
                 }
             }
@@ -368,24 +539,35 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 setCursorPos(nextSpace === -1 ? value.length : nextSpace + 1);
                 return;
             }
-            if (key.backspace) {
-                const prevSpace = value.lastIndexOf(' ', cursorPos - 2);
-                const start = prevSpace === -1 ? 0 : prevSpace + 1;
-                setValue(value.slice(0, start) + value.slice(cursorPos));
-                setCursorPos(start);
-                return;
-            }
         }
-    });
+    };
+
+    const performBufferSearch = (query: string, direction: 'forward' | 'backward') => {
+        if (!query) return;
+        let searchIndex = -1;
+        if (direction === 'forward') {
+            searchIndex = value.indexOf(query, cursorPos + 1);
+            if (searchIndex === -1) searchIndex = value.indexOf(query); // wrap
+        } else {
+            searchIndex = value.lastIndexOf(query, cursorPos - 1);
+            if (searchIndex === -1) searchIndex = value.lastIndexOf(query); // wrap
+        }
+        if (searchIndex !== -1) setCursorPos(searchIndex);
+    };
+
+    useInput(handleKey);
 
     return (
         <Box flexDirection="column" borderStyle="round" borderColor={planMode ? theme.planMode : theme.claudeBlue_FOR_SYSTEM_SPINNER} paddingX={1}>
             <Box>
                 <Box marginRight={1}>
+                    {isRecording && <Text color="red">● </Text>}
                     {props.vimModeEnabled && vimMode === 'NORMAL' ? (
                         <Text color={theme.success} bold>[N]</Text>
                     ) : props.vimModeEnabled && vimMode === 'COMMAND' ? (
                         <Text color={theme.warning} bold>[:]</Text>
+                    ) : props.vimModeEnabled && vimMode === 'VISUAL' ? (
+                        <Text color="cyan" bold>[V]</Text>
                     ) : planMode ? (
                         <Text color={theme.planMode}>◈</Text>
                     ) : (
@@ -401,36 +583,34 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                                 onChange={setCommandValue}
                                 onSubmit={(val) => {
                                     if (val === 'q') props.onCancel?.();
-                                    if (val === 'w') { /* save mock maybe? */ }
                                     setVimMode('NORMAL');
                                 }}
                             />
                         </Box>
+                    ) : isBufferSearching ? (
+                        <Box>
+                            <Text color="yellow">{bufferSearchDirection === 'forward' ? '/' : '?'}</Text>
+                            <Text>{bufferSearchQuery}</Text>
+                        </Box>
                     ) : (
-                        <TextInput
-                            focus={!props.vimModeEnabled || vimMode === 'INSERT'}
-                            value={value}
-                            onChange={(val) => {
-                                if (val !== value) {
-                                    setUndoStack(prev => [...prev.slice(-49), value]);
-                                }
-                                setValue(val);
-                                if (val !== (history[history.length - 1 - historyIndex] || '')) {
-                                    setHistoryIndex(-1);
-                                }
-                                setCursorPos(val.length);
-                            }}
-                            onSubmit={(val) => {
-                                if (!isSearching) {
-                                    setValue('');
-                                    setHistoryIndex(-1);
-                                    setCursorPos(0);
-                                    onSubmit(val);
-                                }
-                            }}
-                        />
+                        <Box>
+                            {/* Rendering selected text */}
+                            <Text>
+                                {vimMode === 'VISUAL' && selectionStart !== null ? (
+                                    <>
+                                        {value.slice(0, Math.min(selectionStart, cursorPos))}
+                                        <Text backgroundColor="white" color="black">
+                                            {value.slice(Math.min(selectionStart, cursorPos), Math.max(selectionStart, cursorPos) + 1)}
+                                        </Text>
+                                        {value.slice(Math.max(selectionStart, cursorPos) + 1)}
+                                    </>
+                                ) : (
+                                    value
+                                )}
+                            </Text>
+                        </Box>
                     )}
-                    {suggestion && !isSearching && vimMode !== 'COMMAND' && (
+                    {suggestion && !isSearching && vimMode !== 'COMMAND' && !isBufferSearching && (
                         <Box>
                             <Text dimColor>{" ".repeat(value.length)}{suggestion}</Text>
                         </Box>
@@ -446,9 +626,14 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                     )}
                 </Box>
             )}
-            {value.includes('\n') && (
-                <Box paddingLeft={2} marginTop={0}>
-                    <Text dimColor italic>Multiline: {value.split('\n').length} lines</Text>
+            {recordingPending && (
+                <Box paddingLeft={2}>
+                    <Text color="red">Recording into register...</Text>
+                </Box>
+            )}
+            {playingMacroPending && (
+                <Box paddingLeft={2}>
+                    <Text color="cyan">Play macro from register...</Text>
                 </Box>
             )}
         </Box>

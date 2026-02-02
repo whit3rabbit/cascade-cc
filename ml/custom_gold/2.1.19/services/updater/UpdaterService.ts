@@ -8,7 +8,7 @@ import semver from 'semver';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdir, rename, unlink, chmod, writeFile, stat, readFile } from 'fs/promises';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { createHash } from 'crypto';
 import os from 'os';
 
@@ -66,33 +66,30 @@ export class UpdaterService {
     /**
      * Atomically installs a binary for the specified version.
      */
-    static async atomicallyInstallBinary(version: string): Promise<boolean> {
+    static async atomicallyInstallBinary(version: string, newBinaryPath: string): Promise<boolean> {
         try {
-            const currentVersion = this.getCurrentVersion();
-            if (currentVersion === version) {
-                return true;
-            }
-
             const executablePath = process.execPath;
-            const tempDir = join(os.tmpdir(), `claude-update-${version}-${Date.now()}`);
-            await mkdir(tempDir, { recursive: true });
-
-            if (EnvService.isTruthy("DEBUG_UPDATER")) {
-                console.log(`[Updater] Downloading binary for version ${version} to ${tempDir}`);
-            }
-
-            // At this point, in a real scenario, we would download the binary.
-            // As this is a deobfuscation-based port, we implement the scaffolding
-            // for the atomic swap logic as seen in chunk1211 and chunk1210.
-
             const isWindows = os.platform() === 'win32';
+
             if (isWindows) {
                 const oldPath = `${executablePath}.old.${Date.now()}`;
-                // On Windows: rename(executablePath, oldPath), then rename(newBinary, executablePath)
-                // This is often blocked if the binary is running, so pending move is used.
+                try {
+                    // 1. Rename running executable to .old (allowed on Windows)
+                    await rename(executablePath, oldPath);
+                    // 2. Move new binary to executablePath
+                    await rename(newBinaryPath, executablePath);
+                } catch (e) {
+                    // Try to restore if second rename fails
+                    if (existsSync(oldPath)) {
+                        await rename(oldPath, executablePath).catch(() => { });
+                    }
+                    throw e;
+                }
             } else {
-                // On Unix: rename(newBinary, executablePath) is atomic if on the same filesystem.
-                // Or create/update a symlink as seen in chunk1211.
+                // On Unix, a simple rename is atomic
+                // Ensure executable permissions
+                await chmod(newBinaryPath, 0o755);
+                await rename(newBinaryPath, executablePath);
             }
 
             return true;

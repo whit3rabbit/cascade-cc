@@ -47,6 +47,8 @@ function generateSnapshotScript(shellPath: string, snapshotFile: string): string
 
     script += `
         alias | sed 's/^alias //g' | sed 's/^/alias -- /' >> "$SNAPSHOT_FILE"
+        # Exported variables from config
+        ${isZsh ? 'export' : 'export -p'} | grep -vE '^(HOME|PWD|SHLVL|OLDPWD|PATH|LANG|TERM|_)=' >> "$SNAPSHOT_FILE"
     `;
 
     return script;

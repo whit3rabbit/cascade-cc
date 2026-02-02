@@ -142,12 +142,6 @@ function getDispatcher(): Dispatcher | undefined {
     const noProxy = process.env.NO_PROXY;
 
     if (proxyUrl) {
-        // Basic ProxyAgent usage. Check undici docs if more complex config needed.
-        // undici ProxyAgent supports token/auth in url.
-        // noProxy support might depend on undici version or manual check?
-        // undici@6 ProxyAgent doesn't seem to take "no_proxy" list directly in constructor options universally?
-        // BUT standard practice is often just passing the URL.
-        // Let's assume standard behavior for now.
         return new ProxyAgent(proxyUrl);
     }
     return undefined;
@@ -181,6 +175,7 @@ export class Anthropic {
         // Simple client wrapper around fetch
         this._client = {
             post: async (url: string, data: any) => {
+                const { iterateHeaders } = await import('../../utils/http/HeaderUtils.js');
                 const { getAuthHeaders } = await import('../auth/AuthService.js');
                 const { EnvService } = await import('../config/EnvService.js');
                 const authHeaders = await getAuthHeaders();
@@ -194,11 +189,7 @@ export class Anthropic {
                     const disableOpus = EnvService.get('DISABLE_PROMPT_CACHING_OPUS') && model.includes('opus');
 
                     if (disableGlobal || disableHaiku || disableSonnet || disableOpus) {
-                        // Strip caching headers/params if possible, or just don't add them. 
-                        // Since we are passing 'data.body' directly, we might need to mutate it.
-                        // Assuming current impl relies on 'cache_control' appearing in messages.
                         if (data.body && Array.isArray(data.body.messages)) {
-                            // Deep clone to avoid mutating original if needed, but for now duplicate
                             data.body.messages = data.body.messages.map((msg: any) => {
                                 if (Array.isArray(msg.content)) {
                                     return {
@@ -212,7 +203,6 @@ export class Anthropic {
                                 return msg;
                             });
                         }
-                        // Also strip top-level system if it has cache_control (new API)
                         if (data.body && Array.isArray(data.body.system)) {
                             data.body.system = data.body.system.map((block: any) => {
                                 const { cache_control, ...rest } = block;
@@ -222,14 +212,22 @@ export class Anthropic {
                     }
                 }
 
-                const headers = {
-                    ...authHeaders,
-                    ...getCustomHeaders(),
-                    ...data.headers
-                };
+                const finalHeaders: Record<string, string> = {};
+                const sources = [authHeaders, getCustomHeaders(), data.headers];
+                for (const source of sources) {
+                    if (!source) continue;
+                    for (const [key, value] of iterateHeaders(source)) {
+                        if (value === null) {
+                            delete finalHeaders[key.toLowerCase()];
+                        } else {
+                            finalHeaders[key.toLowerCase()] = value;
+                        }
+                    }
+                }
+
                 const fetchOptions: any = {
                     method: 'POST',
-                    headers,
+                    headers: finalHeaders,
                     body: JSON.stringify(data.body),
                     dispatcher
                 };
@@ -247,15 +245,25 @@ export class Anthropic {
                 return { data: await response.json() };
             },
             get: async (url: string, data: any) => {
+                const { iterateHeaders } = await import('../../utils/http/HeaderUtils.js');
                 const { getAuthHeaders } = await import('../auth/AuthService.js');
                 const authHeaders = await getAuthHeaders();
-                const headers = {
-                    ...authHeaders,
-                    ...getCustomHeaders(),
-                    ...data.headers
-                };
+
+                const finalHeaders: Record<string, string> = {};
+                const sources = [authHeaders, getCustomHeaders(), data.headers];
+                for (const source of sources) {
+                    if (!source) continue;
+                    for (const [key, value] of iterateHeaders(source)) {
+                        if (value === null) {
+                            delete finalHeaders[key.toLowerCase()];
+                        } else {
+                            finalHeaders[key.toLowerCase()] = value;
+                        }
+                    }
+                }
+
                 const fetchOptions: any = {
-                    headers,
+                    headers: finalHeaders,
                     dispatcher
                 };
 
@@ -263,16 +271,26 @@ export class Anthropic {
                 return { data: await response.json() };
             },
             delete: async (url: string, data: any) => {
+                const { iterateHeaders } = await import('../../utils/http/HeaderUtils.js');
                 const { getAuthHeaders } = await import('../auth/AuthService.js');
                 const authHeaders = await getAuthHeaders();
-                const headers = {
-                    ...authHeaders,
-                    ...getCustomHeaders(),
-                    ...data.headers
-                };
+
+                const finalHeaders: Record<string, string> = {};
+                const sources = [authHeaders, getCustomHeaders(), data.headers];
+                for (const source of sources) {
+                    if (!source) continue;
+                    for (const [key, value] of iterateHeaders(source)) {
+                        if (value === null) {
+                            delete finalHeaders[key.toLowerCase()];
+                        } else {
+                            finalHeaders[key.toLowerCase()] = value;
+                        }
+                    }
+                }
+
                 const fetchOptions: any = {
                     method: 'DELETE',
-                    headers,
+                    headers: finalHeaders,
                     dispatcher
                 };
                 const response = await fetch((options.baseUrl || 'https://api.anthropic.com') + url, fetchOptions);

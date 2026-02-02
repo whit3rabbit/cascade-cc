@@ -21,13 +21,21 @@ import { MailboxPollingService } from '../teams/MailboxPollingService.js';
 
 async function initializeMcpServers() {
     const servers = await McpServerManager.getAllMcpServers();
-    for (const [name, config] of Object.entries(servers)) {
+    const connectionPromises = Object.entries(servers).map(async ([name, config]) => {
+        if (!McpServerManager.isMcpServerEnabled(name)) {
+            // console.log(`[MCP] Skipping disabled server: ${name}`);
+            return;
+        }
+
         try {
             await mcpClientManager.connect(name, config as any);
         } catch (err) {
             console.error(`Failed to connect to MCP server ${name}:`, err);
         }
-    }
+    });
+
+    // Wait for all connections to either succeed, fail, or time out (managed by McpClientManager)
+    await Promise.all(connectionPromises);
 }
 
 import { EnvService } from '../config/EnvService.js';
@@ -72,7 +80,8 @@ export async function initializeApp(): Promise<{ isFirstRun: boolean }> {
         await initializeCommandDefinitions();
 
         // 4. Integrations (MCP, etc.)
-        await initializeMcpServers();
+        // Fire and forget to not block TUI startup
+        initializeMcpServers().catch(err => console.error("Error initializing MCP servers:", err));
 
         // 5. Team Services
         MailboxPollingService.start();

@@ -26,14 +26,27 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 /**
  * Maps organization type to a user-friendly plan name.
  */
-function mapPlanName(orgType: string): string {
-    switch (orgType) {
-        case 'claude_max': return 'Max Plan';
-        case 'claude_pro': return 'Pro Plan';
-        case 'claude_team': return 'Team Plan';
-        case 'claude_enterprise': return 'Enterprise Plan';
-        default: return 'Free Plan';
+/**
+ * Maps organization type and rate limit tier to a user-friendly plan name.
+ */
+function mapPlanName(orgType: string, tier: string): string {
+    const basePlan = (() => {
+        switch (orgType) {
+            case 'claude_max': return 'Max';
+            case 'claude_pro': return 'Pro';
+            case 'claude_team': return 'Team';
+            case 'claude_enterprise': return 'Enterprise';
+            default: return 'Free';
+        }
+    })();
+
+    if (tier && tier !== 'default') {
+        // Clean up tier name (e.g., 'default_claude_max_20x' -> '20x')
+        const shortTier = tier.replace(`default_${orgType}_`, '').replace(/_/g, ' ');
+        return `${basePlan} Plan (${shortTier})`;
     }
+
+    return `${basePlan} Plan`;
 }
 
 /**
@@ -55,7 +68,7 @@ async function fetchProfile(accessToken: string): Promise<{ plan: string, displa
 
         const { organization, account } = response.data;
         cachedProfile = {
-            plan: mapPlanName(organization.organization_type),
+            plan: mapPlanName(organization.organization_type, organization.rate_limit_tier),
             displayName: account.display_name
         };
         lastFetchTime = now;
@@ -116,7 +129,7 @@ export async function getAuthDetails(): Promise<{ type: 'oauth' | 'apikey' | 'no
         const profile = await fetchProfile(oauthToken);
         return {
             type: 'oauth',
-            plan: profile?.plan || 'Pro Plan'
+            plan: profile?.plan || 'OAuth Account'
         };
     }
 

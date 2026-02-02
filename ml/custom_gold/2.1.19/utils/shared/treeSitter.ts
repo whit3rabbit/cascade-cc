@@ -6,7 +6,8 @@ import { createRequire } from 'module';
 import { EnvService } from '../../services/config/EnvService.js';
 
 const require = createRequire(import.meta.url);
-const Parser = require('web-tree-sitter');
+const ParserModule = require('web-tree-sitter');
+const Parser = ParserModule.Parser || ParserModule;
 
 let parser: any;
 const languages = new Map<string, any>();
@@ -17,6 +18,9 @@ export async function initTreeSitter() {
     const __dirname = dirname(fileURLToPath(import.meta.url));
     // Check root and dist locations for wasm files
     const possiblePaths = [
+        join(__dirname, '../../../../node_modules/web-tree-sitter'), // from src/utils/shared
+        join(__dirname, '../../../../../node_modules/web-tree-sitter'), // fallback
+        join(process.cwd(), 'node_modules/web-tree-sitter'),
         join(__dirname, '../../../assets'), // assets from src/utils/shared
         join(__dirname, '../../../../assets'), // assets from dist/utils/shared
         join(process.cwd(), 'assets'),
@@ -29,11 +33,17 @@ export async function initTreeSitter() {
     let bashWasmPath: string | undefined;
 
     for (const p of possiblePaths) {
-        if (existsSync(join(p, 'tree-sitter.wasm'))) {
-            wasmPath = join(p, 'tree-sitter.wasm');
+        if (!wasmPath) {
+            if (existsSync(join(p, 'web-tree-sitter.wasm'))) {
+                wasmPath = join(p, 'web-tree-sitter.wasm');
+            } else if (existsSync(join(p, 'tree-sitter.wasm'))) {
+                wasmPath = join(p, 'tree-sitter.wasm');
+            }
         }
-        if (existsSync(join(p, 'tree-sitter-bash.wasm'))) {
-            bashWasmPath = join(p, 'tree-sitter-bash.wasm');
+        if (!bashWasmPath) {
+            if (existsSync(join(p, 'tree-sitter-bash.wasm'))) {
+                bashWasmPath = join(p, 'tree-sitter-bash.wasm');
+            }
         }
     }
 

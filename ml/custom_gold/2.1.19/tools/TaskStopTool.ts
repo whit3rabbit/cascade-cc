@@ -33,8 +33,8 @@ export const TaskStopTool = {
 
             // Logic to kill the task. 
             // In a real implementation, TaskManager should expose a kill method that eventually kills the process.
-            // For now we use cancelTask.
-            taskManager.cancelTask(id);
+            // We now use killTask which sends SIGKILL to the PID if available.
+            taskManager.killTask(id);
 
             return {
                 is_error: false,

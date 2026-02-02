@@ -11,6 +11,7 @@ export interface GlobInput {
 export const GlobTool = {
     name: "Glob",
     description: "Find files matching a glob pattern.",
+    isConcurrencySafe: true,
     async call(input: GlobInput) {
         const { pattern, path: basePath } = input;
         const cwd = basePath ? resolve(basePath) : process.cwd();

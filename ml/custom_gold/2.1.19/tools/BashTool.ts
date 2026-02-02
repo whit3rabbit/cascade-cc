@@ -20,6 +20,7 @@ export interface BashToolInput {
 export const BashTool = {
     name: "Bash",
     description: "Run scripts or commands on the local machine.",
+    isConcurrencySafe: false,
     async call(input: BashToolInput, context: any) {
         const { command, timeout } = input;
         const cwd = context.cwd || process.cwd();

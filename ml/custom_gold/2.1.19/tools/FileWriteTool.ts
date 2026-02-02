@@ -14,6 +14,7 @@ export interface FileWriteInput {
 export const FileWriteTool = {
     name: "FileWrite",
     description: "Write the contents of a file.",
+    isConcurrencySafe: false,
     prompt: `
 Write content to a file on the local filesystem.
 - If the file exists, it will be overwritten.

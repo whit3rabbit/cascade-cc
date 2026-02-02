@@ -7,7 +7,9 @@ import { execSync } from 'node:child_process';
 import { EnvService } from '../config/EnvService.js';
 import https from 'node:https';
 import { resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
+import { getToolSettings } from '../config/SettingsService.js';
+import { listAgents } from '../agents/AgentPersistence.js';
 
 export interface HealthCheckResult {
     name: string;
@@ -22,50 +24,71 @@ export interface InstallationInfo {
     path: string;
     invokedBinary: string;
     installMethod: string;
-    autoUpdates: string;
+    autoUpdates: 'enabled' | 'disabled' | 'error';
+    ripgrep: {
+        ok: boolean;
+        mode: 'system' | 'builtin' | 'missing';
+        details?: string;
+    };
+}
+
+export interface DoctorDiagnostics {
+    installation: InstallationInfo;
+    healthChecks: HealthCheckResult[];
+    versionLock?: {
+        locked: boolean;
+        version?: string;
+        source?: string;
+    };
+    environmentVariables: {
+        name: string;
+        value: string;
+        status: 'valid' | 'invalid' | 'capped' | 'not-set';
+        message?: string;
+    }[];
+    permissions: {
+        unreachableRules: string[];
+    };
+    contextUsage: {
+        claudeMdSize?: number;
+        agentCount: number;
+        mcpTokenCount: number;
+    };
 }
 
 export class DoctorService {
-    static async runChecks(): Promise<HealthCheckResult[]> {
-        const results: HealthCheckResult[] = [];
+    static async getDiagnostics(): Promise<DoctorDiagnostics> {
+        const installation = await this.getInstallationInfo();
+        const healthChecks: HealthCheckResult[] = [];
 
-        // 1. Installation Info
-        const installInfo = await this.getInstallationInfo();
-        results.push({
-            name: 'Installation',
-            status: 'ok',
-            message: `${installInfo.type} (${installInfo.version})`,
-            details: `Path: ${installInfo.path}\nInvoked: ${installInfo.invokedBinary}\nInstall Method: ${installInfo.installMethod}`
-        });
+        // Dependency Checks
+        healthChecks.push(this.checkBinary('git', '--version', 'Git'));
+        healthChecks.push(this.checkBinary('tmux', '-V', 'tmux'));
 
-        // 2. Dependency Checks
-        results.push(this.checkBinary('git', '--version', 'Git'));
+        // Network Checks
+        healthChecks.push(await this.checkConnectivity('api.anthropic.com'));
+        healthChecks.push(await this.checkConnectivity('statsig.anthropic.com'));
 
-        // Ripgrep check
-        const rgStatus = this.checkRipgrep();
-        results.push({
-            name: 'Search (ripgrep)',
-            status: rgStatus.ok ? 'ok' : 'error',
-            message: rgStatus.ok ? `OK (${rgStatus.mode})` : 'Not working',
-            details: rgStatus.details
-        });
+        // Path & Conflicts
+        healthChecks.push(this.checkPathHealth());
+        const conflictCheck = await this.checkMultipleInstallations();
+        if (conflictCheck.status !== 'ok') {
+            healthChecks.push(conflictCheck);
+        }
 
-        results.push(this.checkBinary('tmux', '-V', 'tmux'));
+        // Settings Health
+        healthChecks.push(await this.checkSettingsHealth());
 
-        // 3. Network Checks
-        results.push(await this.checkConnectivity('api.anthropic.com'));
-        results.push(await this.checkConnectivity('statsig.anthropic.com'));
-
-        // 4. Path & Environment
-        results.push(this.checkPathHealth());
-
-        // 5. Conflicts
-        results.push(await this.checkMultipleInstallations());
-
-        // 6. Settings
-        results.push(await this.checkSettingsHealth());
-
-        return results;
+        return {
+            installation,
+            healthChecks,
+            versionLock: this.getVersionLockInfo(),
+            environmentVariables: this.checkEnvironmentVariables(),
+            permissions: {
+                unreachableRules: this.getUnreachablePermissionRules()
+            },
+            contextUsage: await this.getContextUsage()
+        };
     }
 
     private static async getInstallationInfo(): Promise<InstallationInfo> {
@@ -73,6 +96,7 @@ export class DoctorService {
         const type = await this.detectInstallationType();
         const invokedBinary = process.argv[1] || 'unknown';
         const installMethod = EnvService.get("CLAUDE_CODE_INSTALL_METHOD") || "not set";
+        const rgStatus = this.checkRipgrep();
 
         return {
             type: type as any,
@@ -80,7 +104,8 @@ export class DoctorService {
             path: process.execPath,
             invokedBinary,
             installMethod,
-            autoUpdates: "enabled" // Mocking for now as we don't have the full autoupdater deobfuscated
+            autoUpdates: "enabled",
+            ripgrep: rgStatus
         };
     }
 
@@ -92,15 +117,94 @@ export class DoctorService {
         return 'unknown';
     }
 
+    private static checkRipgrep(): { ok: boolean; mode: 'system' | 'builtin' | 'missing'; details?: string } {
+        try {
+            const output = execSync(`rg --version`, { stdio: 'pipe' }).toString().trim();
+            return { ok: true, mode: 'system', details: output.split('\n')[0] };
+        } catch (e) {
+            // Check for builtin ripgrep if we add it in the future
+            return { ok: false, mode: 'missing', details: 'ripgrep (rg) not found in PATH.' };
+        }
+    }
+
+    private static checkBinary(cmd: string, args: string, displayName: string): HealthCheckResult {
+        try {
+            const output = execSync(`${cmd} ${args}`, { stdio: 'pipe' }).toString().trim();
+            return {
+                name: displayName,
+                status: 'ok',
+                message: output.split('\n')[0]
+            };
+        } catch (error) {
+            return {
+                name: displayName,
+                status: displayName === 'tmux' ? 'warn' : 'error',
+                message: `${displayName} not found. Some features may be limited.`
+            };
+        }
+    }
+
+    private static async checkConnectivity(hostname: string): Promise<HealthCheckResult> {
+        return new Promise((resolveResolve) => {
+            const startTime = Date.now();
+            const req = https.get(`https://${hostname}`, (res) => {
+                const duration = Date.now() - startTime;
+                resolveResolve({
+                    name: `Network: ${hostname}`,
+                    status: 'ok',
+                    message: `Connected in ${duration}ms (Status: ${res.statusCode})`
+                });
+                res.resume();
+            });
+
+            req.on('error', (err) => {
+                resolveResolve({
+                    name: `Network: ${hostname}`,
+                    status: 'error',
+                    message: `Connection failed: ${err.message}`
+                });
+            });
+
+            req.setTimeout(5000, () => {
+                req.destroy();
+                resolveResolve({
+                    name: `Network: ${hostname}`,
+                    status: 'error',
+                    message: 'Connection timed out'
+                });
+            });
+        });
+    }
+
+    private static checkPathHealth(): HealthCheckResult {
+        let inPath = false;
+        try {
+            const which = process.platform === 'win32' ? 'where' : 'which';
+            execSync(`${which} claude`, { stdio: 'pipe' });
+            inPath = true;
+        } catch (e) { }
+
+        if (inPath) {
+            return {
+                name: "Binary Path",
+                status: 'ok',
+                message: "'claude' is correctly installed in your PATH."
+            };
+        } else {
+            return {
+                name: "Binary Path",
+                status: 'warn',
+                message: "'claude' binary not found in PATH. You may need to run 'npm install -g @anthropic-ai/claude-code'."
+            };
+        }
+    }
+
     private static async checkMultipleInstallations(): Promise<HealthCheckResult> {
         const installations: string[] = [];
         const home = process.env.HOME || process.env.USERPROFILE || "";
-
-        // Check native path
         const nativePath = resolve(home, ".local/bin/claude");
         if (existsSync(nativePath)) installations.push(`Native: ${nativePath}`);
 
-        // Check npm global (rough check)
         try {
             const npmPrefix = execSync('npm config get prefix', { stdio: 'pipe' }).toString().trim();
             const npmPath = process.platform === 'win32'
@@ -161,87 +265,68 @@ export class DoctorService {
         };
     }
 
-    private static checkRipgrep(): { ok: boolean; mode: string; details?: string } {
-        try {
-            const output = execSync(`rg --version`, { stdio: 'pipe' }).toString().trim();
-            return { ok: true, mode: 'system', details: output.split('\n')[0] };
-        } catch (e) {
-            return { ok: false, mode: 'missing', details: 'ripgrep (rg) not found in PATH.' };
-        }
+    private static getVersionLockInfo() {
+        return {
+            locked: false
+        };
     }
 
-    private static checkBinary(cmd: string, args: string, displayName: string): HealthCheckResult {
-        try {
-            const output = execSync(`${cmd} ${args}`, { stdio: 'pipe' }).toString().trim();
-            return {
-                name: displayName,
-                status: 'ok',
-                message: output.split('\n')[0]
-            };
-        } catch (error) {
-            return {
-                name: displayName,
-                status: displayName === 'tmux' ? 'warn' : 'error', // tmux is often optional but nice to have
-                message: `${displayName} not found. Some features may be limited.`
-            };
-        }
-    }
+    private static checkEnvironmentVariables() {
+        const varsToCheck = [
+            'BASH_MAX_OUTPUT_LENGTH',
+            'TASK_MAX_OUTPUT_LENGTH',
+            'CLAUDE_CODE_MAX_OUTPUT_TOKENS'
+        ];
 
-    private static async checkConnectivity(hostname: string): Promise<HealthCheckResult> {
-        return new Promise((resovleResolve) => {
-            const startTime = Date.now();
-            const req = https.get(`https://${hostname}`, (res) => {
-                const duration = Date.now() - startTime;
-                resovleResolve({
-                    name: `Network: ${hostname}`,
-                    status: 'ok',
-                    message: `Connected in ${duration}ms (Status: ${res.statusCode})`
-                });
-                res.resume();
-            });
+        return varsToCheck.map(name => {
+            const value = EnvService.get(name);
+            if (value === undefined) {
+                return { name, value: 'not set', status: 'not-set' as const };
+            }
 
-            req.on('error', (err) => {
-                resovleResolve({
-                    name: `Network: ${hostname}`,
-                    status: 'error',
-                    message: `Connection failed: ${err.message}`
-                });
-            });
+            const numValue = parseInt(String(value), 10);
+            if (isNaN(numValue)) {
+                return { name, value: String(value), status: 'invalid' as const, message: 'Must be a number' };
+            }
 
-            req.setTimeout(5000, () => {
-                req.destroy();
-                resovleResolve({
-                    name: `Network: ${hostname}`,
-                    status: 'error',
-                    message: 'Connection timed out'
-                });
-            });
+            if (name === 'BASH_MAX_OUTPUT_LENGTH' && numValue > 150000) {
+                return { name, value: String(value), status: 'capped' as const, message: 'Capped at 150000' };
+            }
+
+            return { name, value: String(value), status: 'valid' as const };
         });
     }
 
-    private static checkPathHealth(): HealthCheckResult {
-        // Check if 'claude' is in PATH
-        let inPath = false;
-        try {
-            const which = process.platform === 'win32' ? 'where' : 'which';
-            execSync(`${which} claude`, { stdio: 'pipe' });
-            inPath = true;
-        } catch (e) {
-            // Not in path
+    private static getUnreachablePermissionRules(): string[] {
+        const unreachable: string[] = [];
+        const settings = getToolSettings('userSettings');
+        const allowed = new Set(settings.permissions?.allow || []);
+        const denied = new Set(settings.permissions?.deny || []);
+
+        for (const rule of allowed) {
+            if (denied.has(rule)) {
+                unreachable.push(`Conflict: '${rule}' is in both allow and deny lists.`);
+            }
         }
 
-        if (inPath) {
-            return {
-                name: "Binary Path",
-                status: 'ok',
-                message: "'claude' is correctly installed in your PATH."
-            };
-        } else {
-            return {
-                name: "Binary Path",
-                status: 'warn',
-                message: "'claude' binary not found in PATH. You may need to run 'npm install -g @anthropic-ai/claude-code'."
-            };
+        return unreachable;
+    }
+
+    private static async getContextUsage() {
+        let claudeMdSize = 0;
+        const claudeMdPath = resolve(process.cwd(), 'CLAUDE.md');
+        if (existsSync(claudeMdPath)) {
+            try {
+                claudeMdSize = statSync(claudeMdPath).size;
+            } catch (e) { }
         }
+
+        const agentCount = listAgents().length;
+
+        return {
+            claudeMdSize,
+            agentCount,
+            mcpTokenCount: 0 // Placeholder
+        };
     }
 }

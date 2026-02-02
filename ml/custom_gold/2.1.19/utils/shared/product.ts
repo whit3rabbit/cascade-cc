@@ -14,12 +14,12 @@ const BASE_PRODUCT_NAME = "Claude Code";
  * @returns {string} The product name.
  */
 export function getProductName(suffix = ""): string {
-    const configDir = process.env.CLAUDE_CONFIG_DIR;
+    const configDirEnv = process.env.CLAUDE_CONFIG_DIR;
     let uniqueId = "";
 
-    if (configDir) {
+    if (configDirEnv) {
         uniqueId = "-" + createHash("sha256")
-            .update(configDir)
+            .update(configDirEnv)
             .digest("hex")
             .substring(0, 8);
     }
@@ -34,4 +34,11 @@ export function getProductName(suffix = ""): string {
  */
 export function getSystemUser(): string {
     return process.env.USER || process.env.USERNAME || "claude-code-user";
+}
+
+/**
+ * Returns the current product version.
+ */
+export function getProductVersion(): string {
+    return "0.0.1"; // Placeholder
 }

@@ -19,7 +19,8 @@ export interface CommandContext {
     setIsTyping: (isTyping: boolean) => void;
     exit: () => void;
     cwd: string;
-    setCurrentMenu: (menu: 'config' | 'mcp' | 'tasks' | 'search' | 'model' | 'status' | 'agents' | null) => void;
+    setCurrentMenu: (menu: 'config' | 'mcp' | 'tasks' | 'search' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | null) => void;
+    setBugReportInitialDescription: (description: string) => void;
     messages: any[];
 }
 
@@ -103,23 +104,7 @@ export class SlashCommandDispatcher {
                 return true;
 
             case '/doctor':
-                context.setMessages(prev => [...prev, { role: 'assistant', content: 'Running diagnostics...' }]);
-                DoctorService.runChecks().then((results: HealthCheckResult[]) => {
-                    const content = `**Claude Code Doctor**\n\n` +
-                        results.map((r: HealthCheckResult) => {
-                            const icon = r.status === 'ok' ? '✅' : r.status === 'warn' ? '⚠️' : '❌';
-                            let item = `${icon} **${r.name}**: ${r.message}`;
-                            if (r.details) {
-                                item += `\n\`\`\`\n${r.details}\n\`\`\``;
-                            }
-                            return item;
-                        }).join('\n\n');
-
-                    context.setMessages(prev => [...prev, {
-                        role: 'assistant',
-                        content
-                    }]);
-                });
+                context.setCurrentMenu('doctor');
                 return true;
 
             case '/compact':
@@ -184,16 +169,15 @@ export class SlashCommandDispatcher {
                 return true;
 
             case '/bug':
-                context.setMessages(prev => [...prev, {
-                    role: 'assistant',
-                    content: 'Found a bug or have feedback? Please report it on our GitHub repository: [https://github.com/anthropics/claude-code/issues](https://github.com/anthropics/claude-code/issues)'
-                }]);
+                context.setBugReportInitialDescription(args);
+                context.setCurrentMenu('bug');
                 return true;
 
             case '/login':
                 (async () => {
+                    const { OAuthService, LoopbackServerHandler } = await import('../services/auth/OAuthService.js');
+                    const handler = new LoopbackServerHandler();
                     try {
-                        const { OAuthService, LoopbackServerHandler } = await import('../services/auth/OAuthService.js');
                         const { generateRandomString, pkceChallenge } = await import('../utils/shared/crypto.js');
                         const open = (await import('open')).default;
 
@@ -201,7 +185,6 @@ export class SlashCommandDispatcher {
                         const codeVerifier = generateRandomString(64);
                         const codeChallenge = pkceChallenge(codeVerifier);
 
-                        const handler = new LoopbackServerHandler();
                         const port = await handler.start();
                         const promise = handler.listenForAuthCode(
                             "Login successful! You can close this window.",
@@ -235,11 +218,32 @@ export class SlashCommandDispatcher {
                             port
                         );
 
-                        await OAuthService.saveToken(tokenResponse);
+                        // Fetch profile and roles
+                        const profile = await OAuthService.fetchProfile(tokenResponse.access_token);
+                        const roles = await OAuthService.fetchRoles(tokenResponse.access_token);
+
+                        const authAccount = {
+                            accountUuid: profile.account.uuid,
+                            emailAddress: profile.account.email,
+                            organizationUuid: profile.organization.uuid,
+                            displayName: profile.account.display_name,
+                            hasExtraUsageEnabled: profile.organization.has_extra_usage_enabled,
+                            billingType: profile.organization.billing_type,
+                            organizationRole: roles.organization_role,
+                            workspaceRole: roles.workspace_role,
+                            organizationName: roles.organization_name
+                        };
+
+                        await OAuthService.saveToken({
+                            ...tokenResponse,
+                            account: authAccount
+                        });
+
                         context.setMessages(prev => [...prev, { role: 'assistant', content: '✅ Successfully logged in! Your credentials have been saved to the system keychain.' }]);
                     } catch (e) {
                         context.setMessages(prev => [...prev, { role: 'assistant', content: `❌ Login failed: ${e instanceof Error ? e.message : String(e)}` }]);
                     } finally {
+                        handler.closeServer();
                         context.setIsTyping(false);
                     }
                 })();
@@ -248,17 +252,9 @@ export class SlashCommandDispatcher {
             case '/logout':
                 (async () => {
                     try {
-                        const { KeychainService } = await import('../services/auth/KeychainService.js');
-                        const { getProductName } = await import('../utils/shared/product.js');
-                        const { setStatsigStorage } = await import('../services/auth/MsalAuthService.js');
-
-                        const serviceName = getProductName("-credentials");
-                        if (KeychainService.isAvailable()) {
-                            KeychainService.saveToken(serviceName, ""); // Clear keychain
-                        }
-                        setStatsigStorage({ accessToken: null, oauthAccount: null }); // Clear in-memory
-
-                        context.setMessages(prev => [...prev, { role: 'assistant', content: '✅ Successfully logged out.' }]);
+                        const { OAuthService } = await import('../services/auth/OAuthService.js');
+                        await OAuthService.logout();
+                        context.setMessages(prev => [...prev, { role: 'assistant', content: '✅ Logged out successfully. Your credentials have been removed.' }]);
                     } catch (e) {
                         context.setMessages(prev => [...prev, { role: 'assistant', content: `❌ Logout failed: ${e instanceof Error ? e.message : String(e)}` }]);
                     }

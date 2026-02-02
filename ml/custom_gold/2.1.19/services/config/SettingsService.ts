@@ -5,11 +5,12 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { getBaseConfigDir } from '../../utils/shared/runtimeAndEnv.js';
 import { EnvService } from './EnvService.js';
 import { HooksConfig } from '../hooks/HookTypes.js';
 
-export type SettingSource = "policySettings" | "flagSettings" | "userSettings" | "projectSettings" | "localSettings";
+export type SettingSource = "policySettings" | "flagSettings" | "legacySettings" | "userSettings" | "projectSettings" | "localSettings";
 
 export interface ToolPermissionSettings {
     permissions?: {
@@ -40,7 +41,11 @@ export interface Settings {
         allowUnsandboxedCommands?: boolean;
     };
     allowManagedHooksOnly?: boolean;
-    telemetry?: { enabled: boolean };
+    telemetry?: {
+        enabled: boolean;
+        enhanced?: boolean;
+    };
+    vimModeEnabled?: boolean;
     theme?: "dark" | "light" | "system" | "light-daltonized" | "dark-daltonized" | "light-ansi" | "dark-ansi";
     iterm2It2SetupComplete?: boolean;
     preferTmuxOverIterm2?: boolean;
@@ -57,12 +62,25 @@ export interface Settings {
         [layer: string]: ToolPermissionSettings;
     };
     hooks?: HooksConfig;
+    autoCompact?: boolean;
+    showTips?: boolean;
+    thinkingMode?: boolean;
+    promptSuggestions?: boolean;
+    rewindCode?: boolean;
+    verbose?: boolean;
+    progressBar?: boolean;
+    gitignore?: boolean;
+    showCodeDiffFooter?: boolean;
+    showPrStatusFooter?: boolean;
+    autoConnectIde?: boolean;
+    chromeEnabled?: boolean;
     [key: string]: any;
 }
 
 const SOURCE_ORDER: SettingSource[] = [
     "policySettings",
     "flagSettings",
+    "legacySettings",
     "userSettings",
     "projectSettings",
     "localSettings"
@@ -81,14 +99,16 @@ export function getSettingsPath(source: SettingSource): string | null {
     switch (source) {
         case "userSettings":
             return join(home, 'settings.json');
+        case "legacySettings":
+            return join(homedir(), '.claude.json');
         case "projectSettings":
             return join(cwd, '.claude', 'settings.json');
         case "localSettings":
             return join(cwd, '.claude', 'settings.local.json');
         case "policySettings":
-            return process.platform === 'win32'
-                ? 'C:\\ProgramData\\ClaudeCode\\managed-settings.json'
-                : '/etc/anthropic/claude/managed-settings.json';
+            if (process.platform === 'win32') return 'C:\\ProgramData\\ClaudeCode\\managed-settings.json';
+            if (process.platform === 'darwin') return '/Library/Application Support/ClaudeCode/managed-settings.json';
+            return '/etc/anthropic/claude/managed-settings.json';
         case "flagSettings":
             return EnvService.get('CLAUDE_FLAG_SETTINGS_PATH') || null;
         default:

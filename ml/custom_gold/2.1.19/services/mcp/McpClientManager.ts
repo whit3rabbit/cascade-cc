@@ -8,6 +8,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { WebSocketClientTransport } from "@modelcontextprotocol/sdk/client/websocket.js";
 import { LogManager } from "../logging/LogManager.js";
+import { getSettings } from "../config/SettingsService.js";
 import { EnvService } from "../config/EnvService.js";
 
 // Re-exports for convenience (Legacy/Compatibility)
@@ -45,6 +46,11 @@ export class McpClientManager {
      * Connects to a specific MCP server.
      */
     async connect(serverId: string, config: McpServerConfig): Promise<void> {
+        if (this.activeClients.has(serverId)) {
+            console.log(`[MCP] Server ${serverId} already connected, disconnecting first...`);
+            await this.disconnect(serverId);
+        }
+
         console.log(`[MCP] Connecting to server: ${serverId} (${config.type || 'stdio'})`);
 
         try {
@@ -58,7 +64,7 @@ export class McpClientManager {
                 transport = new StdioClientTransport({
                     command: config.command,
                     args: config.args || [],
-                    env: { ...(process.env as Record<string, string>), ...(config.env || {}) } // process.env expansion is okay here
+                    env: { ...(process.env as Record<string, string>), ...(config.env || {}) }
                 });
             } else if (config.type === "sse") {
                 if (!config.url) throw new Error(`MCP Server ${serverId} missing 'url' for sse transport`);
@@ -83,32 +89,16 @@ export class McpClientManager {
                 }
             );
 
-            const mcpTimeout = Number(EnvService.get('MCP_TIMEOUT')) || 60000; // 60s default
-            const connectPromise = client.connect(transport);
+            const mcpTimeout = Number(EnvService.get('MCP_TIMEOUT')) || 60000;
 
-            // Timeout wrapper for connect
-            await new Promise<void>((resolve, reject) => {
-                const timer = setTimeout(() => {
-                    reject(new Error(`MCP server connection timed out after ${mcpTimeout}ms`));
-                }, mcpTimeout);
-
-                connectPromise.then(() => {
-                    clearTimeout(timer);
-                    resolve();
-                }).catch((err) => {
-                    clearTimeout(timer);
-                    reject(err);
-                });
-            });
+            // Connect with timeout
+            await Promise.race([
+                client.connect(transport),
+                new Promise((_, reject) => setTimeout(() => reject(new Error(`MCP server connection timed out after ${mcpTimeout}ms`)), mcpTimeout))
+            ]);
 
             const capabilities = client.getServerCapabilities();
             console.log(`[MCP] Connected to ${serverId}. Capabilities:`, capabilities);
-
-            // Add error listeners
-            if (config.type === "stdio" || !config.type) {
-                // Stdio transport doesn't expose the child process directly here easily
-                // but we can listen for transport closure
-            }
 
             this.activeClients.set(serverId, {
                 client,
@@ -135,12 +125,14 @@ export class McpClientManager {
      */
     async restart(serverId: string): Promise<void> {
         const active = this.activeClients.get(serverId);
-        if (!active) {
-            throw new Error(`Server ${serverId} not found`);
+        const settings = getSettings();
+        const config = active?.config || settings.mcp?.servers?.[serverId];
+
+        if (!config) {
+            throw new Error(`Configuration for server ${serverId} not found`);
         }
 
         console.log(`[MCP] Restarting server: ${serverId}`);
-        const config = active.config;
         await this.disconnect(serverId);
         await this.connect(serverId, config);
     }

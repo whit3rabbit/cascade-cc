@@ -10,7 +10,7 @@ export * from "./shared/fileTypeUtils.js";
 export * from "./fs/binaryUtils.js";
 
 import { track } from "../services/telemetry/Telemetry.js";
-import { installPlugin, uninstallPlugin, enablePlugin, disablePlugin, updatePlugin } from "../services/mcp/PluginManager.js";
+import { installPlugin, uninstallPlugin, enablePlugin, disablePlugin, updatePlugin, type ConfigScope } from "../services/mcp/PluginManager.js";
 
 type PluginActionResult = {
     success: boolean;
@@ -32,7 +32,7 @@ export function handleCliErrorAndExit(error: any, action: string): never {
 /**
  * Installs a plugin via CLI with logging.
  */
-export async function installPluginCli(pluginId: string, scope: string = "user") {
+export async function installPluginCli(pluginId: string, scope: ConfigScope = "user") {
     try {
         console.log(`Installing plugin "${pluginId}"...`);
         const result = await installPlugin(pluginId, scope as any) as PluginActionResult;
@@ -54,7 +54,7 @@ export async function installPluginCli(pluginId: string, scope: string = "user")
 /**
  * Uninstalls a plugin via CLI.
  */
-export async function uninstallPluginCli(pluginId: string, scope: string = "user") {
+export async function uninstallPluginCli(pluginId: string, scope: ConfigScope = "user") {
     try {
         const result = await uninstallPlugin(pluginId, scope) as PluginActionResult;
         if (!result.success) {
@@ -74,7 +74,7 @@ export async function uninstallPluginCli(pluginId: string, scope: string = "user
 /**
  * Enables a plugin via CLI.
  */
-export async function enablePluginCli(pluginId: string, scope: string) {
+export async function enablePluginCli(pluginId: string, scope: ConfigScope) {
     try {
         const result = await enablePlugin(pluginId, scope) as PluginActionResult;
         if (!result.success) {
@@ -94,7 +94,7 @@ export async function enablePluginCli(pluginId: string, scope: string) {
 /**
  * Disables a plugin via CLI.
  */
-export async function disablePluginCli(pluginId: string, scope: string) {
+export async function disablePluginCli(pluginId: string, scope: ConfigScope) {
     try {
         const result = await disablePlugin(pluginId, scope) as PluginActionResult;
         if (!result.success) {
@@ -114,7 +114,7 @@ export async function disablePluginCli(pluginId: string, scope: string) {
 /**
  * Updates a plugin via CLI.
  */
-export async function updatePluginCli(pluginId: string, scope: string) {
+export async function updatePluginCli(pluginId: string, scope: ConfigScope) {
     try {
         console.log(`Checking for updates for plugin "${pluginId}" at ${scope} scope...`);
         const result = await updatePlugin(pluginId, scope) as PluginActionResult;

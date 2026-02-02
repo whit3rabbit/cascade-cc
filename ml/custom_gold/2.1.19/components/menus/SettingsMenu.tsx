@@ -12,6 +12,7 @@ import { mcpClientManager } from '../../services/mcp/McpClientManager.js';
 import { getSettings, updateSettings } from '../../services/config/SettingsService.js';
 import { themeService } from '../../services/terminal/ThemeService.js';
 import { getAuthDetails } from '../../services/auth/AuthService.js';
+import { costService } from '../../services/terminal/CostService.js';
 import os from 'os';
 
 interface SettingsMenuProps {
@@ -103,26 +104,27 @@ export function SettingsMenu({ onExit, initialTab = 'Status' }: SettingsMenuProp
     const configItems = useMemo(() => {
         // Map user requested items to actual settings or placeholders
         return [
-            { label: 'Auto-compact', value: 'autoCompact', type: 'boolean', current: true },
-            { label: 'Show tips', value: 'showTips', type: 'boolean', current: true },
-            { label: 'Thinking mode', value: 'thinkingMode', type: 'boolean', current: true },
-            { label: 'Prompt suggestions', value: 'promptSuggestions', type: 'boolean', current: true },
-            { label: 'Rewind code (checkpoints)', value: 'rewindCode', type: 'boolean', current: true },
-            { label: 'Verbose output', value: 'verbose', type: 'boolean', current: false },
-            { label: 'Terminal progress bar', value: 'progressBar', type: 'boolean', current: true },
-            { label: 'Default permission mode', value: 'permissionMode', type: 'select', current: 'Default' },
-            { label: 'Respect .gitignore in file picker', value: 'gitignore', type: 'boolean', current: true },
-            { label: 'Auto-update channel', value: 'updateChannel', type: 'select', current: 'latest' },
+            { label: 'Auto-compact', value: 'autoCompact', type: 'boolean', current: settings.autoCompact ?? true },
+            { label: 'Show tips', value: 'showTips', type: 'boolean', current: settings.showTips ?? true },
+            { label: 'Thinking mode', value: 'thinkingMode', type: 'boolean', current: settings.thinkingMode ?? true },
+            { label: 'Prompt suggestions', value: 'promptSuggestions', type: 'boolean', current: settings.promptSuggestions ?? true },
+            { label: 'Rewind code (checkpoints)', value: 'rewindCode', type: 'boolean', current: settings.rewindCode ?? true },
+            { label: 'Verbose output', value: 'verbose', type: 'boolean', current: settings.verbose ?? false },
+            { label: 'Terminal progress bar', value: 'progressBar', type: 'boolean', current: settings.progressBar ?? true },
+            { label: 'Default permission mode', value: 'permissionMode', type: 'select', current: settings.permissionMode || 'Default' },
+            { label: 'Respect .gitignore in file picker', value: 'gitignore', type: 'boolean', current: settings.gitignore ?? true },
+            { label: 'Auto-update channel', value: 'updateChannel', type: 'select', current: settings.updateChannel || 'latest' },
             { label: 'Theme', value: 'theme', type: 'select', current: settings.theme || 'dark' },
-            { label: 'Notifications', value: 'notifications', type: 'select', current: 'Auto' },
-            { label: 'Output style', value: 'outputStyle', type: 'select', current: 'default' },
-            { label: 'Language', value: 'language', type: 'select', current: 'Default (English)' },
-            { label: 'Editor mode', value: 'editorMode', type: 'select', current: 'normal' },
-            { label: 'Show code diff footer', value: 'showCodeDiffFooter', type: 'boolean', current: true },
-            { label: 'Show PR status footer', value: 'showPrStatusFooter', type: 'boolean', current: true },
-            { label: 'Model', value: 'model', type: 'select', current: 'Default (recommended)' },
-            { label: 'Auto-connect to IDE (external terminal)', value: 'autoConnectIde', type: 'boolean', current: true },
-            { label: 'Claude in Chrome enabled by default', value: 'chromeEnabled', type: 'boolean', current: true },
+            { label: 'Vim Mode', value: 'vimModeEnabled', type: 'boolean', current: settings.vimModeEnabled || false },
+            { label: 'Notifications', value: 'notifications', type: 'select', current: settings.notifications || 'Auto' },
+            { label: 'Output style', value: 'outputStyle', type: 'select', current: settings.outputStyle || 'default' },
+            { label: 'Language', value: 'language', type: 'select', current: settings.language || 'Default (English)' },
+            { label: 'Editor mode', value: 'editorMode', type: 'select', current: settings.editorMode || 'normal' },
+            { label: 'Show code diff footer', value: 'showCodeDiffFooter', type: 'boolean', current: settings.showCodeDiffFooter ?? true },
+            { label: 'Show PR status footer', value: 'showPrStatusFooter', type: 'boolean', current: settings.showPrStatusFooter ?? true },
+            { label: 'Model', value: 'model', type: 'select', current: settings.model || 'Default (recommended)' },
+            { label: 'Auto-connect to IDE (external terminal)', value: 'autoConnectIde', type: 'boolean', current: settings.autoConnectIde ?? true },
+            { label: 'Claude in Chrome enabled by default', value: 'chromeEnabled', type: 'boolean', current: settings.chromeEnabled ?? true },
         ];
     }, [settings]);
 
@@ -132,10 +134,14 @@ export function SettingsMenu({ onExit, initialTab = 'Status' }: SettingsMenuProp
     }, [configItems, searchQuery]);
 
     const handleConfigSelect = (item: any) => {
+        const configItem = configItems.find(i => i.value === item.value);
+        if (!configItem) return;
+
         // Toggle boolean
-        if (item.type === 'boolean') {
-            // In a real implementation we'd update settings
-            // setSettings(prev => ({ ...prev, [item.value]: !item.current }));
+        if (configItem.type === 'boolean') {
+            const newValue = !configItem.current;
+            updateSettings({ [configItem.value]: newValue });
+            setSettings(getSettings());
         }
     };
 
@@ -164,11 +170,16 @@ export function SettingsMenu({ onExit, initialTab = 'Status' }: SettingsMenuProp
                     }))}
                     itemComponent={({ label, isSelected }) => {
                         const item = configItems.find(i => i.label === label);
-                        const valueDisplay = item?.current.toString();
+                        let valueDisplay = item?.current.toString();
+                        if (item?.type === 'boolean') {
+                            valueDisplay = item.current ? '[X]' : '[ ]';
+                        }
                         return (
                             <Box justifyContent="space-between" width="100%">
                                 <Text color={isSelected ? 'cyan' : 'white'}>{label}</Text>
-                                <Text color={isSelected ? 'cyan' : 'gray'}>{valueDisplay}</Text>
+                                <Box>
+                                    <Text color={isSelected ? 'cyan' : 'gray'}>{valueDisplay}</Text>
+                                </Box>
                             </Box>
                         );
                     }}
@@ -183,12 +194,42 @@ export function SettingsMenu({ onExit, initialTab = 'Status' }: SettingsMenuProp
         </Box>
     );
 
-    const renderUsageTab = () => (
-        <Box flexDirection="column" paddingX={2}>
-            <Text>Usage statistics not available in this view yet.</Text>
-            <Text>Use /cost for current session details.</Text>
-        </Box>
-    );
+    const renderUsageTab = () => {
+        const usageData = costService.getUsage();
+        const cost = costService.calculateCost();
+        return (
+            <Box flexDirection="column" paddingX={2}>
+                <Box marginBottom={1}>
+                    <Text bold underline>Session Usage Details</Text>
+                </Box>
+                <Box flexDirection="column">
+                    <Box justifyContent="space-between">
+                        <Text>Input Tokens:</Text>
+                        <Text color="cyan">{usageData.inputTokens.toLocaleString()}</Text>
+                    </Box>
+                    <Box justifyContent="space-between">
+                        <Text>Output Tokens:</Text>
+                        <Text color="cyan">{usageData.outputTokens.toLocaleString()}</Text>
+                    </Box>
+                    <Box justifyContent="space-between">
+                        <Text>Cache Write Tokens:</Text>
+                        <Text color="cyan">{(usageData.cacheWriteTokens || 0).toLocaleString()}</Text>
+                    </Box>
+                    <Box justifyContent="space-between">
+                        <Text>Cache Read Tokens:</Text>
+                        <Text color="cyan">{(usageData.cacheReadTokens || 0).toLocaleString()}</Text>
+                    </Box>
+                    <Box marginTop={1} borderStyle="single" borderColor="green" paddingX={1} justifyContent="space-between">
+                        <Text bold>Estimated Cost:</Text>
+                        <Text bold color="green">${cost.toFixed(4)}</Text>
+                    </Box>
+                </Box>
+                <Box marginTop={1}>
+                    <Text dimColor>Rates vary by model. Calculations are estimates.</Text>
+                </Box>
+            </Box>
+        );
+    };
 
     return (
         <Box flexDirection="column" width="100%" height="100%">

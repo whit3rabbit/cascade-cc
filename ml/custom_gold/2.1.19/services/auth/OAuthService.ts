@@ -34,6 +34,7 @@ export interface TokenExchangeResponse {
     refresh_token?: string;
     expires_in: number;
     scope: string;
+    account?: OAuthAccount;
     [key: string]: any;
 }
 
@@ -47,6 +48,19 @@ export interface RefreshedTokenData {
     scopes: string[];
     subscriptionType?: string;
     rateLimitTier?: string;
+    account?: OAuthAccount;
+}
+
+export interface OAuthAccount {
+    accountUuid: string;
+    emailAddress: string;
+    organizationUuid: string;
+    displayName?: string;
+    hasExtraUsageEnabled?: boolean;
+    billingType?: string;
+    organizationRole?: string;
+    workspaceRole?: string;
+    organizationName?: string;
 }
 
 /**
@@ -72,13 +86,14 @@ export const OAuthService = {
             const dataStr = KeychainService.readToken(serviceName);
             if (dataStr) {
                 try {
-                    const data = JSON.parse(dataStr);
+                    const rawData = JSON.parse(dataStr);
+                    const data = rawData.claudeAiOauth || rawData;
                     if (data.accessToken) {
                         // Check if expiration is near
                         const now = Date.now();
                         const fiveMinutes = 5 * 60 * 1000;
                         if (data.expiresAt && now + fiveMinutes < data.expiresAt) {
-                            setStatsigStorage({ accessToken: data.accessToken, oauthAccount: data.account });
+                            setStatsigStorage({ accessToken: data.accessToken, oauthAccount: data.account || data.oauthAccount });
                             return data.accessToken;
                         }
 
@@ -112,10 +127,12 @@ export const OAuthService = {
         if (KeychainService.isAvailable()) {
             const serviceName = getProductName("-credentials");
             const tokenData = JSON.stringify({
-                accessToken,
-                refreshToken,
-                expiresAt,
-                account
+                claudeAiOauth: {
+                    accessToken,
+                    refreshToken,
+                    expiresAt,
+                    account
+                }
             });
             KeychainService.saveToken(serviceName, tokenData);
         }
@@ -245,6 +262,53 @@ export const OAuthService = {
         } catch (error) {
             // track("tengu_oauth_token_refresh_failure", { error: error.message });
             throw error;
+        }
+    },
+
+    /**
+     * Fetches the user profile.
+     */
+    async fetchProfile(accessToken: string): Promise<any> {
+        const response = await RetryStrategy.get(`${CONSOLE_AUTHORIZE_URL.replace("/oauth/authorize", "")}/api/oauth/profile`, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json"
+            }
+        });
+
+        if (response.status !== 200) {
+            throw new Error(`Failed to fetch profile: ${response.statusText}`);
+        }
+
+        return response.data;
+    },
+
+    /**
+     * Fetches user roles.
+     */
+    async fetchRoles(accessToken: string): Promise<any> {
+        const response = await RetryStrategy.get(ROLES_URL, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json"
+            }
+        });
+
+        if (response.status !== 200) {
+            throw new Error(`Failed to fetch roles: ${response.statusText}`);
+        }
+
+        return response.data;
+    },
+
+    /**
+     * Logs out the user by clearing local persistence.
+     */
+    async logout(): Promise<void> {
+        setStatsigStorage({ accessToken: undefined, oauthAccount: undefined });
+        if (KeychainService.isAvailable()) {
+            const serviceName = getProductName("-credentials");
+            KeychainService.deleteToken(serviceName);
         }
     }
 };

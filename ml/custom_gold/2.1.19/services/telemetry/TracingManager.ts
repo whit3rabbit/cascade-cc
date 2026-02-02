@@ -52,11 +52,16 @@ try {
 let interactionSequence = 0;
 const spanMap = new Map<string, { span: Span; startTime: number }>();
 
+import { getSettings } from '../config/SettingsService.js';
+
 /**
- * Checks if enhanced telemetry is enabled via environment variables.
+ * Checks if enhanced telemetry is enabled via environment variables or settings.
  */
 function isEnhancedTelemetryEnabled(): boolean {
-    return !!(process.env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA || process.env.ENABLE_ENHANCED_TELEMETRY_BETA);
+    if (process.env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA || process.env.ENABLE_ENHANCED_TELEMETRY_BETA) {
+        return true;
+    }
+    return !!getSettings().telemetry?.enhanced;
 }
 
 /**

@@ -57,10 +57,20 @@ export class McpServerManager {
     }
 
     /**
+     * Checks if a server is enabled in its configuration.
+     */
+    static isMcpServerEnabled(serverName: string): boolean {
+        const settings = getSettings();
+        const config = settings.mcp?.servers?.[serverName] as any;
+        if (!config) return true; // Default to true for dynamic servers or if missing config
+        return config.enabled !== false;
+    }
+
+    /**
      * Adds or updates an MCP server configuration in a specific scope.
      */
     static async addMcpServer(name: string, config: any, scope: string) {
-        if (name.match(/[^a-zA-Z0-9_-]/)) {
+        if (name.match(/[^a-zA-Z0-9_: @-]/)) {
             throw new Error(`Invalid MCP server name: ${name}`);
         }
 

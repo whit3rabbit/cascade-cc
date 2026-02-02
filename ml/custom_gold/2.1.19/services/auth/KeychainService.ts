@@ -77,8 +77,16 @@ export const KeychainService: KeychainInterface = {
             const res = runCommand("security", ["find-generic-password", "-a", user, "-w", "-s", serviceName]);
             if (res.code === 0) {
                 token = res.stdout;
-            } else if (res.stderr.includes("errSecAuthFailed")) {
-                console.warn(`Keychain access denied for ${serviceName} on macOS.`);
+            } else {
+                // Return codes: 44 = item not found (silent), 36 = access denied/locked, 128 = user canceled
+                if (res.code === 36 || res.stderr.includes("errSecAuthFailed")) {
+                    console.warn(`Keychain access denied for "${serviceName}" on macOS.`);
+                    console.warn("Guidance: Ensure the terminal has 'Developer Tools' permissions in System Settings > Privacy & Security, or that the binary is properly signed.");
+                } else if (res.code === 128) {
+                    console.warn(`Keychain access canceled by user for "${serviceName}".`);
+                } else if (res.code !== 44) {
+                    console.debug(`Keychain error (${res.code}): ${res.stderr}`);
+                }
             }
         } else if (platform === "win32") {
             const script = `$vault = New-Object Windows.Security.Credentials.PasswordVault; try { $c = $vault.Retrieve("${serviceName}", "${user}"); $c.FillPassword(); $c.Password } catch { exit 1 }`;

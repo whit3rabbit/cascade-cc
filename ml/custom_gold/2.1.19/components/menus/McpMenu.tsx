@@ -93,6 +93,27 @@ export function McpMenu({ onExit }: McpMenuProps) {
     // Flatten for navigation
     const flatItems = [...userMcpItems, ...builtinItems];
 
+    const handleToggle = async (item: ServerItem) => {
+        const isCurrentlyConnected = activeClients.includes(item.id);
+
+        try {
+            if (item.type === 'builtin') {
+                // For built-ins, we can only restart if connected
+                if (isCurrentlyConnected) {
+                    await mcpClientManager.restart(item.id);
+                }
+            } else {
+                // For user MCPs/plugins, toggle enabled state
+                const { PluginManager } = await import('../../services/mcp/PluginManager.js');
+                await PluginManager.togglePlugin(item.id, !isCurrentlyConnected);
+            }
+            // Refresh data
+            await loadData();
+        } catch (err) {
+            console.error(`Failed to toggle MCP server ${item.id}:`, err);
+        }
+    };
+
     useInput((input, key) => {
         if (key.escape) {
             onExit();
@@ -104,11 +125,9 @@ export function McpMenu({ onExit }: McpMenuProps) {
             setSelectedIndex(prev => Math.min(flatItems.length - 1, prev + 1));
         }
         if (key.return) {
-            // Toggle functionality could go here (connect/disconnect)
-            // For now we just acknowledge or maybe toggle if implemented
             const item = flatItems[selectedIndex];
             if (item) {
-                // handleToggle(item);
+                handleToggle(item);
             }
         }
     });

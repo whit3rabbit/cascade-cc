@@ -33,6 +33,7 @@ export interface GrepInput {
 export const GrepTool = {
     name: "Grep",
     description: "Search for patterns in files using ripgrep (rg).",
+    isConcurrencySafe: true,
     async call(input: GrepInput) {
         const { pattern, path = ".", glob, output_mode = "content", type, multiline, head_limit = 0, offset = 0 } = input;
 

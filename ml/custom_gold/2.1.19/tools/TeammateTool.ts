@@ -454,7 +454,7 @@ export const TeammateTool = {
                                 continue;
                             }
                         }
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        await new Promise(resolve => setTimeout(resolve, 250));
                     }
                     return {
                         data: {
@@ -663,10 +663,12 @@ export const TeammateTool = {
                 }
 
                 // Construct Command
-                const isDev = EnvService.get("NODE_ENV") === 'development' || process.argv[1].includes('.ts') || process.argv[1].includes('cli.tsx');
+                const isTsFile = process.argv[1].endsWith('.ts') || process.argv[1].endsWith('.tsx');
+                const isDevEnv = EnvService.get("NODE_ENV") === 'development' || EnvService.isTruthy("CLAUDE_DEV");
                 const requestId = createRequestId("join", resolved);
+
                 let command;
-                if (isDev) {
+                if (isTsFile || (isDevEnv && !process.argv[1].includes('bin/claude'))) {
                     command = `npm run dev -- --agent ${uniqueName} --auto-join ${requestId}`;
                 } else {
                     command = `claude --agent ${uniqueName} --auto-join ${requestId}`;

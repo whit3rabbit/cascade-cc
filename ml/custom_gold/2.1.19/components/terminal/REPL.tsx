@@ -37,9 +37,11 @@ import { LspRecommendationDialog } from '../onboarding/LspRecommendationDialog.j
 import { SettingsMenu } from '../menus/SettingsMenu.js';
 import { McpMenu } from '../menus/McpMenu.js';
 import { AgentsMenu } from '../menus/AgentsMenu.js';
+import { BugReportCommand } from '../../commands/BugReportCommand.js';
 import { TaskList } from '../TaskList.js';
 import { StatusLine } from './StatusLine.js';
 import { ModelPicker } from '../ModelPicker/ModelPicker.js';
+import { Doctor } from './Doctor.js';
 import Spinner from 'ink-spinner';
 import { DocumentationService } from '../../services/documentation/DocumentationService.js';
 import { useInput } from 'ink';
@@ -79,13 +81,17 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
     const [costThreshold] = useState(0.50); // Default threshold of $0.50
     const [usage, setUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
     const [mcpTools, setMcpTools] = useState<any[]>([]);
-    const [currentMenu, setCurrentMenu] = useState<'config' | 'mcp' | 'search' | 'tasks' | 'model' | 'status' | 'agents' | null>(null);
+    const [currentMenu, setCurrentMenu] = useState<'config' | 'mcp' | 'search' | 'tasks' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | null>(null);
+    const [bugReportInitialDescription, setBugReportInitialDescription] = useState<string>('');
     const [suggestions, setSuggestions] = useState<string[]>([]);
     const [exitConfirmation, setExitConfirmation] = useState(false);
     const [shellSnapshotPath, setShellSnapshotPath] = useState<string | undefined>(undefined);
     const [subscription, setSubscription] = useState<string>('');
     const [scrollOffset, setScrollOffset] = useState(0);
     const [cwd, setCwd] = useState(process.cwd());
+    const [lastChar, setLastChar] = useState('');
+    const [isHistorySearching, setIsHistorySearching] = useState(false);
+    const [historySearchQuery, setHistorySearchQuery] = useState('');
 
     useEffect(() => {
         // Dispatch SessionStart hook
@@ -116,8 +122,48 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
         runSessionHooks();
     }, []);
 
+    useEffect(() => {
+        const settings = getSettings();
+        if (settings.vimModeEnabled !== undefined) {
+            setVimModeEnabled(settings.vimModeEnabled);
+        }
+    }, [currentMenu]);
+
     // Global Shortcuts
     useInput((input, key) => {
+        if (activeScreen === 'doctor-report' && input !== '') {
+            setCurrentMenu(null);
+            return;
+        }
+
+        if (isHistorySearching) {
+            if (key.return) {
+                setIsHistorySearching(false);
+                const query = historySearchQuery.toLowerCase();
+                // Find first message from Bottom (current) to Top that matches
+                const index = messages.slice().reverse().findIndex(m =>
+                    m.content && typeof m.content === 'string' && m.content.toLowerCase().includes(query)
+                );
+                if (index !== -1) {
+                    setScrollOffset(index);
+                }
+                return;
+            }
+            if (key.escape) {
+                setIsHistorySearching(false);
+                return;
+            }
+            if (key.backspace) {
+                setHistorySearchQuery(prev => prev.slice(0, -1));
+                return;
+            }
+            if (!key.ctrl && !key.meta && input) {
+                setHistorySearchQuery(prev => prev + input);
+                return;
+            }
+            return;
+        }
+
         if (input === 't' && key.ctrl) {
             setCurrentMenu('tasks');
         }
@@ -127,6 +173,10 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
             setScrollOffset(0);
         }
         if (input === 'd' && key.ctrl) {
+            if (vimModeEnabled && vimMode === 'NORMAL') {
+                setScrollOffset(prev => Math.max(0, prev - 10));
+                return;
+            }
             exit();
         }
         if (input === 'c' && key.ctrl) {
@@ -153,6 +203,36 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
         }
         if (key.pageDown) {
             setScrollOffset(prev => Math.max(0, prev - 5));
+        }
+
+        // Vim Scrolling
+        if (vimModeEnabled && vimMode === 'NORMAL') {
+            if (input === 'g') {
+                if (lastChar === 'g') {
+                    setScrollOffset(messages.length);
+                    setLastChar('');
+                } else {
+                    setLastChar('g');
+                }
+                return;
+            }
+            setLastChar('');
+
+            if (input === 'G') {
+                setScrollOffset(0);
+                return;
+            }
+
+            if (key.ctrl && input === 'u') {
+                setScrollOffset(prev => prev + 10);
+                return;
+            }
+
+            if (input === '/') {
+                setIsHistorySearching(true);
+                setHistorySearchQuery('');
+                return;
+            }
         }
 
         if (input === 'o' && key.ctrl) {
@@ -226,6 +306,8 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
         if (currentMenu === 'tasks') return 'tasks-menu';
         if (currentMenu === 'agents') return 'agents-menu';
         if (currentMenu === 'model') return 'model-menu';
+        if (currentMenu === 'bug') return 'bug-report';
+        if (currentMenu === 'doctor') return 'doctor-report';
         return 'transcript';
     };
 
@@ -253,6 +335,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
             exit,
             cwd: process.cwd(),
             setCurrentMenu,
+            setBugReportInitialDescription,
             messages
         });
     };
@@ -404,152 +487,138 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
         <Box flexDirection="column" padding={0} width="100%" height="100%">
             {showTasks && <TaskList tasks={tasks} />}
 
-            {messages.length === 0 && (
-                <Box flexDirection="column" paddingX={2}>
-                    <Logo version="2.1.27" model={model || "Sonnet 4.5"} cwd={process.cwd()} subscription={subscription} />
-                </Box>
-            )}
-
             <Box flexGrow={1} flexDirection="column" overflowY="hidden" paddingX={2}>
-                <MessageHistory messages={messages} scrollOffset={scrollOffset} />
+                {activeScreen === 'transcript' ? (
+                    <>
+                        {messages.length === 0 ? (
+                            <Box flexDirection="column" paddingTop={1}>
+                                <Logo version="2.1.27" model={model || "Sonnet 4.5"} cwd={process.cwd()} subscription={subscription} />
+                            </Box>
+                        ) : (
+                            <MessageHistory messages={messages} scrollOffset={scrollOffset} />
+                        )}
+                    </>
+                ) : (
+                    <Box flexGrow={1} flexDirection="column">
+                        {activeScreen === 'cost' && (
+                            <CostThresholdDialog
+                                onApprove={() => setShowCostWarning(false)}
+                                onExit={() => exit()}
+                                cost={cost}
+                                threshold={costThreshold}
+                            />
+                        )}
+                        {activeScreen === 'settings-menu' && (
+                            <SettingsMenu
+                                onExit={() => setCurrentMenu(null)}
+                                initialTab={currentMenu === 'config' ? 'Config' : 'Status'}
+                            />
+                        )}
+                        {activeScreen === 'mcp-menu' && (
+                            <McpMenu onExit={async () => {
+                                setCurrentMenu(null);
+                                await refreshMcpTools();
+                            }} />
+                        )}
+                        {activeScreen === 'agents-menu' && (
+                            <AgentsMenu onExit={() => setCurrentMenu(null)} />
+                        )}
+                        {activeScreen === 'bug-report' && (
+                            <BugReportCommand
+                                messages={messages}
+                                initialDescription={bugReportInitialDescription}
+                                onDone={(msg) => {
+                                    setCurrentMenu(null);
+                                    setMessages(prev => [...prev, { role: 'assistant', content: msg }]);
+                                }}
+                            />
+                        )}
+                        {activeScreen === 'search-menu' && (
+                            <UnifiedSearchMenu
+                                history={history}
+                                commands={commandRegistry.getAllCommands().map(c => ({
+                                    label: c.name,
+                                    value: `/${c.name}`,
+                                    description: c.description
+                                }))}
+                                onSelect={(val) => {
+                                    setCurrentMenu(null);
+                                    handleSubmit(val);
+                                }}
+                                onExit={() => setCurrentMenu(null)}
+                            />
+                        )}
+                        {activeScreen === 'tasks-menu' && <TaskMenu onExit={() => setCurrentMenu(null)} />}
+                        {activeScreen === 'model-menu' && (
+                            <ModelPicker
+                                initialModel={model || null}
+                                onSelect={(val) => {
+                                    setCurrentMenu(null);
+                                    if (val) handleSubmit(`/model ${val}`);
+                                }}
+                                onCancel={() => setCurrentMenu(null)}
+                                isStandalone={true}
+                            />
+                        )}
+                        {activeScreen === 'doctor-report' && <Doctor />}
+                    </Box>
+                )}
+
+                {/* Modals/Dialogs that overlay or interrupt */}
+                {activeScreen === 'tool-permission' && (
+                    <PermissionDialog
+                        toolUseConfirm={toolPermissions[0]}
+                        onDone={(response: any) => {
+                            const req = toolPermissions[0];
+                            if (response && response.optionType === 'accept-always') {
+                                handlePermissionResponse({ behavior: 'allow', scope: 'always', message: 'User accepted' }, req.tool, req.input, {});
+                            }
+                            if (req.resolve) req.resolve('allowed');
+                            setToolPermissions(prev => prev.slice(1));
+                        }}
+                        onReject={() => {
+                            const req = toolPermissions[0];
+                            if (req.resolve) req.resolve('denied');
+                            setToolPermissions(prev => prev.slice(1));
+                        }}
+                        parseInput={(i) => i}
+                    />
+                )}
+                {activeScreen === 'worker-permission' && (
+                    <WorkerPermissionDialog
+                        request={workerPermissions[0]}
+                        onApprove={() => setWorkerPermissions(prev => prev.slice(1))}
+                        onReject={() => setWorkerPermissions(prev => prev.slice(1))}
+                    />
+                )}
+                {activeScreen === 'sandbox-permission' && (
+                    <SandboxPermissionDialog
+                        hostPattern={sandboxPermissions[0]}
+                        onDone={() => setSandboxPermissions(prev => prev.slice(1))}
+                    />
+                )}
+                {activeScreen === 'ide-onboarding' && (
+                    <OnboardingWorkflow onDone={() => setShowIdeOnboarding(false)} />
+                )}
+                {activeScreen === 'lsp-recommendation' && (
+                    <LspRecommendationDialog onDone={() => setLspRecommendation(null)} />
+                )}
             </Box>
 
-
-            {isTyping && !planMode && (
-                <Box paddingX={1}>
-                    <Text color="green">
-                        <Spinner type="dots" /> Claude is thinking...
-                    </Text>
-                </Box>
-            )}
-
-            {/* Render conditional screens */}
-            {activeScreen === 'cost' && (
-                <CostThresholdDialog
-                    onApprove={() => {
-                        setShowCostWarning(false);
-                    }}
-                    onExit={() => exit()}
-                    cost={cost}
-                    threshold={costThreshold}
-                />
-            )}
-
-            {activeScreen === 'tool-permission' && (
-                <PermissionDialog
-                    toolUseConfirm={toolPermissions[0]}
-                    onDone={(response: any) => {
-                        const req = toolPermissions[0];
-                        if (response && response.optionType === 'accept-always') {
-                            handlePermissionResponse({ behavior: 'allow', scope: 'always', message: 'User accepted always' }, req.tool, req.input, {});
-                        }
-                        if (req.resolve) req.resolve('allowed');
-                        setToolPermissions(prev => prev.slice(1));
-                    }}
-                    onReject={() => {
-                        const req = toolPermissions[0];
-                        if (req.resolve) req.resolve('denied');
-                        setToolPermissions(prev => prev.slice(1));
-                    }}
-                    parseInput={(input) => input}
-                />
-            )}
-
-            {activeScreen === 'worker-permission' && (
-                <WorkerPermissionDialog
-                    request={workerPermissions[0]}
-                    onApprove={() => setWorkerPermissions(prev => prev.slice(1))}
-                    onReject={() => setWorkerPermissions(prev => prev.slice(1))}
-                />
-            )}
-
-            {activeScreen === 'sandbox-permission' && (
-                <SandboxPermissionDialog
-                    hostPattern={sandboxPermissions[0]}
-                    onDone={() => setSandboxPermissions(prev => prev.slice(1))}
-                />
-            )}
-
-            {activeScreen === 'ide-onboarding' && (
-                <OnboardingWorkflow
-                    onDone={() => {
-                        setShowIdeOnboarding(false);
-                    }}
-                />
-            )}
-
-            {activeScreen === 'lsp-recommendation' && (
-                <LspRecommendationDialog
-                    onDone={() => setLspRecommendation(null)}
-                />
-            )}
-
-            {activeScreen === 'settings-menu' && (
-                <SettingsMenu
-                    onExit={() => setCurrentMenu(null)}
-                    initialTab={currentMenu === 'config' ? 'Config' : 'Status'}
-                />
-            )}
-
-            {activeScreen === 'mcp-menu' && (
-                <McpMenu onExit={async () => {
-                    setCurrentMenu(null);
-                    await refreshMcpTools();
-                }} />
-            )}
-
-            {activeScreen === 'agents-menu' && (
-                <AgentsMenu onExit={() => setCurrentMenu(null)} />
-            )}
-
-            {activeScreen === 'search-menu' && (
-                <Box paddingX={2} paddingY={1}>
-                    <UnifiedSearchMenu
-                        history={history}
-                        commands={commandRegistry.getAllCommands().map(c => ({
-                            label: c.name,
-                            value: `/${c.name}`,
-                            description: c.description
-                        }))}
-                        onSelect={(val) => {
-                            setCurrentMenu(null);
-                            handleSubmit(val);
-                        }}
-                        onExit={() => setCurrentMenu(null)}
-                    />
-                </Box>
-            )}
-
-            {activeScreen === 'tasks-menu' && (
-                <Box paddingX={2} paddingY={1}>
-                    <TaskMenu onExit={() => setCurrentMenu(null)} />
-                </Box>
-            )}
-
-            {activeScreen === 'model-menu' && (
-                <Box paddingX={2} paddingY={1}>
-                    <ModelPicker
-                        initialModel={model || null}
-                        onSelect={(val) => {
-                            setCurrentMenu(null);
-                            if (val) {
-                                handleSubmit(`/model ${val}`);
-                            }
-                        }}
-                        onCancel={() => setCurrentMenu(null)}
-                        isStandalone={true}
-                    />
-                </Box>
-            )}
-
-
-
-            {activeScreen === 'transcript' && (
-                <Box flexDirection="column" width="100%">
-                    <Box width="100%">
-                        <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
+            <Box flexDirection="column" width="100%">
+                {isTyping && !planMode && (
+                    <Box paddingX={1} marginBottom={0}>
+                        <Text color="green">
+                            <Spinner type="dots" /> Claude is thinking...
+                        </Text>
                     </Box>
-                    <Box paddingX={2} paddingY={0}>
+                )}
+
+                {activeScreen === 'transcript' && (
+                    <Box paddingX={2} paddingY={0} flexDirection="column">
+                        <Box width="100%">
+                            <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
+                        </Box>
                         <UserPromptMessage
                             onSubmit={handleSubmit}
                             onClear={() => setMessages([])}
@@ -559,30 +628,34 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                             planMode={planMode}
                             suggestions={suggestions}
                             onCancel={() => {
-                                if (exitConfirmation) {
-                                    exit();
-                                } else {
+                                if (exitConfirmation) exit();
+                                else {
                                     setExitConfirmation(true);
                                     setTimeout(() => setExitConfirmation(false), 2000);
                                 }
                             }}
                         />
                     </Box>
-                </Box>
-            )}
+                )}
 
-            {/* Status Line */}
-            <StatusLine
-                vimMode={vimMode}
-                vimModeEnabled={vimModeEnabled}
-                model={model || 'Sonnet 4.5'}
-                isTyping={isTyping}
-                cwd={cwd}
-                showTasks={showTasks}
-                usage={usage}
-                planMode={planMode}
-                exitConfirmation={exitConfirmation}
-            />
+                <StatusLine
+                    vimMode={vimMode}
+                    vimModeEnabled={vimModeEnabled}
+                    model={model || 'Sonnet 4.5'}
+                    isTyping={isTyping}
+                    cwd={cwd}
+                    showTasks={showTasks}
+                    usage={usage}
+                    planMode={planMode}
+                    exitConfirmation={exitConfirmation}
+                />
+
+                {isHistorySearching && (
+                    <Box paddingX={2} marginBottom={0}>
+                        <Text color="yellow">/ {historySearchQuery}</Text>
+                    </Box>
+                )}
+            </Box>
         </Box>
     );
 };
