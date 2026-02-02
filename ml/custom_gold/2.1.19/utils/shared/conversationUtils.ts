@@ -22,6 +22,7 @@ export interface TokenUsage {
 
 export interface Message {
     type: string;
+    role?: string;
     text?: string;
     content?: any;
     cacheScope?: string | null;
@@ -104,10 +105,44 @@ export function getMaxOutputTokens(userSettings: any, envMaxTokens?: string): nu
 }
 
 /**
- * Placeholder for message transformation for display.
- * Logic for bB2 and xB2 deobfuscation would be here.
+ * Transforms messages for display, handling attachments and caching hints.
+ * Logic derived from chunk1115 and chunk1342.
  */
 export function transformUserMessagesForDisplay(messages: Message[], cachingEnabled: boolean): Message[] {
-    // Stub implementation
-    return messages.map(msg => ({ ...msg }));
+    const transformed: Message[] = [];
+
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        const isLastInSequence = (i === messages.length - 1);
+
+        // Filter out hook progress messages if they are not the latest
+        if (msg.type === "progress" && !isLastInSequence) {
+            continue;
+        }
+
+        // Handle attachment transformation
+        if (msg.type === "attachment") {
+            const attachment = msg.content;
+            if (attachment?.type === "hook_cancelled" ||
+                attachment?.type === "hook_blocking_error" ||
+                attachment?.type === "hook_system_message") {
+                // Keep these as they represent critical state transitions
+                transformed.push({ ...msg });
+            }
+            continue;
+        }
+
+        // Apply caching scope to user messages if enabled
+        if (cachingEnabled && msg.role === 'user' && !msg.cacheScope) {
+            transformed.push({
+                ...msg,
+                cacheScope: isLastInSequence ? "ephemeral" : null
+            });
+            continue;
+        }
+
+        transformed.push({ ...msg });
+    }
+
+    return transformed;
 }

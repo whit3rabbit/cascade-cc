@@ -115,8 +115,46 @@ export const globalContext: { mcpCliMain?: () => any } = {
 };
 
 /**
- * Initialization utility (placeholder for future logic).
+ * Initialization utility to detect terminal color support.
+ * Matches logic in chunk036.
  */
 export function initialize(): void {
-    // No-op for now
+    const env = process.env;
+
+    // 1. Honor manual overrides
+    if (env.NO_COLOR || env.NODE_DISABLE_COLORS) {
+        process.env.FORCE_COLOR = '0';
+        return;
+    }
+
+    if (env.FORCE_COLOR) {
+        // Already set, honor it
+        return;
+    }
+
+    // 2. Continuous Integration checks
+    if (env.CI) {
+        if (['GITHUB_ACTIONS', 'GITEA_ACTIONS', 'CIRCLECI'].some(key => key in env)) {
+            process.env.FORCE_COLOR = '3'; // Truecolor support
+        } else {
+            process.env.FORCE_COLOR = '1'; // Basic support
+        }
+        return;
+    }
+
+    // 3. Terminal specific overrides
+    if (env.COLORTERM === 'truecolor' || env.TERM_PROGRAM === 'iTerm.app' || env.TERM === 'xterm-kitty') {
+        process.env.FORCE_COLOR = '3';
+        return;
+    }
+
+    if (env.TERM && /-256(color)?$/i.test(env.TERM)) {
+        process.env.FORCE_COLOR = '2';
+        return;
+    }
+
+    // 4. Default TTY check (handled by chalk/ink usually, but we set a baseline)
+    if (process.stdout.isTTY) {
+        process.env.FORCE_COLOR = '1';
+    }
 }

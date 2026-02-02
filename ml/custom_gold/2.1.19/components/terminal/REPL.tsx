@@ -41,7 +41,10 @@ import { BugReportCommand } from '../../commands/BugReportCommand.js';
 import { TaskList } from '../TaskList.js';
 import { StatusLine } from './StatusLine.js';
 import { ModelPicker } from '../ModelPicker/ModelPicker.js';
-import { Doctor } from './Doctor.js';
+import { CompactCommand } from '../../commands/CompactCommand.js';
+import { MemoryCommand } from '../../commands/MemoryCommand.js';
+import { CostCommand } from '../../commands/CostCommand.js';
+import { DoctorCommand } from '../../commands/DoctorCommand.js';
 import Spinner from 'ink-spinner';
 import { DocumentationService } from '../../services/documentation/DocumentationService.js';
 import { useInput } from 'ink';
@@ -81,7 +84,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
     const [costThreshold] = useState(0.50); // Default threshold of $0.50
     const [usage, setUsage] = useState<{ inputTokens: number; outputTokens: number }>({ inputTokens: 0, outputTokens: 0 });
     const [mcpTools, setMcpTools] = useState<any[]>([]);
-    const [currentMenu, setCurrentMenu] = useState<'config' | 'mcp' | 'search' | 'tasks' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | null>(null);
+    const [currentMenu, setCurrentMenu] = useState<'config' | 'mcp' | 'search' | 'tasks' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | 'compact' | 'memory' | 'cost' | null>(null);
     const [bugReportInitialDescription, setBugReportInitialDescription] = useState<string>('');
     const [suggestions, setSuggestions] = useState<string[]>([]);
     const [exitConfirmation, setExitConfirmation] = useState(false);
@@ -308,6 +311,9 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
         if (currentMenu === 'model') return 'model-menu';
         if (currentMenu === 'bug') return 'bug-report';
         if (currentMenu === 'doctor') return 'doctor-report';
+        if (currentMenu === 'compact') return 'compact-command';
+        if (currentMenu === 'memory') return 'memory-command';
+        if (currentMenu === 'cost') return 'cost-command';
         return 'transcript';
     };
 
@@ -352,6 +358,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
     };
 
     const handleSubmit = async (input: string) => {
+        if (isTyping) return;
         setHistory(prev => [...prev, input]);
 
         if (input.startsWith('/')) {
@@ -560,7 +567,42 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                                 isStandalone={true}
                             />
                         )}
-                        {activeScreen === 'doctor-report' && <Doctor />}
+                        {activeScreen === 'doctor-report' && (
+                            <DoctorCommand
+                                onDone={(msg) => {
+                                    setCurrentMenu(null);
+                                    setMessages(prev => [...prev, { role: 'assistant', content: msg }]);
+                                }}
+                            />
+                        )}
+                        {activeScreen === 'compact-command' && (
+                            <CompactCommand
+                                messages={messages}
+                                setMessages={setMessages}
+                                setIsTyping={setIsTyping}
+                                onDone={(msg) => {
+                                    setCurrentMenu(null);
+                                    setMessages(prev => [...prev, { role: 'assistant', content: msg }]);
+                                }}
+                            />
+                        )}
+                        {activeScreen === 'memory-command' && (
+                            <MemoryCommand
+                                cwd={cwd}
+                                onDone={(msg) => {
+                                    setCurrentMenu(null);
+                                    setMessages(prev => [...prev, { role: 'assistant', content: msg }]);
+                                }}
+                            />
+                        )}
+                        {activeScreen === 'cost-command' && (
+                            <CostCommand
+                                onDone={(msg) => {
+                                    setCurrentMenu(null);
+                                    setMessages(prev => [...prev, { role: 'assistant', content: msg }]);
+                                }}
+                            />
+                        )}
                     </Box>
                 )}
 
@@ -617,11 +659,15 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                 {activeScreen === 'transcript' && (
                     <Box paddingX={2} paddingY={0} flexDirection="column">
                         <Box width="100%">
-                            <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
+                            <Text dimColor>{"─".repeat(Math.max(0, Math.min(100, (process.stdout.columns || 80) - 4)))}</Text>
                         </Box>
                         <UserPromptMessage
                             onSubmit={handleSubmit}
                             onClear={() => setMessages([])}
+                            onClearScreen={() => {
+                                process.stdout.write('\u001b[2J\u001b[3J\u001b[H');
+                                setMessages([]);
+                            }}
                             history={history}
                             vimModeEnabled={vimModeEnabled}
                             onVimModeChange={setVimMode}

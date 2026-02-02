@@ -8,6 +8,7 @@ import { DoctorService, HealthCheckResult } from "../services/terminal/DoctorSer
 import { EnvService } from "../services/config/EnvService.js";
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { updateSettings } from "../services/config/SettingsService.js";
 
 // ... (imports remain the same)
 
@@ -19,7 +20,7 @@ export interface CommandContext {
     setIsTyping: (isTyping: boolean) => void;
     exit: () => void;
     cwd: string;
-    setCurrentMenu: (menu: 'config' | 'mcp' | 'tasks' | 'search' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | null) => void;
+    setCurrentMenu: (menu: 'config' | 'mcp' | 'tasks' | 'search' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | 'compact' | 'memory' | 'cost' | null) => void;
     setBugReportInitialDescription: (description: string) => void;
     messages: any[];
 }
@@ -95,9 +96,11 @@ export class SlashCommandDispatcher {
                     const claudeMdPath = join(context.cwd, 'CLAUDE.md');
                     if (existsSync(claudeMdPath)) {
                         context.setMessages(prev => [...prev, { role: 'assistant', content: '✅ `CLAUDE.md` already exists in this directory.' }]);
+                        return true;
                     } else {
-                        context.setMessages(prev => [...prev, { role: 'assistant', content: 'I will help you initialize this project by creating a `CLAUDE.md` file. I need to analyze your project structure first...' }]);
-                        // We return false to let the LLM handle the prompt defined in init.ts
+                        // Return false to let the REPL handle this as a prompt command
+                        // The actual prompt is handled by the LLM seeing the system instructions or 
+                        // by being injected into the conversation.
                         return false;
                     }
                 }
@@ -108,39 +111,20 @@ export class SlashCommandDispatcher {
                 return true;
 
             case '/compact':
-                context.setIsTyping(true);
-                PromptManager.compactMessages(context.messages || [], { model: "claude-3-5-sonnet-20241022" })
-                    .then(compacted => {
-                        context.setMessages(() => compacted);
-                        context.setMessages(prev => [...prev, { role: 'assistant', content: '✅ Conversation history compacted.' }]);
-                    })
-                    .finally(() => context.setIsTyping(false));
+                context.setCurrentMenu('compact');
                 return true;
 
             case '/context':
             case '/cost':
-                {
-                    const { costService } = await import('../services/terminal/CostService.js');
-                    const usage = costService.getUsage();
-                    const totalCost = costService.calculateCost();
-
-                    context.setMessages(prev => [...prev, {
-                        role: 'assistant',
-                        content: `**Session Usage & Cost**
-- **Tokens**: ${usage.inputTokens} in / ${usage.outputTokens} out
-- **Cache**: ${usage.cacheReadTokens || 0} read / ${usage.cacheWriteTokens || 0} written
-- **Estimated Cost**: **$${totalCost.toFixed(4)}**`
-                    }]);
-                }
+                context.setCurrentMenu('cost');
                 return true;
 
             case '/model':
                 if (!args) {
                     context.setCurrentMenu('model');
                 } else {
-                    // In a real app, this would persist the selection to session state or settings
-                    context.setMessages(prev => [...prev, { role: 'assistant', content: `Model preference updated to: **${args}**` }]);
-                    // Ideally we would trigger a callback or service update here
+                    updateSettings({ primaryModel: args });
+                    context.setMessages(prev => [...prev, { role: 'assistant', content: `Model preference updated and persisted to: **${args}**` }]);
                 }
                 return true;
 
@@ -157,15 +141,7 @@ export class SlashCommandDispatcher {
                 return true;
 
             case '/memory':
-                {
-                    const memoryPath = join(context.cwd, 'MEMORY.md');
-                    if (existsSync(memoryPath)) {
-                        const content = readFileSync(memoryPath, 'utf8');
-                        context.setMessages(prev => [...prev, { role: 'assistant', content: `**Current MEMORY.md Content:**\n\n${content}` }]);
-                    } else {
-                        context.setMessages(prev => [...prev, { role: 'assistant', content: '_MEMORY.md not found in current directory._' }]);
-                    }
-                }
+                context.setCurrentMenu('memory');
                 return true;
 
             case '/bug':

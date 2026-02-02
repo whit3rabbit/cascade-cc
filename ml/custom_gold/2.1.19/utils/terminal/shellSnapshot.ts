@@ -11,10 +11,9 @@ import { fileExists, getHomeDir, getRelativeFilePath, resolvePathFromHome } from
 import { onCleanup } from "../cleanup.js";
 import { getPlatform, isWsl } from "../platform/detector.js";
 import { getGitBashPath } from "../platform/shell.js";
-import { truncateString } from "../text/ansi.js";
-import { terminalLog, errorLog, infoLog, m1 as getCwd } from "../shared/runtime.js";
+import { shellQuote as R4 } from "./shellQuote.js";
+import { terminalLog, errorLog, m1 as getCwd } from "../shared/runtime.js";
 import { spawnBashCommand, executeBashCommand } from "../shared/bashUtils.js";
-import { signals } from "../shared/constants.js";
 import { EnvService } from "../../services/config/EnvService.js";
 
 const SHELL_SNAPSHOT_TIMEOUT = 10000;
@@ -24,17 +23,34 @@ const base64EncodedString = "\\\\";
  * Gets the rip-grep alias or function definition.
  */
 function getRipgrepAliasOrFunction() {
-    // Simplified ripGrepConfig implementation
-    const rgPath = "/usr/bin/rg"; // Fallback default
-    const exists = existsSync(rgPath);
+    // In gold, this queries a ripgrep config provider. 
+    // For now, we'll check common paths and environment.
+    const useBuiltin = EnvService.get("CLAUDE_CODE_USE_BUILTIN_RIPGREP") === "true";
+    const rgPath = useBuiltin ? "rg" : "/usr/bin/rg";
 
-    if (!exists) {
-        return { type: "alias", snippet: "rg" };
+    // Check if it's actually bundled or system
+    const isBundled = useBuiltin;
+
+    if (isBundled) {
+        return {
+            type: "function",
+            snippet: [
+                "function rg {",
+                "  if [[ -n $ZSH_VERSION ]]; then",
+                `    ARGV0=rg ${R4([rgPath])} "$@"`,
+                "  elif [[ $BASHPID != $$ ]]; then",
+                `    exec -a rg ${R4([rgPath])} "$@"`,
+                "  else",
+                `    (exec -a rg ${R4([rgPath])} "$@")`,
+                "  fi",
+                "}"
+            ].join('\n')
+        };
     }
 
     return {
         type: "alias",
-        snippet: truncateString([rgPath]),
+        snippet: R4([rgPath]),
     };
 }
 
@@ -49,7 +65,7 @@ function getShellConfigFilePath(shellPath: string): string {
 /**
  * Constructs the shell script to set up environment variables and aliases.
  */
-async function buildShellSetupScript() {
+async function buildShellSetupScript(shellPath: string) {
     let envPath = EnvService.get("PATH") || "";
     if (getPlatform() === "windows") {
         const result = await executeBashCommand("echo $PATH", {
@@ -72,13 +88,12 @@ async function buildShellSetupScript() {
     if (ripgrep.type === "function") {
         script += `
       cat >> "$SNAPSHOT_FILE" << 'RIPGREP_FUNC_END'
-  ${ripgrep.snippet}
+${ripgrep.snippet}
 RIPGREP_FUNC_END
     `;
     } else {
-        const escapedSnippet = ripgrep.snippet.replace(/'/g, "'\\''");
         script += `
-      echo '  alias rg='"'${escapedSnippet}'" >> "$SNAPSHOT_FILE"
+      echo '  alias rg='"'${ripgrep.snippet.replace(/'/g, "'\\''")}'" >> "$SNAPSHOT_FILE"
     `;
     }
 
@@ -87,8 +102,8 @@ RIPGREP_FUNC_END
   `;
 
     if (cliPath) {
-        const escapedCliPath = truncateString([cliPath.cliPath]);
-        const escapedArgs = cliPath.args.map(arg => truncateString([arg])).join(" ");
+        const escapedCliPath = R4([cliPath.cliPath]);
+        const escapedArgs = cliPath.args.map(arg => R4([arg])).join(" ");
         const mcpCliAlias = `${escapedCliPath} ${escapedArgs}`;
 
         script += `
@@ -100,11 +115,44 @@ RIPGREP_FUNC_END
     `;
     }
 
-    const finalPath = envPath || "";
     script += `
       # Add PATH to the file
-      echo "export PATH=${truncateString([finalPath])}" >> "$SNAPSHOT_FILE"
+      echo "export PATH=${R4([envPath])}" >> "$SNAPSHOT_FILE"
   `;
+
+    // Add function and alias harvesting logic from gold
+    const isZsh = shellPath.includes("zsh");
+    if (isZsh) {
+        script += `
+      echo "# Functions" >> "$SNAPSHOT_FILE"
+      typeset -f > /dev/null 2>&1
+      typeset +f | grep -vE '^(_|__)' | while read func; do
+        typeset -f "$func" >> "$SNAPSHOT_FILE"
+      done
+      echo "# Shell Options" >> "$SNAPSHOT_FILE"
+      setopt | sed 's/^/setopt /' | head -n 1000 >> "$SNAPSHOT_FILE"
+      echo "# Aliases" >> "$SNAPSHOT_FILE"
+      alias | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> "$SNAPSHOT_FILE"
+    `;
+    } else {
+        script += `
+      echo "# Functions" >> "$SNAPSHOT_FILE"
+      declare -f > /dev/null 2>&1
+      declare -F | cut -d' ' -f3 | grep -vE '^(_|__)' | while read func; do
+        declare -f "$func" >> "$SNAPSHOT_FILE"
+      done
+      echo "# Shell Options" >> "$SNAPSHOT_FILE"
+      shopt -p | head -n 1000 >> "$SNAPSHOT_FILE"
+      set -o | grep "on" | awk '{print "set -o " $1}' | head -n 1000 >> "$SNAPSHOT_FILE"
+      echo "shopt -s expand_aliases" >> "$SNAPSHOT_FILE"
+      echo "# Aliases" >> "$SNAPSHOT_FILE"
+      if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+        alias | grep -v "='winpty " | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> "$SNAPSHOT_FILE"
+      else
+        alias | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> "$SNAPSHOT_FILE"
+      fi
+    `;
+    }
 
     return script;
 }
@@ -138,10 +186,10 @@ async function buildShellSnapshotScript(shellPath: string, snapshotFilePath: str
     const shellConfigFile = getShellConfigFilePath(shellPath);
     const isZsh = shellConfigFile.endsWith(".zshrc");
     const sourceCommand = shouldSourceConfig ? `source "${shellConfigFile}" < /dev/null` : "# No user config file to source";
-    const shellSetupScript = await buildShellSetupScript();
+    const shellSetupScript = await buildShellSetupScript(shellPath);
 
     return `
-    SNAPSHOT_FILE=${truncateString([snapshotFilePath])}
+    SNAPSHOT_FILE=${R4([snapshotFilePath])}
     ${sourceCommand}
 
     # First, create/clear the snapshot file

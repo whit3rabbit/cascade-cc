@@ -27,31 +27,30 @@ const FileDiffView = ({ filePath, edits }: { filePath?: string, edits: any[] }) 
 export const PermissionDialog: React.FC<UsePermissionDialogProps> = (props) => {
     const {
         options,
-        onChange
+        onChange,
+        selectedIndex,
+        setSelectedIndex
     } = usePermissionDialog(props);
 
-    const [selectedIndex, setSelectedIndex] = useState(0);
-
-    const isFileEdit = props.toolUseConfirm.tool.name === 'edit_file' || props.toolUseConfirm.tool.name === 'repl_replace';
+    const isFileEdit = props.toolUseConfirm.tool.name === 'edit_file' ||
+        props.toolUseConfirm.tool.name === 'repl_replace' ||
+        props.toolUseConfirm.tool.name === 'replace_file_content';
 
     let edits: { old_string: string; new_string: string; replace_all: boolean }[] = [];
     if (isFileEdit && props.toolUseConfirm.input) {
-        const { file_path, old_string, new_string, replace_all } = props.toolUseConfirm.input;
+        const { old_string, new_string, replace_all } = props.toolUseConfirm.input;
         edits = [{ old_string, new_string, replace_all }];
     }
 
     useInput((input, key) => {
         if (key.downArrow || input === 'j') {
-            setSelectedIndex((prev) => (prev + 1) % options.length);
+            setSelectedIndex((prev: number) => (prev + 1) % options.length);
         }
         if (key.upArrow || input === 'k') {
-            setSelectedIndex((prev) => (prev - 1 + options.length) % options.length);
+            setSelectedIndex((prev: number) => (prev - 1 + options.length) % options.length);
         }
         if (key.return) {
-            const selected = options[selectedIndex];
-            if (selected) {
-                onChange(selected.option, "allowed");
-            }
+            onChange(options[selectedIndex].option);
         }
         if (key.escape) {
             props.onReject();
@@ -59,40 +58,43 @@ export const PermissionDialog: React.FC<UsePermissionDialogProps> = (props) => {
     });
 
     return (
-        <Box flexDirection="column" borderStyle="round" borderColor="yellow" padding={1}>
-            <Text bold color="yellow">
-                {isFileEdit ? "Confirm File Edit" : "Tool Permission Required"}
-            </Text>
-
-            <Text>
-                Allow <Text bold color="cyan">{props.toolUseConfirm.tool.name}</Text> to execute?
-            </Text>
-
-            <Box marginY={1}>
-                {isFileEdit ? (
-                    <FileDiffView filePath={props.toolUseConfirm.input?.file_path} edits={edits} />
-                ) : (
-                    <Box borderStyle="single" borderColor="gray" paddingX={1}>
-                        <Text dimColor>{JSON.stringify(props.toolUseConfirm.input, null, 2)}</Text>
-                    </Box>
-                )}
+        <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} paddingY={0}>
+            <Box paddingX={1} marginTop={-1}>
+                <Text bold color="yellow"> Tool Permission </Text>
             </Box>
 
-            <Box flexDirection="column" marginTop={1}>
-                {options.map((opt: { option: PermissionOptionValue; label: string }, i: number) => (
-                    <PermissionOption
-                        key={i}
-                        label={opt.label}
-                        value={opt.option.type}
-                        isFocused={i === selectedIndex}
-                        onSelect={() => onChange(opt.option, "allowed")}
-                        shortcut={i === 0 ? 'Enter' : undefined}
-                    />
-                ))}
+            <Box flexDirection="column" padding={1}>
+                <Text>
+                    Allow <Text bold color="cyan">{props.toolUseConfirm.tool.name}</Text> to execute?
+                </Text>
+
+                <Box marginY={1}>
+                    {isFileEdit ? (
+                        <FileDiffView filePath={props.toolUseConfirm.input?.file_path || props.toolUseConfirm.input?.TargetFile} edits={edits} />
+                    ) : (
+                        <Box borderStyle="single" borderColor="gray" paddingX={1}>
+                            <Text dimColor>{JSON.stringify(props.toolUseConfirm.input, null, 2)}</Text>
+                        </Box>
+                    )}
+                </Box>
+
+                <Box flexDirection="column" marginTop={0}>
+                    {options.map((opt: any, i: number) => (
+                        <PermissionOption
+                            key={i}
+                            label={opt.label}
+                            value={opt.option.type}
+                            isFocused={i === selectedIndex}
+                            onSelect={() => onChange(opt.option)}
+                            shortcut={i === 0 ? 'Enter' : undefined}
+                            description={opt.option.description}
+                        />
+                    ))}
+                </Box>
             </Box>
 
-            <Box marginTop={1}>
-                <Text dimColor>Press Enter to confirm, Esc to reject</Text>
+            <Box borderStyle="single" borderTop={false} borderBottom={false} borderLeft={false} borderRight={false} paddingX={1} marginBottom={-1}>
+                <Text dimColor> Use ↑↓ to navigate · Enter to select · Esc to deny </Text>
             </Box>
         </Box>
     );

@@ -94,14 +94,55 @@ export class StreamingResponse {
     }
 
     /**
-     * Creates a StreamingResponse from a ReadableStream.
+     * Creates a StreamingResponse from a Response with an SSE stream.
+     * 
+     * @param response - The response containing the SSE stream.
+     * @param controller - An optional AbortController to signal completion or error.
+     * @returns A new StreamingResponse instance.
+     */
+    static fromSSEResponse(response: Response, controller?: AbortController): StreamingResponse {
+        const sr = new StreamingResponse({});
+        sr.setResponse(response);
+
+        if (!response.body) {
+            sr.error(new Error("Response body is null"));
+            return sr;
+        }
+
+        const stream = response.body;
+        (async () => {
+            const { parseSseEvents } = await import('./SseParser.js');
+            try {
+                for await (const event of parseSseEvents(stream)) {
+                    if (event.data) {
+                        try {
+                            const parsed = JSON.parse(event.data);
+                            sr.receivedMessages.push(parsed);
+                            sr.messages.push(parsed);
+                            // In a real implementation, we might emit events or update state here.
+                        } catch (e) {
+                            console.error("Failed to parse SSE data as JSON:", event.data);
+                        }
+                    }
+                }
+                sr.done();
+            } catch (err) {
+                sr.error(err);
+            } finally {
+                controller?.abort();
+            }
+        })();
+
+        return sr;
+    }
+
+    /**
+     * Creates a StreamingResponse from a ReadableStream (generic).
      * 
      * @param _stream - The stream to wrap.
      * @returns A new StreamingResponse instance.
      */
     static fromReadableStream(_stream: ReadableStream): StreamingResponse {
-        // Placeholder for real stream parsing logic if needed.
-        // In a full implementation, this would handle the chunked SSE parsing.
         return new StreamingResponse({});
     }
 }

@@ -10,18 +10,30 @@ export interface AccessTokenData {
 }
 
 /**
- * Checks if the current build/environment is first-party.
+ * Checks if the current build/environment is first-party (Anthropic API).
  */
 export function isFirstParty(): boolean {
-    // Stub implementation; in a real app this might check process.env or a build constant.
-    return true;
+    const bedrock = process.env.CLAUDE_CODE_USE_BEDROCK;
+    const vertex = process.env.CLAUDE_CODE_USE_VERTEX;
+    const foundry = process.env.CLAUDE_CODE_USE_FOUNDRY;
+
+    // If any of these are set, it's NOT first-party (it's a proxy/partner integration)
+    return !(bedrock || vertex || foundry);
 }
 
 /**
  * Checks if a specific feature is enabled.
  */
 export function isFeatureEnabled(_featureName?: string): boolean {
-    return true;
+    const baseUrl = process.env.ANTHROPIC_BASE_URL;
+    if (!baseUrl) return true;
+
+    try {
+        const host = new URL(baseUrl).host;
+        return ["api.anthropic.com"].includes(host);
+    } catch {
+        return false;
+    }
 }
 
 /**

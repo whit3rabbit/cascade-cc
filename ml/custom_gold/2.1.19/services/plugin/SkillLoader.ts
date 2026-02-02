@@ -7,11 +7,14 @@ import { readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { getProjectRoot } from '../../utils/fs/paths.js';
+import { mcpClientManager } from '../mcp/McpClientManager.js';
 
 export interface SkillCommand {
     name: string;
     source: 'local_skill' | 'plugin_skill';
     path: string;
+    description?: string;
+    serverId?: string;
 }
 
 /**
@@ -49,10 +52,20 @@ export async function getSkillDirectoryCommands(): Promise<SkillCommand[]> {
 
 /**
  * Loads skills provided by MCP plugins or other external sources.
- * 
- * TODO: Interface with McpServerManager to retrieve plugin-provided skills.
+ * Integrates with McpClientManager to retrieve tools/capabilities.
  */
 export async function getPluginSkills(): Promise<SkillCommand[]> {
-    // Placeholder for plugin skill loading logic
-    return [];
+    try {
+        const tools = await mcpClientManager.getTools();
+        return tools.map(tool => ({
+            name: tool.name,
+            source: 'plugin_skill',
+            path: `mcp://${tool.serverId}/${tool.name}`,
+            description: tool.description,
+            serverId: tool.serverId
+        }));
+    } catch (error) {
+        console.error(`[SkillLoader] Failed to load plugin skills:`, error);
+        return [];
+    }
 }

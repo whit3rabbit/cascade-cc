@@ -4,6 +4,8 @@
  */
 
 import React, { createContext, useContext, ReactNode } from 'react';
+import { mcpClientManager } from './McpClientManager.js';
+import { togglePlugin } from './PluginManager.js';
 
 interface McpContextValue {
     reconnectMcpServer: (serverId: string) => void;
@@ -56,16 +58,25 @@ export function McpConnectionProvider({
     /**
      * Reconnects to a specific MCP server and updates its status.
      */
-    const reconnectMcpServer = (serverId: string) => {
+    const reconnectMcpServer = async (serverId: string) => {
         console.log(`[MCP] Reconnecting to server: ${serverId} (Endpoint: ${mcpCliEndpoint})`);
-        // Implementation would interface with McpServerManager
+        try {
+            await mcpClientManager.restart(serverId);
+        } catch (error) {
+            console.error(`[MCP] Failed to reconnect to ${serverId}:`, error);
+        }
     };
 
     /**
      * Toggles a server's enabled/disabled state.
      */
-    const toggleMcpServer = (serverId: string, enabled: boolean) => {
+    const toggleMcpServer = async (serverId: string, enabled: boolean) => {
         console.log(`[MCP] Toggling server ${serverId}: ${enabled ? 'Enabled' : 'Disabled'}`);
+        try {
+            await togglePlugin(serverId, enabled);
+        } catch (error) {
+            console.error(`[MCP] Failed to toggle server ${serverId}:`, error);
+        }
     };
 
     const value = { reconnectMcpServer, toggleMcpServer };

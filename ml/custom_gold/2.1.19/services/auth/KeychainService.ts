@@ -74,7 +74,15 @@ export const KeychainService: KeychainInterface = {
         let token: string | null = null;
 
         if (platform === "darwin") {
-            const res = runCommand("security", ["find-generic-password", "-a", user, "-w", "-s", serviceName]);
+            let res = runCommand("security", ["find-generic-password", "-a", user, "-w", "-s", serviceName]);
+            if (res.code !== 0 && res.code !== 128) {
+                // Fallback: try without specifying account (handles legacy items with different account names)
+                const fallbackRes = runCommand("security", ["find-generic-password", "-w", "-s", serviceName]);
+                if (fallbackRes.code === 0) {
+                    res = fallbackRes;
+                }
+            }
+
             if (res.code === 0) {
                 token = res.stdout;
             } else {
@@ -88,7 +96,8 @@ export const KeychainService: KeychainInterface = {
                     console.debug(`Keychain error (${res.code}): ${res.stderr}`);
                 }
             }
-        } else if (platform === "win32") {
+        }
+        else if (platform === "win32") {
             const script = `$vault = New-Object Windows.Security.Credentials.PasswordVault; try { $c = $vault.Retrieve("${serviceName}", "${user}"); $c.FillPassword(); $c.Password } catch { exit 1 }`;
             const res = runCommand("powershell", ["-Command", script]);
             if (res.code === 0) token = res.stdout;

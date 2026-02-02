@@ -7,6 +7,7 @@ import { getGitState, isGitRepo } from '../utils/shared/git.js';
 import { formatTranscript } from '../utils/shared/transcript.js';
 import { submitFeedback } from '../services/terminal/FeedbackService.js';
 import { openUrl } from '../utils/shared/open.js';
+import { BugReportService } from '../services/bugreport/BugReportService.js';
 
 interface BugReportCommandProps {
     messages: any[];
@@ -60,7 +61,7 @@ export const BugReportCommand: React.FC<BugReportCommandProps> = ({
                 gitRepo: gitInfo?.isGit ?? false,
                 gitState: gitInfo?.state ?? null,
                 transcript: formatTranscript(messages),
-                // lastApiRequest: getLastApiRequest() // TODO: Implement if needed
+                lastApiRequest: BugReportService.getLastApiRequest()
             };
 
             const result = await submitFeedback(report);

@@ -3,7 +3,6 @@
  * Role: Statsig Integration and Diagnostics
  */
 
-// Placeholder stubs for Statsig classes based on deobfuscated code
 export const LogLevel = {
     StatsigLogLevelNone: 0,
     Error: 1,
@@ -12,64 +11,94 @@ export const LogLevel = {
     Debug: 4,
 };
 
+const DEBUG_PREFIX = " DEBUG ";
+const INFO_PREFIX = "  INFO ";
+const WARN_PREFIX = "  WARN ";
+const ERROR_PREFIX = " ERROR ";
+
+function formatLogArgs(args: any[]) {
+    args.unshift("[Statsig]");
+    return args;
+}
+
 export class Log {
     static level = LogLevel.Warn;
 
     static info(...args: any[]) {
         if (Log.level >= LogLevel.Info) {
-            console.info("[Statsig Info]", ...args);
+            console.info(INFO_PREFIX, ...formatLogArgs(args));
         }
     }
     static debug(...args: any[]) {
         if (Log.level >= LogLevel.Debug) {
-            console.debug("[Statsig Debug]", ...args);
+            console.debug(DEBUG_PREFIX, ...formatLogArgs(args));
         }
     }
     static warn(...args: any[]) {
         if (Log.level >= LogLevel.Warn) {
-            console.warn("[Statsig Warn]", ...args);
+            console.warn(WARN_PREFIX, ...formatLogArgs(args));
         }
     }
     static error(...args: any[]) {
         if (Log.level >= LogLevel.Error) {
-            console.error("[Statsig Error]", ...args);
+            console.error(ERROR_PREFIX, ...formatLogArgs(args));
         }
     }
 }
 
+const markers = new Map<string, any[]>();
+const ACTION_START = "start";
+const ACTION_END = "end";
+const STEP_OVERALL = "overall";
+const STEP_NETWORK_REQUEST = "network_request";
+const STEP_PROCESS = "process";
+
 export const Diagnostics = {
-    markers: new Map<string, any[]>(),
+    _getMarkers(key: string) {
+        return markers.get(key);
+    },
 
     markInitOverallStart(key: string) {
-        this._addMarker(key, { action: "start", step: "overall" });
+        this._addMarker(key, { action: ACTION_START, step: STEP_OVERALL });
     },
+
     markInitOverallEnd(key: string, success: boolean, evaluationDetails: any) {
         this._addMarker(key, {
-            action: "end",
-            step: "overall",
+            action: ACTION_END,
+            step: STEP_OVERALL,
             success,
             error: success ? undefined : { name: "InitializeError", message: "Failed to initialize" },
             evaluationDetails
         });
     },
+
     markInitNetworkReqStart(key: string, networkReqData: any) {
-        this._addMarker(key, { action: "start", step: "network_request", ...networkReqData });
+        this._addMarker(key, { action: ACTION_START, step: STEP_NETWORK_REQUEST, ...networkReqData });
     },
+
     markInitNetworkReqEnd(key: string, networkReqData: any) {
-        this._addMarker(key, { action: "end", step: "network_request", ...networkReqData });
+        this._addMarker(key, { action: ACTION_END, step: STEP_NETWORK_REQUEST, ...networkReqData });
+    },
+
+    markInitProcessStart(key: string) {
+        this._addMarker(key, { action: ACTION_START, step: "initialize", subStep: STEP_PROCESS });
+    },
+
+    markInitProcessEnd(key: string, success: boolean) {
+        this._addMarker(key, { action: ACTION_END, step: "initialize", subStep: STEP_PROCESS, success });
     },
 
     _addMarker(key: string, data: any) {
-        const list = this.markers.get(key) || [];
-        list.push({ ...data, timestamp: Date.now() });
-        this.markers.set(key, list);
+        const Y = markers.get(key) ?? [];
+        Y.push({ ...data, timestamp: Date.now() });
+        markers.set(key, Y);
     },
 
     clearMarkers(key: string) {
-        this.markers.delete(key);
+        markers.delete(key);
     },
 
-    getDiagnosticsData(response: Response | undefined, attempt: number, isDelta: boolean, errorData: any) {
+    getDiagnosticsData(response: any, attempt: number, isDelta: boolean, errorData: any) {
         return {
             success: response?.ok === true,
             statusCode: response?.status,
@@ -82,8 +111,11 @@ export const Diagnostics = {
 };
 
 // Global Statsig reference setup
-if (typeof window !== "undefined") {
-    (window as any).__STATSIG__ = (window as any).__STATSIG__ || {};
-} else if (typeof global !== "undefined") {
-    (global as any).__STATSIG__ = (global as any).__STATSIG__ || {};
+const STATSIG_GLOBAL = "__STATSIG__";
+const globalRef: any = typeof window !== "undefined" ? window : (typeof global !== "undefined" ? global : (typeof globalThis !== "undefined" ? globalThis : {}));
+
+if (!globalRef[STATSIG_GLOBAL]) {
+    globalRef[STATSIG_GLOBAL] = {};
 }
+
+export const getStatsigGlobal = () => globalRef[STATSIG_GLOBAL];

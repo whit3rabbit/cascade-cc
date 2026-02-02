@@ -74,6 +74,13 @@ export async function submitFeedback(report: any, signal?: AbortSignal): Promise
         if (response.status === 200 && response.data?.feedback_id) {
             return { success: true, feedbackId: response.data.feedback_id };
         }
+
+        if (response.status === 403 && response.data?.error?.type === "permission_error" && response.data?.error?.message?.includes("custom data retention settings")) {
+            return {
+                success: false,
+                error: "Feedback cannot be submitted because of your custom data retention settings."
+            };
+        }
         */
 
         // --- SIMULATED SUCCESS FOR DEOBFUSCATION ENVIRONMENT ---

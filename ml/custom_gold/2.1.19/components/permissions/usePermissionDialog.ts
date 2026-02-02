@@ -71,68 +71,47 @@ const getPermissionOptions = (
 
 export const usePermissionDialog = (props: UsePermissionDialogProps) => {
     const {
-        filePath,
-        completionType,
-        languageName,
         toolUseConfirm,
         onDone,
         onReject,
-        parseInput,
-        operationType = 'write'
     } = props;
 
-    // In chunk1513: let [X] = j6(); let O = X.toolPermissionContext;
-    const toolPermissionContext = {}; // Stub
+    const [selectedIndex, setSelectedIndex] = useState(0);
 
-    const [acceptFeedback, setAcceptFeedback] = useState("");
-    const [rejectFeedback, setRejectFeedback] = useState("");
-    const [focusedOption, setFocusedOption] = useState("yes"); // or index/id
-    const [yesInputMode, setYesInputMode] = useState(false);
-    const [noInputMode, setNoInputMode] = useState(false);
+    const options = useMemo(() => [
+        {
+            option: { type: 'accept-once', label: 'Allow once', scope: 'once' },
+            label: 'Allow once'
+        },
+        {
+            option: { type: 'accept-session', label: 'Allow for this session', scope: 'session' },
+            label: 'Allow for this session'
+        },
+        {
+            option: { type: 'accept-always', label: 'Always allow', scope: 'always' },
+            label: 'Always allow'
+        },
+        {
+            option: { type: 'reject', label: 'Deny', scope: 'once' },
+            label: 'Deny'
+        }
+    ], []);
 
-    // Feedback mode states
-    const [feedbackEnterMode, setFeedbackEnterMode] = useState(false);
-    const [rejectFeedbackEnterMode, setRejectFeedbackEnterMode] = useState(false);
-
-    const options = useMemo(() => getPermissionOptions({
-        yesInputMode,
-        noInputMode,
-        toolPermissionContext
-    }), [yesInputMode, noInputMode, toolPermissionContext]);
-
-    // Derived from S (callback) in chunk1513
-    const onChange = useCallback((option: PermissionOptionValue, value: any, feedback?: string) => {
-        // Handle logic for allow/reject
+    const onChange = useCallback((option: any) => {
         if (option.type === 'reject') {
             onReject();
         } else {
-            // onAllow wrapper
-            toolUseConfirm.onAllow(value, feedback, {
+            toolUseConfirm.onAllow(toolUseConfirm.input, undefined, {
                 scope: option.scope
             });
-            onDone({ result: value, optionType: option.type });
+            onDone();
         }
     }, [onReject, toolUseConfirm, onDone]);
-
-    // Handle inputs
-    useInput((input, key) => {
-        // Implement navigation logic here if needed, 
-        // or rely on the parent component to handle focus and pass it down.
-        // Chunk1513 uses f7 (useInput wrapper likely) `confirm:cycleMode`.
-    });
 
     return {
         options,
         onChange,
-        acceptFeedback,
-        setAcceptFeedback,
-        rejectFeedback,
-        setRejectFeedback,
-        focusedOption,
-        setFocusedOption,
-        yesInputMode,
-        setYesInputMode,
-        noInputMode,
-        setNoInputMode
+        selectedIndex,
+        setSelectedIndex
     };
 };

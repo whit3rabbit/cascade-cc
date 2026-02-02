@@ -10,6 +10,16 @@ import { homedir, platform, release, arch, cpus, totalmem } from 'os';
 import { EnvService } from '../config/EnvService.js';
 
 export class BugReportService {
+    private static lastApiRequest: any = null;
+
+    static setLastApiRequest(request: any) {
+        this.lastApiRequest = request;
+    }
+
+    static getLastApiRequest() {
+        return this.lastApiRequest;
+    }
+
     static async generateReport(outputDir: string = process.cwd()): Promise<string> {
         try {
             const systemInfo = this.getSystemInfo();

@@ -39,25 +39,48 @@ export const DEFAULT_LIBRARY_INFO = {
 };
 
 /**
- * MSAL Telemetry Tracker Class (Stub).
+ * MSAL Telemetry Tracker Class.
  */
 export class TelemetryTracker {
+    private measurements = new Map<string, { startTime: number; correlationId: string }>();
+
     generateId(): string {
         return Math.random().toString(36).substring(2, 15);
     }
 
     startMeasurement(name: string, correlationId?: string) {
+        const eventId = this.generateId();
+        const startTimeMs = Date.now();
+        const corrId = correlationId || "";
+
+        this.measurements.set(eventId, { startTime: startTimeMs, correlationId: corrId });
+
         return {
-            end: () => null,
-            discard: () => { },
-            add: () => { },
-            increment: () => { },
+            end: () => {
+                const info = this.measurements.get(eventId);
+                if (info) {
+                    const duration = Date.now() - info.startTime;
+                    // In a real impl, this would log to a telemetry provider
+                    this.measurements.delete(eventId);
+                    return duration;
+                }
+                return null;
+            },
+            discard: () => {
+                this.measurements.delete(eventId);
+            },
+            add: (key: string, value: any) => {
+                // Add attribute to measurement
+            },
+            increment: (key: string) => {
+                // Increment counter
+            },
             event: {
-                eventId: this.generateId(),
+                eventId,
                 status: "InProgress",
                 name,
-                startTimeMs: Date.now(),
-                correlationId: correlationId || ""
+                startTimeMs,
+                correlationId: corrId
             }
         };
     }

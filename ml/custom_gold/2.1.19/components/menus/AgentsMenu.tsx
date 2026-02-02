@@ -51,18 +51,24 @@ export function AgentsMenu({ onExit }: AgentsMenuProps) {
 
     const handleWizardSubmit = async (data: any) => {
         try {
-            // If method is 'generate', we would ideally call an LLM here.
-            // For this implementation, we'll create a stub or just pass the description as system prompt for now if generated.
-            // In a real "generate" flow, we'd need an async loader. Only "manual" is fully supported logic-wise without LLM calls.
+            let name = data.description.split(' ').slice(0, 2).join('-').toLowerCase().replace(/[^a-z0-9-]/g, '');
+            let systemPrompt = data.description;
+            let description = data.description;
+
+            if (data.method === 'generate') {
+                const { generateAgent } = await import('../../services/agents/AgentDesigner.js');
+                const design = await generateAgent(data.description, userAgents.map(a => a.value));
+                name = design.identifier;
+                systemPrompt = design.systemPrompt;
+                description = design.whenToUse;
+            }
 
             const newAgent: AgentData = {
-                name: data.description.split(' ').slice(0, 2).join('-').toLowerCase().replace(/[^a-z0-9-]/g, ''),
-                description: data.description,
-                agentType: data.description.split(' ').slice(0, 2).join('-').toLowerCase().replace(/[^a-z0-9-]/g, ''), // simplified slug
-                systemPrompt: data.method === 'generate'
-                    ? `You are an agent designed to: ${data.description}`
-                    : data.description, // Manual mode assumes description IS usage instructions for this demo
-                model: 'claude-3-5-sonnet-20241022', // Default
+                name,
+                description,
+                agentType: name,
+                systemPrompt,
+                model: 'claude-3-5-sonnet-20241022',
                 scope: data.location
             };
 
@@ -70,7 +76,7 @@ export function AgentsMenu({ onExit }: AgentsMenuProps) {
             refreshAgents();
             setView('list');
         } catch (err) {
-            // console.error("Failed to save agent", err);
+            // Error handling
         }
     };
 

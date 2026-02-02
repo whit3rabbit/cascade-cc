@@ -5,6 +5,7 @@
 
 import { normalizeHeaders } from '../../utils/http/HeaderUtils.js';
 import { path } from '../../utils/http/PathBuilder.js';
+import { BugReportService } from '../bugreport/BugReportService.js';
 
 interface RequestOptions {
     headers?: Record<string, string>;
@@ -163,6 +164,20 @@ function getCustomHeaders(): Record<string, string> {
     }, {} as Record<string, string>);
 }
 
+function getUserAgent(): string {
+    const version = "2.1.19";
+    const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT || "cli";
+    const agentSdk = process.env.CLAUDE_AGENT_SDK_VERSION ? `, agent-sdk/${process.env.CLAUDE_AGENT_SDK_VERSION}` : "";
+    return `claude-cli/${version} (external, ${entrypoint}${agentSdk})`;
+}
+
+function getBillingHeader(): string {
+    const version = "2.1.19";
+    const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT || "cli";
+    const sessionType = "session"; // or turn? original uses turning point
+    return `cc_version=${version}.${sessionType}; cc_entrypoint=${entrypoint}`;
+}
+
 const dispatcher = getDispatcher();
 
 export class Anthropic {
@@ -212,7 +227,11 @@ export class Anthropic {
                     }
                 }
 
-                const finalHeaders: Record<string, string> = {};
+                const finalHeaders: Record<string, string> = {
+                    "User-Agent": getUserAgent(),
+                    "x-anthropic-billing-header": getBillingHeader(),
+                    "anthropic-version": "2023-06-01"
+                };
                 const sources = [authHeaders, getCustomHeaders(), data.headers];
                 for (const source of sources) {
                     if (!source) continue;
@@ -233,6 +252,13 @@ export class Anthropic {
                 };
                 if (data.signal) fetchOptions.signal = data.signal;
 
+                BugReportService.setLastApiRequest({
+                    url: (options.baseUrl || 'https://api.anthropic.com') + url,
+                    method: 'POST',
+                    headers: finalHeaders,
+                    body: data.body
+                });
+
                 const response = await fetch((options.baseUrl || 'https://api.anthropic.com') + url, fetchOptions);
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({}));
@@ -249,7 +275,11 @@ export class Anthropic {
                 const { getAuthHeaders } = await import('../auth/AuthService.js');
                 const authHeaders = await getAuthHeaders();
 
-                const finalHeaders: Record<string, string> = {};
+                const finalHeaders: Record<string, string> = {
+                    "User-Agent": getUserAgent(),
+                    "x-anthropic-billing-header": getBillingHeader(),
+                    "anthropic-version": "2023-06-01"
+                };
                 const sources = [authHeaders, getCustomHeaders(), data.headers];
                 for (const source of sources) {
                     if (!source) continue;
@@ -267,6 +297,12 @@ export class Anthropic {
                     dispatcher
                 };
 
+                BugReportService.setLastApiRequest({
+                    url: (options.baseUrl || 'https://api.anthropic.com') + url + (data.query ? '?' + new URLSearchParams(data.query).toString() : ''),
+                    method: 'GET',
+                    headers: finalHeaders
+                });
+
                 const response = await fetch((options.baseUrl || 'https://api.anthropic.com') + url + (data.query ? '?' + new URLSearchParams(data.query).toString() : ''), fetchOptions);
                 return { data: await response.json() };
             },
@@ -275,7 +311,11 @@ export class Anthropic {
                 const { getAuthHeaders } = await import('../auth/AuthService.js');
                 const authHeaders = await getAuthHeaders();
 
-                const finalHeaders: Record<string, string> = {};
+                const finalHeaders: Record<string, string> = {
+                    "User-Agent": getUserAgent(),
+                    "x-anthropic-billing-header": getBillingHeader(),
+                    "anthropic-version": "2023-06-01"
+                };
                 const sources = [authHeaders, getCustomHeaders(), data.headers];
                 for (const source of sources) {
                     if (!source) continue;

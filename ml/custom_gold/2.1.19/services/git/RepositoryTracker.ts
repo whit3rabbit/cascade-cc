@@ -4,6 +4,7 @@
  */
 
 import { realpathSync, existsSync } from "node:fs";
+import { getSettings, updateSettings } from "../config/SettingsService.js";
 
 export interface RepositoryTrackerService {
     addPath(repoUrl: string, localPath: string): void;
@@ -26,9 +27,16 @@ export const RepositoryTracker: RepositoryTrackerService = {
         }
 
         const normalizedRepo = repoUrl.toLowerCase();
-        // Here we would interact with a persistent state store (e.g. settings)
-        // For deobfuscation, we're stubbing the intent.
-        console.log(`[RepoTracker] Tracking ${realPath} for ${normalizedRepo}`);
+        const settings = getSettings();
+        const repoPaths = settings.repoPaths || {};
+
+        const existingPaths = repoPaths[normalizedRepo] || [];
+        if (!existingPaths.includes(realPath)) {
+            existingPaths.push(realPath);
+            repoPaths[normalizedRepo] = existingPaths;
+            updateSettings({ repoPaths });
+            console.log(`[RepoTracker] Tracking ${realPath} for ${normalizedRepo}`);
+        }
     },
 
     /**
@@ -36,9 +44,10 @@ export const RepositoryTracker: RepositoryTrackerService = {
      */
     getExistingPaths(repoUrl: string): string[] {
         const normalizedRepo = repoUrl.toLowerCase();
-        // Mocked retrieval from state
-        // In a real implementation, we would filter stored paths by normalizedRepo
-        const paths: string[] = [];
+        const settings = getSettings();
+        const repoPaths = settings.repoPaths || {};
+
+        const paths = repoPaths[normalizedRepo] || [];
         return paths.filter(p => existsSync(p));
     }
 };

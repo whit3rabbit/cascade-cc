@@ -3,61 +3,18 @@
  * Role: Manages high-level OpenTelemetry spans for user interactions and LLM requests.
  */
 
-// We'll create a mock for @opentelemetry/api since it might not be installed
-// or we can try to use it if available. For this refinement, I'll assume we need to
-// stub it or use a wrapper. The JS code used it directly.
-// I'll create a stub interface here to avoid dependency issues during this phase.
+import { trace, context, Span, Tracer, SpanContext } from '@opentelemetry/api';
+import { getSettings } from '../config/SettingsService.js';
 
-interface Span {
-    spanContext(): { spanId: string };
-    setAttribute(key: string, value: any): void;
-    setAttributes(attributes: Record<string, any>): void;
-    end(): void;
-}
-
-interface Tracer {
-    startSpan(name: string, options?: any): Span;
-}
-
-// Mock implementation to prevent runtime crashes if otel is missing
-const mockSpan: Span = {
-    spanContext: () => ({ spanId: `mock-${Date.now()}` }),
-    setAttribute: () => { },
-    setAttributes: () => { },
-    end: () => { }
-};
-
-const mockTracer: Tracer = {
-    startSpan: () => mockSpan
-};
-
-// Start of actual code logic with fallbacks
-let trace: any;
-let context: any;
-let otelTrace: any;
-let tracer: any = mockTracer;
-
-try {
-    const otel = require('@opentelemetry/api');
-    trace = otel.trace;
-    context = otel.context;
-    otelTrace = otel.trace;
-    tracer = otelTrace.getTracer("com.anthropic.claude_code.tracing", "1.0.0");
-} catch (e) {
-    // OpenTelemetry not found, using mocks
-    trace = { getSpan: () => mockSpan, setSpan: (_ctx: any, span: any) => span };
-    context = { active: () => ({}), with: (_ctx: any, fn: Function) => fn() };
-}
+const tracer: Tracer = trace.getTracer("com.anthropic.claude_code.tracing", "1.0.0");
 
 let interactionSequence = 0;
 const spanMap = new Map<string, { span: Span; startTime: number }>();
 
-import { getSettings } from '../config/SettingsService.js';
-
 /**
  * Checks if enhanced telemetry is enabled via environment variables or settings.
  */
-function isEnhancedTelemetryEnabled(): boolean {
+export function isEnhancedTelemetryEnabled(): boolean {
     if (process.env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA || process.env.ENABLE_ENHANCED_TELEMETRY_BETA) {
         return true;
     }
@@ -68,7 +25,10 @@ function isEnhancedTelemetryEnabled(): boolean {
  * Starts a new interaction span representing a single user input-to-response cycle.
  */
 export function startInteractionSpan(userPrompt?: string): Span {
-    if (!isEnhancedTelemetryEnabled()) return trace.getSpan(context.active()) || mockSpan;
+    if (!isEnhancedTelemetryEnabled()) {
+        const activeSpan = trace.getSpan(context.active());
+        if (activeSpan) return activeSpan;
+    }
 
     interactionSequence++;
     const span = tracer.startSpan("claude_code.interaction", {
@@ -79,12 +39,10 @@ export function startInteractionSpan(userPrompt?: string): Span {
         }
     });
 
-    const spanId = span.spanContext().spanId;
-    spanMap.set(spanId, { span, startTime: Date.now() });
+    const spanContext = span.spanContext();
+    spanMap.set(spanContext.spanId, { span, startTime: Date.now() });
 
-    // In a real TS environment we'd need proper context management types
-    // For now we assume the JS logic works via the mock or real lib
-    return context.with(trace.setSpan(context.active(), span), () => span);
+    return span;
 }
 
 /**
@@ -92,14 +50,14 @@ export function startInteractionSpan(userPrompt?: string): Span {
  */
 export function endInteractionSpan(span?: Span): void {
     if (!span) return;
-    const spanId = span.spanContext().spanId;
-    const info = spanMap.get(spanId);
+    const spanContext = span.spanContext();
+    const info = spanMap.get(spanContext.spanId);
 
     if (info) {
         const duration = Date.now() - info.startTime;
         span.setAttribute("interaction.duration_ms", duration);
         span.end();
-        spanMap.delete(spanId);
+        spanMap.delete(spanContext.spanId);
     }
 }
 
@@ -107,7 +65,10 @@ export function endInteractionSpan(span?: Span): void {
  * Starts a span for an LLM API request.
  */
 export function startLLMRequestSpan(model: string, querySource: string): Span {
-    if (!isEnhancedTelemetryEnabled()) return trace.getSpan(context.active()) || mockSpan;
+    if (!isEnhancedTelemetryEnabled()) {
+        const activeSpan = trace.getSpan(context.active());
+        if (activeSpan) return activeSpan;
+    }
 
     const span = tracer.startSpan("claude_code.llm_request", {
         attributes: {
@@ -117,8 +78,8 @@ export function startLLMRequestSpan(model: string, querySource: string): Span {
         }
     });
 
-    const spanId = span.spanContext().spanId;
-    spanMap.set(spanId, { span, startTime: Date.now() });
+    const spanContext = span.spanContext();
+    spanMap.set(spanContext.spanId, { span, startTime: Date.now() });
 
     return span;
 }
@@ -135,8 +96,8 @@ export interface LLMRequestStats {
  */
 export function endLLMRequestSpan(span?: Span, stats: LLMRequestStats = {}): void {
     if (!span) return;
-    const spanId = span.spanContext().spanId;
-    const info = spanMap.get(spanId);
+    const spanContext = span.spanContext();
+    const info = spanMap.get(spanContext.spanId);
 
     if (info) {
         const duration = Date.now() - info.startTime;
@@ -148,6 +109,6 @@ export function endLLMRequestSpan(span?: Span, stats: LLMRequestStats = {}): voi
             "success": stats.success ?? true
         });
         span.end();
-        spanMap.delete(spanId);
+        spanMap.delete(spanContext.spanId);
     }
 }

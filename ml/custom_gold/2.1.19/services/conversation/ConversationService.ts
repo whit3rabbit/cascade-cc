@@ -82,15 +82,16 @@ export class ConversationService {
         };
     }
 
-    private static async *conversationLoop(
+    public static async *conversationLoop(
         messages: any[],
-        systemPrompt: string,
+        systemPrompt: string | string[],
         options: any
     ): AsyncGenerator<any> {
         let keepGoing = true;
 
         while (keepGoing) {
-            const responseStream = this.streamLLM(messages, systemPrompt, options);
+            const system = Array.isArray(systemPrompt) ? systemPrompt.join('\n') : systemPrompt;
+            const responseStream = this.streamLLM(messages, system, options);
 
             let assistantMessage: any = { role: "assistant", content: [], tool_use: [] as any[] };
             let currentToolUse: any = null;
@@ -102,7 +103,7 @@ export class ConversationService {
                     case "content_block_start":
                         if (chunk.content_block.type === "text") {
                             assistantMessage.content.push(chunk.content_block);
-                        } else if (chunk.content_block.type === "tool_use" || chunk.content_block.type === "server_tool_use") {
+                        } else if (chunk.content_block.type === "tool_use" || chunk.content_block.type === "server_tool_use" || chunk.content_block.type === "web_search_tool_result") {
                             currentToolUse = { ...chunk.content_block, input_json: "" };
                             assistantMessage.tool_use.push(currentToolUse);
                             assistantMessage.content.push(currentToolUse);
@@ -175,23 +176,28 @@ export class ConversationService {
             content: m.content
         }));
 
+        const tools = [
+            ...(options.tools || []).map((t: any) => ({
+                name: t.name,
+                description: t.description,
+                input_schema: t.input_schema || t.parameters
+            })),
+            ...(options.extraToolSchemas || [])
+        ];
+
         const stream = await client.messages.create({
             model: ModelResolver.resolveModel(options.model || "claude-3-5-sonnet-20241022", !!options.planMode),
             max_tokens: Number(EnvService.get("CLAUDE_CODE_MAX_OUTPUT_TOKENS")) || 4096,
             system,
             messages: anthropicMessages,
             stream: true,
-            tools: options.tools.map((t: any) => ({
-                name: t.name,
-                description: t.description,
-                input_schema: t.input_schema || t.parameters
-            }))
+            tools: tools.length > 0 ? tools : undefined
         });
 
         if (!(stream instanceof ReadableStream)) return;
 
         for await (const event of parseSseEvents(stream)) {
-            if (event.type === 'message' || event.data) {
+            if (event.event === 'message' || event.data) {
                 try {
                     const data = JSON.parse(event.data);
                     if (data.type === 'ping' || data.type === 'error') continue;

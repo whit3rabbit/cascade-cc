@@ -99,7 +99,7 @@ export const OAuthService = {
 
                         // Try refresh
                         if (data.refreshToken) {
-                            const refreshed = await this.refreshToken(data.refreshToken);
+                            const refreshed = await this.refreshToken(data.refreshToken, data.scopes);
                             await this.saveToken(refreshed);
                             return refreshed.accessToken;
                         }
@@ -121,6 +121,7 @@ export const OAuthService = {
         const refreshToken = (data as any).refreshToken || (data as TokenExchangeResponse).refresh_token;
         const expiresAt = (data as any).expiresAt || (Date.now() + (data as TokenExchangeResponse).expires_in * 1000);
         const account = (data as any).account;
+        const scopes = (data as any).scopes || (data as TokenExchangeResponse).scope?.split(" ").filter(Boolean) || [];
 
         setStatsigStorage({ accessToken, oauthAccount: account });
 
@@ -131,7 +132,8 @@ export const OAuthService = {
                     accessToken,
                     refreshToken,
                     expiresAt,
-                    account
+                    account,
+                    scopes
                 }
             });
             KeychainService.saveToken(serviceName, tokenData);
@@ -220,12 +222,12 @@ export const OAuthService = {
     /**
      * Refreshes an access token using a refresh token.
      */
-    async refreshToken(refreshTokenValue: string): Promise<RefreshedTokenData> {
+    async refreshToken(refreshTokenValue: string, scopes?: string[]): Promise<RefreshedTokenData> {
         const body = {
             grant_type: "refresh_token",
             refresh_token: refreshTokenValue,
             client_id: CLIENT_ID,
-            scope: SCOPES_DEFAULT.join(" "),
+            scope: (scopes && scopes.length > 0) ? scopes.join(" ") : SCOPES_DEFAULT.join(" "),
         };
 
         try {

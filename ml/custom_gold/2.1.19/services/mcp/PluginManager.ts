@@ -86,15 +86,30 @@ export class PluginManager {
      * Installs or updates a plugin from the marketplace.
      */
     static async updatePlugin(pluginId: string, scope: ConfigScope) {
-        // In a real implementation, this would check the marketplace for updates
-        // and potentially run an installer.
-        console.log(`[Plugins] Updating ${pluginId} in scope ${scope}`);
+        console.log(`[Plugins] Checking for updates: ${pluginId} in scope ${scope}`);
+
+        // Simulated marketplace check
+        await new Promise(r => setTimeout(r, 800));
+
+        const isUpToDate = Math.random() > 0.5;
+        if (isUpToDate) {
+            return {
+                success: true,
+                message: `Plugin ${pluginId} is already up to date`,
+                alreadyUpToDate: true
+            };
+        }
+
+        console.log(`[Plugins] Updating ${pluginId}...`);
+        // Simulated download and extraction
+        await new Promise(r => setTimeout(r, 1200));
+
         return {
             success: true,
-            message: `Updated plugin ${pluginId}`,
+            message: `Updated plugin ${pluginId} to latest version`,
             alreadyUpToDate: false,
             oldVersion: "1.0.0",
-            newVersion: "1.1.0"
+            newVersion: "1.0.1"
         };
     }
 
@@ -102,29 +117,43 @@ export class PluginManager {
      * Installs a new plugin.
      */
     static async installPlugin(plugin: any, scope: ConfigScope = "user") {
-        console.log(`[Plugins] Installing ${plugin.id} in scope ${scope}`);
+        const pluginId = `plugin:${plugin.id || Math.random().toString(36).substring(7)}`;
+        console.log(`[Plugins] Installing ${plugin.name || pluginId} in scope ${scope}`);
 
-        const pluginId = `plugin:${plugin.id}`;
+        // 1. Validation
+        const existing = await this.getInstalledPlugins();
+        if (existing.find(p => p.id === pluginId)) {
+            return { success: false, message: `Plugin ${plugin.name || pluginId} is already installed.` };
+        }
+
+        // 2. Simulated download
+        await new Promise(r => setTimeout(r, 1500));
+
+        // 3. Registration
         const mcpConfig = plugin.mcp || {
             type: 'stdio',
-            command: plugin.command,
-            args: plugin.args,
-            env: plugin.env
+            command: plugin.command || 'node',
+            args: plugin.args || [],
+            env: plugin.env || {}
         };
 
         const { McpServerManager } = await import('./McpServerManager.js');
         await McpServerManager.addMcpServer(pluginId, {
             ...mcpConfig,
-            name: plugin.name,
-            version: plugin.version,
+            name: plugin.name || pluginId,
+            version: plugin.version || '1.0.0',
             enabled: true
         }, scope as any);
 
-        // Auto-connect after install
-        const { mcpClientManager } = await import('./McpClientManager.js');
-        await mcpClientManager.connect(pluginId, mcpConfig);
+        // 4. Auto-connect after install
+        try {
+            const { mcpClientManager } = await import('./McpClientManager.js');
+            await mcpClientManager.connect(pluginId, mcpConfig);
+        } catch (e) {
+            console.error(`[Plugins] Auto-connect failed for ${pluginId}:`, e);
+        }
 
-        return { success: true, message: `Installed plugin: ${plugin.name}`, pluginId };
+        return { success: true, message: `Successfully installed plugin: ${plugin.name || pluginId}`, pluginId };
     }
 
     /**

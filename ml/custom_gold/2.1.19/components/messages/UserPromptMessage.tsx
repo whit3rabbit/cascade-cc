@@ -22,6 +22,7 @@ export interface UserPromptMessageProps {
     planMode?: boolean;
     suggestions?: string[];
     onCancel?: () => void;
+    onClearScreen?: () => void;
 }
 
 export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
@@ -493,6 +494,62 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
 
         // Emacs Shortcuts
         if (key.ctrl) {
+            if (input === 'a') {
+                setCursorPos(0);
+                return;
+            }
+            if (input === 'e') {
+                setCursorPos(value.length);
+                return;
+            }
+            if (input === 'b') {
+                setCursorPos(Math.max(0, cursorPos - 1));
+                return;
+            }
+            if (input === 'f') {
+                setCursorPos(Math.min(value.length, cursorPos + 1));
+                return;
+            }
+            if (input === 'd') {
+                if (value.length === 0) {
+                    props.onCancel?.();
+                } else if (cursorPos < value.length) {
+                    const newValue = value.slice(0, cursorPos) + value.slice(cursorPos + 1);
+                    setValue(newValue);
+                }
+                return;
+            }
+            if (input === 'l') {
+                props.onClearScreen?.();
+                return;
+            }
+            if (input === 'p') {
+                if (historyIndex < history.length - 1) {
+                    const newIndex = historyIndex + 1;
+                    setHistoryIndex(newIndex);
+                    setValue(history[history.length - 1 - newIndex] || '');
+                }
+                return;
+            }
+            if (input === 'n') {
+                if (historyIndex > -1) {
+                    const newIndex = historyIndex - 1;
+                    setHistoryIndex(newIndex);
+                    if (newIndex === -1) {
+                        setValue('');
+                    } else {
+                        setValue(history[history.length - 1 - newIndex] || '');
+                    }
+                }
+                return;
+            }
+            if (input === 'w') {
+                const prevSpace = value.lastIndexOf(' ', cursorPos - 2);
+                const start = prevSpace === -1 ? 0 : prevSpace + 1;
+                setValue(value.slice(0, start) + value.slice(cursorPos));
+                setCursorPos(start);
+                return;
+            }
             if (input === 'k') {
                 const killed = value.slice(cursorPos);
                 setValue(value.slice(0, cursorPos));
@@ -540,6 +597,49 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 return;
             }
         }
+        if (key.leftArrow && !key.meta) {
+            setCursorPos(Math.max(0, cursorPos - 1));
+            return;
+        }
+        if (key.rightArrow && !key.meta) {
+            setCursorPos(Math.min(value.length, cursorPos + 1));
+            return;
+        }
+
+        if (key.backspace) {
+            if (cursorPos > 0) {
+                const newValue = value.slice(0, cursorPos - 1) + value.slice(cursorPos);
+                setValue(newValue);
+                setCursorPos(cursorPos - 1);
+            }
+            return;
+        }
+
+        if (key.delete) {
+            if (cursorPos < value.length) {
+                const newValue = value.slice(0, cursorPos) + value.slice(cursorPos + 1);
+                setValue(newValue);
+            }
+            return;
+        }
+
+        if (key.return && !key.shift && !key.meta) {
+            onSubmit(value);
+            setValue('');
+            setCursorPos(0);
+            setHistoryIndex(-1);
+            return;
+        }
+
+        // Standard character input
+        if (input && !key.ctrl && !key.meta && !key.escape && !key.tab && !key.return) {
+            if (vimMode === 'INSERT' || !props.vimModeEnabled) {
+                const newValue = value.slice(0, cursorPos) + input + value.slice(cursorPos);
+                setValue(newValue);
+                setCursorPos(cursorPos + input.length);
+                return;
+            }
+        }
     };
 
     const performBufferSearch = (query: string, direction: 'forward' | 'backward') => {
@@ -556,6 +656,35 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
     };
 
     useInput(handleKey);
+
+    const renderValue = () => {
+        if (vimMode === 'VISUAL' && selectionStart !== null) {
+            const start = Math.min(selectionStart, cursorPos);
+            const end = Math.max(selectionStart, cursorPos) + 1;
+            return (
+                <Text>
+                    {value.slice(0, start)}
+                    <Text backgroundColor="white" color="black">{value.slice(start, end)}</Text>
+                    {value.slice(end)}
+                </Text>
+            );
+        }
+
+        // Show cursor in Normal Mode
+        if (props.vimModeEnabled && vimMode === 'NORMAL') {
+            return (
+                <Text>
+                    {value.slice(0, cursorPos)}
+                    <Text backgroundColor="white" color="black">
+                        {value[cursorPos] || ' '}
+                    </Text>
+                    {value.slice(cursorPos + 1)}
+                </Text>
+            );
+        }
+
+        return <Text>{value}</Text>;
+    };
 
     return (
         <Box flexDirection="column" borderStyle="round" borderColor={planMode ? theme.planMode : theme.claudeBlue_FOR_SYSTEM_SPINNER} paddingX={1}>
@@ -594,20 +723,7 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                         </Box>
                     ) : (
                         <Box>
-                            {/* Rendering selected text */}
-                            <Text>
-                                {vimMode === 'VISUAL' && selectionStart !== null ? (
-                                    <>
-                                        {value.slice(0, Math.min(selectionStart, cursorPos))}
-                                        <Text backgroundColor="white" color="black">
-                                            {value.slice(Math.min(selectionStart, cursorPos), Math.max(selectionStart, cursorPos) + 1)}
-                                        </Text>
-                                        {value.slice(Math.max(selectionStart, cursorPos) + 1)}
-                                    </>
-                                ) : (
-                                    value
-                                )}
-                            </Text>
+                            {renderValue()}
                         </Box>
                     )}
                     {suggestion && !isSearching && vimMode !== 'COMMAND' && !isBufferSearching && (

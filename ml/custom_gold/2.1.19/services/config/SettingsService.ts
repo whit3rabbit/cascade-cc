@@ -74,6 +74,7 @@ export interface Settings {
     showPrStatusFooter?: boolean;
     autoConnectIde?: boolean;
     chromeEnabled?: boolean;
+    repoPaths?: Record<string, string[]>;
     [key: string]: any;
 }
 

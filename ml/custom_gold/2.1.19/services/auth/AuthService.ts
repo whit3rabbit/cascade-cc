@@ -96,7 +96,8 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
     if (oauthToken) {
         return {
             "Authorization": `Bearer ${oauthToken}`,
-            "anthropic-beta": OAUTH_BETA_HEADER
+            "anthropic-beta": OAUTH_BETA_HEADER,
+            "anthropic-version": "2023-06-01"
         };
     }
 

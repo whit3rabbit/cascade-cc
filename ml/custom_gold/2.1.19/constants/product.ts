@@ -32,7 +32,7 @@ export const DEPLOYMENT_ENVIRONMENTS = {
  */
 export const HTTP_PROTOCOL = "http://";
 export const LOCALHOST = "127.0.0.1";
-export const CLIENT_ID = "claude-code-cli";
+export const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 export const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 export const ROLES_URL = "https://api.anthropic.com/api/oauth/claude_cli/roles";
 export const PROFILE_URL = "https://api.anthropic.com/api/oauth/profile";

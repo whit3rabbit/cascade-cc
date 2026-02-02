@@ -1,189 +1,190 @@
 /**
  * File: src/services/sandbox/SandboxSettings.ts
- * Role: Manages permissions and settings for the tool execution sandbox.
+ * Role: Configuration for sandbox profiles and security policies.
+ * Derived from chunk233 and chunk231.
  */
 
-import { getToolSettings, getSettings } from '../config/SettingsService.js';
-import { resolve } from 'node:path';
-import { isIPv4 } from 'node:net';
+export const MACOS_SBPL_PROFILE = `
+(version 1)
+(deny default)
 
-/**
- * Parses a tool permission rule (e.g., "file_read(domain:example.com)").
- */
-export function parseToolPermissionRule(rule: string): { toolName: string; ruleContent?: string } {
-    const match = rule.match(/^([^(]+)\(([^)]+)\)$/);
-    if (!match) return { toolName: rule };
-    return { toolName: match[1], ruleContent: match[2] };
-}
+; Essential permissions
+(allow process-exec)
+(allow process-fork)
+(allow process-info* (target same-sandbox))
+(allow signal (target same-sandbox))
+(allow mach-priv-task-port (target same-sandbox))
 
-export interface SandboxNetworkConfig {
-    allowedDomains: string[];
-    deniedDomains: string[];
+; User preferences
+(allow user-preference-read)
+
+; Mach IPC - specific services only
+(allow mach-lookup
+  (global-name "com.apple.audio.systemsoundserver")
+  (global-name "com.apple.distributed_notifications@Uv3")
+  (global-name "com.apple.FontObjectsServer")
+  (global-name "com.apple.fonts")
+  (global-name "com.apple.logd")
+  (global-name "com.apple.lsd.mapdb")
+  (global-name "com.apple.PowerManagement.control")
+  (global-name "com.apple.system.logger")
+  (global-name "com.apple.system.notification_center")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.system.opendirectoryd.membership")
+  (global-name "com.apple.bsd.dirhelper")
+  (global-name "com.apple.securityd.xpc")
+  (global-name "com.apple.coreservices.launchservicesd")
+  (global-name "com.apple.SecurityServer")
+)
+
+; POSIX IPC
+(allow ipc-posix-shm)
+(allow ipc-posix-sem)
+
+; IOKit
+(allow iokit-open
+  (iokit-registry-entry-class "IOSurfaceRootUserClient")
+  (iokit-registry-entry-class "RootDomainUserClient")
+  (iokit-user-client-class "IOSurfaceSendRight")
+)
+(allow iokit-get-properties)
+
+; Safe system sockets (no network)
+(allow system-socket (require-all (socket-domain AF_SYSTEM) (socket-protocol 2)))
+
+; sysctl - restricted set
+(allow sysctl-read
+  (sysctl-name "hw.activecpu")
+  (sysctl-name "hw.busfrequency_compat")
+  (sysctl-name "hw.byteorder")
+  (sysctl-name "hw.cacheconfig")
+  (sysctl-name "hw.cachelinesize_compat")
+  (sysctl-name "hw.cpufamily")
+  (sysctl-name "hw.cpufrequency")
+  (sysctl-name "hw.cpufrequency_compat")
+  (sysctl-name "hw.cputype")
+  (sysctl-name "hw.l1dcachesize_compat")
+  (sysctl-name "hw.l1icachesize_compat")
+  (sysctl-name "hw.l2cachesize_compat")
+  (sysctl-name "hw.l3cachesize_compat")
+  (sysctl-name "hw.logicalcpu")
+  (sysctl-name "hw.logicalcpu_max")
+  (sysctl-name "hw.machine")
+  (sysctl-name "hw.memsize")
+  (sysctl-name "hw.ncpu")
+  (sysctl-name "hw.nperflevels")
+  (sysctl-name "hw.packages")
+  (sysctl-name "hw.pagesize_compat")
+  (sysctl-name "hw.pagesize")
+  (sysctl-name "hw.physicalcpu")
+  (sysctl-name "hw.physicalcpu_max")
+  (sysctl-name "hw.tbfrequency_compat")
+  (sysctl-name "hw.vectorunit")
+  (sysctl-name "kern.argmax")
+  (sysctl-name "kern.bootargs")
+  (sysctl-name "kern.hostname")
+  (sysctl-name "kern.maxfiles")
+  (sysctl-name "kern.maxfilesperproc")
+  (sysctl-name "kern.maxproc")
+  (sysctl-name "kern.ngroups")
+  (sysctl-name "kern.osproductversion")
+  (sysctl-name "kern.osrelease")
+  (sysctl-name "kern.ostype")
+  (sysctl-name "kern.osvariant_status")
+  (sysctl-name "kern.osversion")
+  (sysctl-name "kern.secure_kernel")
+  (sysctl-name "kern.tcsm_available")
+  (sysctl-name "kern.tcsm_enable")
+  (sysctl-name "kern.usrstack64")
+  (sysctl-name "kern.version")
+  (sysctl-name "kern.willshutdown")
+  (sysctl-name "machdep.cpu.brand_string")
+  (sysctl-name "machdep.ptrauth_enabled")
+  (sysctl-name "security.mac.lockdown_mode_state")
+  (sysctl-name "sysctl.proc_cputype")
+  (sysctl-name "vm.loadavg")
+  (sysctl-name-prefix "hw.optional.arm")
+  (sysctl-name-prefix "hw.optional.arm.")
+  (sysctl-name-prefix "hw.optional.armv8_")
+  (sysctl-name-prefix "hw.perflevel")
+  (sysctl-name-prefix "kern.proc.all")
+  (sysctl-name-prefix "kern.proc.pgrp.")
+  (sysctl-name-prefix "kern.proc.pid.")
+  (sysctl-name-prefix "machdep.cpu.")
+  (sysctl-name-prefix "net.routetable.")
+)
+
+(allow sysctl-write
+  (sysctl-name "kern.tcsm_enable")
+)
+
+; Generic file IO for safe devices
+(allow file-ioctl (literal "/dev/null"))
+(allow file-ioctl (literal "/dev/zero"))
+(allow file-ioctl (literal "/dev/random"))
+(allow file-ioctl (literal "/dev/urandom"))
+(allow file-ioctl (literal "/dev/dtracehelper"))
+(allow file-ioctl (literal "/dev/tty"))
+
+(allow file-read-data file-write-data
+  (require-all (literal "/dev/null") (vnode-type CHARACTER-DEVICE))
+)
+`;
+
+export const LINUX_BWRAP_BASE_ARGS = [
+    "--new-session",
+    "--die-with-parent",
+    "--dev", "/dev",
+    "--unshare-pid",
+    "--proc", "/proc"
+];
+
+export interface SandboxOptions {
+    needsNetworkRestriction?: boolean;
+    readAllowPaths?: string[];
+    readDenyPaths?: string[];
+    writeAllowPaths?: string[];
+    writeDenyPaths?: string[];
     allowUnixSockets?: boolean;
-    allowAllUnixSockets?: boolean;
-    allowLocalBinding?: boolean;
-}
-
-export interface SandboxFilesystemConfig {
-    allowWrite: string[];
-    denyWrite: string[];
-    denyRead: string[];
-}
-
-export interface RipgrepConfig {
-    command: string;
-    args: string[];
-}
-
-export interface SandboxConfig {
-    network: SandboxNetworkConfig;
-    filesystem: SandboxFilesystemConfig;
-    ripgrep: RipgrepConfig;
 }
 
 /**
- * Aggregates sandbox settings from various config layers.
- */
-export function getSandboxConfig(): SandboxConfig {
-    const layers = ["flagSettings", "policySettings", "userSettings", "projectSettings", "localSettings"];
-    const allowWrite: string[] = ["."];
-    const denyWrite: string[] = [];
-    const denyRead: string[] = [];
-    const allowedDomains: string[] = [];
-    const deniedDomains: string[] = [];
-
-    for (const layer of layers) {
-        const settings = getToolSettings(layer);
-        if (!settings?.permissions) continue;
-
-        for (const allow of settings.permissions.allow || []) {
-            const { toolName, ruleContent } = parseToolPermissionRule(allow);
-            if (toolName === 'file_write' && ruleContent) {
-                allowWrite.push(resolve(process.cwd(), ruleContent));
-            }
-            if (toolName === 'file_read' && ruleContent?.startsWith("domain:")) {
-                allowedDomains.push(ruleContent.substring(7));
-            }
-        }
-
-        for (const deny of settings.permissions.deny || []) {
-            const { toolName, ruleContent } = parseToolPermissionRule(deny);
-            if (toolName === 'file_write' && ruleContent) {
-                denyWrite.push(resolve(process.cwd(), ruleContent));
-            }
-            if (toolName === 'file_read' && ruleContent) {
-                denyRead.push(resolve(process.cwd(), ruleContent));
-            }
-        }
-    }
-
-    const settings = getSettings();
-    const ripgrep = settings?.sandbox?.ripgrep || {
-        command: 'rg',
-        args: []
-    };
-
-    return {
-        network: {
-            allowedDomains,
-            deniedDomains,
-            allowUnixSockets: settings?.sandbox?.network?.allowUnixSockets,
-            allowAllUnixSockets: settings?.sandbox?.network?.allowAllUnixSockets,
-            allowLocalBinding: settings?.sandbox?.network?.allowLocalBinding
-        },
-        filesystem: {
-            allowWrite,
-            denyWrite,
-            denyRead
-        },
-        ripgrep
-    };
-}
-
-/**
- * Checks if the sandbox is globally enabled in settings.
+ * Checks if the sandbox is enabled via environment variables.
  */
 export function isSandboxEnabled(): boolean {
-    const settings = getSettings();
-    return !!settings?.sandbox?.enabled;
+    return process.env.CLAUDE_CODE_DISABLE_SANDBOX !== 'true';
 }
 
+/**
+ * Checks if unsandboxed (dangerous) commands are allowed.
+ */
 export function areUnsandboxedCommandsAllowed(): boolean {
-    const settings = getSettings();
-    return !!settings?.sandbox?.allowUnsandboxedCommands;
+    return process.env.CLAUDE_CODE_ALLOW_DANGEROUS_COMMANDS === 'true';
 }
 
-export function isDomainAllowed(domain: string): boolean {
-    if (!isSandboxEnabled()) return true;
-    const config = getSandboxConfig();
+/**
+ * Checks if a URL is allowed to be fetched based on the sandbox policy.
+ */
+export function isUrlAllowed(url: string): boolean {
+    // Basic policy: allow most public URLs but block local/private network by default
+    // In a real implementation, this would be more sophisticated.
+    try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.toLowerCase();
 
-    if (isMatch(domain, config.network.deniedDomains)) {
+        // Block localhost and private IPs
+        if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+            return false;
+        }
+
+        // Example: block internal domains
+        if (host.endsWith('.internal')) {
+            return false;
+        }
+
+        return true;
+    } catch {
         return false;
     }
-
-    if (config.network.allowedDomains.length > 0) {
-        return isMatch(domain, config.network.allowedDomains);
-    }
-
-    return true;
 }
-
-/**
- * Helper to match a domain/IP against a list of patterns (exact, suffix, CIDR, or Regex).
- */
-function isMatch(domain: string, patterns: string[]): boolean {
-    return patterns.some(pattern => {
-        // 1. Regex Match: if pattern is wrapped in / /
-        if (pattern.startsWith('/') && pattern.endsWith('/')) {
-            try {
-                const regex = new RegExp(pattern.slice(1, -1));
-                return regex.test(domain);
-            } catch {
-                return false;
-            }
-        }
-
-        // 2. CIDR Match: if pattern contains / and is not a regex
-        if (pattern.includes('/')) {
-            const [range, prefixStr] = pattern.split('/');
-            const prefix = parseInt(prefixStr, 10);
-            if (isIPv4(domain) && isIPv4(range) && !isNaN(prefix)) {
-                return matchCIDR(domain, range, prefix);
-            }
-        }
-
-        // 3. Exact match or Suffix match or Wildcard
-        return domain === pattern || domain.endsWith("." + pattern) || pattern === "*";
-    });
-}
-
-/**
- * Matches an IPv4 address against a CIDR range.
- */
-function matchCIDR(ip: string, range: string, prefix: number): boolean {
-    const ipNum = ipToLong(ip);
-    const rangeNum = ipToLong(range);
-    const mask = -1 << (32 - prefix);
-    return (ipNum & mask) === (rangeNum & mask);
-}
-
-/**
- * Converts an IPv4 string to a 32-bit integer.
- */
-function ipToLong(ip: string): number {
-    return ip.split('.').reduce((acc, part) => (acc << 8) + parseInt(part, 10), 0) >>> 0;
-}
-
-/**
- * Checks if a URL is allowed.
- */
-export function isUrlAllowed(urlStr: string): boolean {
-    try {
-        const url = new URL(urlStr);
-        return isDomainAllowed(url.hostname);
-    } catch {
-        // If not a valid URL, we don't block based on domain but maybe based on protocol?
-        return true;
-    }
-}
-

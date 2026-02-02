@@ -1,9 +1,5 @@
-/**
- * File: src/tools/WebSearchTool.ts
- * Role: Performs a web search.
- */
-
-import { terminalLog } from '../utils/shared/runtime.js';
+import { ConversationService } from '../services/conversation/ConversationService.js';
+import { EnvService } from '../services/config/EnvService.js';
 
 export interface WebSearchInput {
     query: string;
@@ -18,8 +14,40 @@ export interface WebSearchHit {
 
 export interface WebSearchOutput {
     query: string;
-    results: (WebSearchHit | string)[];
+    results: (WebSearchHit | { toolUseId: string; content: WebSearchHit[] } | string)[];
     durationSeconds: number;
+}
+
+function getWebSearchPrompt(): string {
+    const now = new Date().toISOString();
+    const year = new Date().getFullYear();
+    return `
+- Allows Claude to search the web and use the results to inform responses
+- Provides up-to-date information for current events and recent data
+- Returns search result information formatted as search result blocks, including links as markdown hyperlinks
+- Use this tool for accessing information beyond Claude's knowledge cutoff
+- Searches are performed automatically within a single API call
+
+CRITICAL REQUIREMENT - You MUST follow this:
+  - After answering the user's question, you MUST include a "Sources:" section at the end of your response
+  - In the Sources section, list all relevant URLs from the search results as markdown hyperlinks: [Title](URL)
+  - This is MANDATORY - never skip including sources in your response
+  - Example format:
+
+    [Your answer here]
+
+    Sources:
+    - [Source Title 1](https://example.com/1)
+    - [Source Title 2](https://example.com/2)
+
+Usage notes:
+  - Domain filtering is supported to include or block specific websites
+  - Web search is only available in the US
+
+IMPORTANT - Use the correct year in search queries:
+  - Today's date is ${now}. You MUST use this year when searching for recent information, documentation, or current events.
+  - Example: If the user asks for "latest React docs", search for "React documentation ${year}", NOT "React documentation ${year - 1}"
+`;
 }
 
 export const WebSearchTool = {
@@ -28,54 +56,67 @@ export const WebSearchTool = {
     isConcurrencySafe: true,
     async call(input: WebSearchInput, context: any) {
         const startTime = performance.now();
-        const { query, allowed_domains, blocked_domains } = input;
-        const { onProgress } = context || {};
+        const { query } = input;
 
-        if (onProgress) {
-            onProgress({ type: 'query_update', query });
-        } else {
-            terminalLog(`Searching for: ${query}...`);
-        }
+        const subAgentPrompt = `Perform a web search for the query: ${query}`;
+        const extraToolSchemas = [{
+            type: "web_search_20250305",
+            name: "web_search",
+            allowed_domains: input.allowed_domains,
+            blocked_domains: input.blocked_domains,
+            max_uses: 8
+        }];
 
-        // Simulate network delay
-        await new Promise(r => setTimeout(r, 1200));
+        const loop = ConversationService.conversationLoop(
+            [{ role: "user", content: subAgentPrompt }],
+            "You are an assistant for performing a web search tool use",
+            {
+                ...context,
+                extraToolSchemas,
+                querySource: "web_search_tool"
+            }
+        );
 
-        const hits: WebSearchHit[] = [
-            { title: `${query} - Wikipedia`, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}` },
-            { title: `Top 10 facts about ${query}`, url: `https://example.com/facts/${encodeURIComponent(query)}` },
-            { title: `${query} Official Site`, url: `https://${query.toLowerCase().replace(/\s+/g, '')}.com` },
-            { title: `Latest news on ${query}`, url: `https://news.example.com/search?q=${encodeURIComponent(query)}` },
-            { title: `Community discussion on ${query}`, url: `https://reddit.com/r/${query.toLowerCase().replace(/\s+/g, '')}` }
-        ];
+        let results: WebSearchOutput['results'] = [];
+        let queryCounter = 0;
 
-        // Filter by domains if provided
-        let filteredHits = hits;
-        if (allowed_domains && allowed_domains.length > 0) {
-            filteredHits = hits.filter(h => allowed_domains.some(d => h.url.includes(d)));
-        }
-        if (blocked_domains && blocked_domains.length > 0) {
-            filteredHits = hits.filter(h => !blocked_domains.some(d => h.url.includes(d)));
+        for await (const event of loop) {
+            if (event.type === 'stream_event') {
+                const chunk = event.event;
+                // Handle progress updates if necessary (matching gold reference structure)
+                if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'input_json_delta') {
+                    // Extracting query updates from partial JSON if we were to match exactly, 
+                    // but for now we'll focus on results.
+                }
+            } else if (event.type === 'assistant') {
+                const assistantMessage = event.message;
+                for (const content of assistantMessage.content) {
+                    if (content.type === 'text') {
+                        results.push(content.text);
+                    } else if (content.type === 'web_search_tool_result') {
+                        results.push({
+                            toolUseId: content.toolUseId,
+                            content: content.content
+                        });
+                    }
+                }
+            }
         }
 
         const durationSeconds = (performance.now() - startTime) / 1000;
-
-        if (onProgress) {
-            onProgress({ type: 'search_results_received', resultCount: filteredHits.length, query });
-        }
 
         return {
             is_error: false,
             content: {
                 query,
-                results: [
-                    {
-                        toolUseId: Math.random().toString(36).substring(2, 10),
-                        content: filteredHits
-                    }
-                ],
+                results,
                 durationSeconds
             }
         };
+    },
+
+    prompt() {
+        return getWebSearchPrompt();
     },
 
     mapToolResultToToolResultBlockParam(output: WebSearchOutput, toolUseId: string) {
@@ -84,12 +125,8 @@ export const WebSearchTool = {
         output.results.forEach(res => {
             if (typeof res === "string") {
                 content += res + "\n\n";
-            } else {
-                if ('content' in res && Array.isArray(res.content)) {
-                    content += `Links: ${JSON.stringify(res.content)}\n\n`;
-                } else {
-                    content += `No links found.\n\n`;
-                }
+            } else if ('toolUseId' in res) {
+                content += `Links: ${JSON.stringify(res.content)}\n\n`;
             }
         });
 

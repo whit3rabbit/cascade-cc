@@ -3,7 +3,15 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 // Configuration
-const VERSION = '2.1.12';
+const DEFAULT_VERSION = '2.1.12';
+
+const args = process.argv.slice(2);
+const dryRun = args.includes('--dry-run');
+const filteredArgs = args.filter(arg => arg !== '--dry-run');
+const versionArg = filteredArgs[0];
+const batchSizeArg = filteredArgs[1];
+
+const VERSION = versionArg || process.env.DISCOVERY_VERSION || DEFAULT_VERSION;
 const SYSTEM_MAP_PATH = path.join(__dirname, '..', 'cascade_graph_analysis', VERSION, 'system_map.v2.json');
 const GRAPH_MAP_PATH = path.join(__dirname, '..', 'cascade_graph_analysis', VERSION, 'metadata', 'graph_map.json');
 const CHUNKS_DIR = path.join(__dirname, '..', 'cascade_graph_analysis', VERSION, 'chunks');
@@ -168,8 +176,6 @@ function runCrawler(batchSize = 20, dryRun = false) {
     console.log('[*] Batch analysis complete.');
 }
 
-const args = process.argv.slice(2);
-const batchSize = parseInt(args[0]) || 10;
-const dryRun = args.includes('--dry-run');
+const batchSize = parseInt(batchSizeArg, 10) || 10;
 
 runCrawler(batchSize, dryRun);
