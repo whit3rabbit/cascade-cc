@@ -3,6 +3,7 @@
     "src": {
       "description": "Auto-generated from custom_gold",
       "files": [
+        "BugReportCommand.tsx",
         "SlashCommandDispatcher.ts",
         "help.tsx",
         "helpers.ts",
@@ -126,6 +127,7 @@
       "terminal": {
         "description": "Auto-generated from custom_gold",
         "files": [
+          "Doctor.tsx",
           "Logo.tsx",
           "REPL.tsx",
           "StatusLine.tsx",
@@ -137,6 +139,7 @@
           "ControlStreamService.ts",
           "CostService.ts",
           "DoctorService.ts",
+          "FeedbackService.ts",
           "FileIndexService.ts",
           "HistoryService.ts",
           "NotificationService.tsx",
@@ -396,11 +399,14 @@
           "fileTypeUtils.ts",
           "fixtureUtils.ts",
           "formatUri.ts",
+          "git.ts",
           "jsonSchema.ts",
           "lodashUtils.ts",
           "loggingUtils.ts",
           "lspFormatter.ts",
           "messageUtils.ts",
+          "open.ts",
+          "process.ts",
           "product.ts",
           "runtime.ts",
           "runtimeAndEnv.ts",
@@ -410,6 +416,7 @@
           "schemaRegistry.ts",
           "screenshotUtils.ts",
           "timeUtils.ts",
+          "transcript.ts",
           "treeSitter.ts",
           "uiUtils.ts"
         ]
@@ -427,18 +434,33 @@
   },
   "file_anchors": [
     {
+      "suggested_path": "`src/commands/BugReportCommand.tsx`",
+      "suggested_name": "`BugReportCommand`",
+      "description": "Auto-generated anchor for commands/BugReportCommand.tsx",
+      "trigger_keywords": [
+        "../services/terminal/FeedbackService.js",
+        "../utils/shared/transcript.js",
+        "../utils/shared/process.js",
+        "../utils/shared/product.js",
+        "../utils/shared/open.js",
+        "../utils/shared/git.js",
+        "BugReportCommand",
+        "functionality."
+      ]
+    },
+    {
       "suggested_path": "`src/commands/SlashCommandDispatcher.ts`",
       "suggested_name": "`CommandContext`",
       "description": "Auto-generated anchor for commands/SlashCommandDispatcher.ts",
       "trigger_keywords": [
         "../services/terminal/DoctorService.js",
-        "../services/auth/KeychainService.js",
-        "../services/auth/MsalAuthService.js",
         "../services/terminal/CostService.js",
         "../services/auth/OAuthService.js",
-        "../utils/shared/product.js",
         "../utils/shared/crypto.js",
-        "SlashCommandDispatcher"
+        "SlashCommandDispatcher",
+        "successfully.",
+        "credentials",
+        "directory._"
       ]
     },
     {
@@ -452,8 +474,8 @@
         "com.anthropic.claude",
         "local-jsx",
         "SCANNER",
-        "above",
-        "Play"
+        "../services/terminal/CommandRegistry.js",
+        "../constants/product.js"
       ]
     },
     {
@@ -505,12 +527,12 @@
       "trigger_keywords": [
         "releaseNotesCommandDefinition",
         "release-notes",
+        "changelog.md",
+        "notes.",
+        "asked",
         "notes",
-        "Display",
-        "release",
-        "Focus",
-        "./helpers.js",
-        "updates"
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+        "retrieve"
       ]
     },
     {
@@ -701,8 +723,8 @@
         "main",
         "Disable",
         "Change",
-        "Toggle",
-        "light-daltonized"
+        "light-daltonized",
+        "dark-daltonized"
       ]
     },
     {
@@ -710,12 +732,12 @@
       "suggested_name": "`McpDiscoverView`",
       "description": "Auto-generated anchor for components/menus/McpDiscoverView.tsx",
       "trigger_keywords": [
-        "../../services/mcp/PluginManager.js",
         "../mcp/MCPServerDialog.js",
         "marketplaces...",
         "McpDiscoverView",
         "progress...",
         "Discover",
+        "../../services/mcp/PluginManager.js",
         "complete",
         "Loading"
       ]
@@ -731,7 +753,7 @@
         "configured",
         "McpMenu",
         "MCPs",
-        "../../services/mcp/McpClientManager.js",
+        "../../services/mcp/PluginManager.js",
         "built-in"
       ]
     },
@@ -747,7 +769,7 @@
         "promptSuggestions",
         "autoConnectIde",
         "permissionMode",
-        "chromeEnabled"
+        "vimModeEnabled"
       ]
     },
     {
@@ -772,8 +794,8 @@
       "trigger_keywords": [
         "UnifiedSearchMenu",
         "ink-text-input",
-        "results",
         "history",
+        "results",
         "../../services/terminal/ThemeService.js",
         "select",
         "ink-select-input",
@@ -789,10 +811,10 @@
         "UserPromptMessage",
         "reverse-i-search",
         "claude-prompt-",
-        "fuse.js",
-        "Multiline",
-        "inherit",
-        "VISUAL"
+        "register...",
+        "Recording",
+        "backward",
+        "forward"
       ]
     },
     {
@@ -881,8 +903,8 @@
         "edit_file",
         "execute",
         "./PermissionOption.js",
-        "confirm",
-        "Confirm"
+        "allowed",
+        "confirm"
       ]
     },
     {
@@ -893,8 +915,8 @@
         "PermissionOptionProps",
         "PermissionOption",
         "white",
-        "cyan",
         "gray",
+        "cyan",
         "column",
         "react"
       ]
@@ -945,6 +967,21 @@
       ]
     },
     {
+      "suggested_path": "`src/components/terminal/Doctor.tsx`",
+      "suggested_name": "`Doctor`",
+      "description": "Auto-generated anchor for components/terminal/Doctor.tsx",
+      "trigger_keywords": [
+        "../../services/terminal/DoctorService.js",
+        "//docs.anthropic.com/claude-code",
+        "diagnostics...",
+        "diagnostics",
+        "Unreachable",
+        "Warnings",
+        "Checks",
+        "Locked"
+      ]
+    },
+    {
       "suggested_path": "`src/components/terminal/Logo.tsx`",
       "suggested_name": "`Logo`",
       "description": "Auto-generated anchor for components/terminal/Logo.tsx",
@@ -967,11 +1004,11 @@
         "../../commands/SlashCommandDispatcher.js",
         "../onboarding/LspRecommendationDialog.js",
         "../permissions/WorkerPermissionDialog.js",
-        "../../services/terminal/CostService.js",
         "../permissions/CostThresholdDialog.js",
         "../onboarding/IdeOnboardingDialog.js",
         "../../services/hooks/HookService.js",
-        "../onboarding/OnboardingWorkflow.js"
+        "../onboarding/OnboardingWorkflow.js",
+        "../../commands/BugReportCommand.js"
       ]
     },
     {
@@ -995,11 +1032,11 @@
       "description": "Auto-generated anchor for components/terminal/TranscriptToggle.tsx",
       "trigger_keywords": [
         "TranscriptToggle",
-        "detailed",
         "Showing",
+        "detailed",
         "center",
-        "toggle",
         "Ctrl",
+        "toggle",
         "transcript",
         "single"
       ]
@@ -1012,11 +1049,11 @@
         "/.claude/agents/",
         ".claude/agents/",
         "AgentWizard",
-        "Describe",
-        "submit",
         "unit",
         "../common/Divider.js",
-        "comprehensive"
+        "comprehensive",
+        "Creation",
+        "Describe"
       ]
     },
     {
@@ -1044,9 +1081,9 @@
         "claude-cli/",
         "BUILD_INFO",
         "build",
-        "../services/config/EnvService.js",
         "anthropic-ai/claude-code",
-        "CLAUDE_CODE_ENTRYPOINT"
+        "CLAUDE_CODE_ENTRYPOINT",
+        "external"
       ]
     },
     {
@@ -1168,11 +1205,11 @@
         "AgentPersistence",
         "AgentData",
         "gray-matter",
-        "builtin",
         "color",
+        "builtin",
         "agents",
-        "description",
-        ".claude"
+        ".claude",
+        "load"
       ]
     },
     {
@@ -1224,8 +1261,8 @@
       "trigger_keywords": [
         "AccountManager",
         "homeAccountId",
-        "Account",
         "base64",
+        "Account",
         "required"
       ]
     },
@@ -1234,14 +1271,14 @@
       "suggested_name": "`ApiKeyManager`",
       "description": "Auto-generated anchor for services/auth/ApiKeyManager.ts",
       "trigger_keywords": [
+        "anthropic-api-key",
+        "anthropic/api-key",
+        "/.claude.json.",
         "ApiKeyManager",
         "apiKeyHelper",
         "redirect",
         "address",
-        "exists.",
-        "Unable",
-        "type.",
-        "loopback"
+        "Example"
       ]
     },
     {
@@ -1266,12 +1303,12 @@
       "trigger_keywords": [
         "Windows.Security.Credentials",
         "delete-generic-password",
-        "find-generic-password",
         "add-generic-password",
         "show-keychain-info",
         "KeychainInterface",
         "errSecAuthFailed",
-        "KeychainService"
+        "KeychainService",
+        "c.FillPassword"
       ]
     },
     {
@@ -1296,12 +1333,12 @@
       "trigger_keywords": [
         "../../utils/http/RetryStrategy.js",
         "../../utils/shared/envContext.js",
-        "../../utils/shared/product.js",
         "/opt/azcmagent/bin/himds",
         "../../constants/keys.js",
         "code_challenge_method",
         "TokenExchangeResponse",
-        "./KeychainService.js"
+        "./MsalAuthService.js",
+        "/api/oauth/profile"
       ]
     },
     {
@@ -1341,11 +1378,11 @@
         "claude-bugreport-",
         "BugReportService",
         "system-info.json",
-        "collection",
-        "generation",
+        "collecting",
+        "logs.jsonl",
         "logs.txt",
-        "pending.",
-        "started."
+        "fflate",
+        ".zip"
       ]
     },
     {
@@ -1354,13 +1391,13 @@
       "description": "Auto-generated anchor for services/config/ConfigStatusService.ts",
       "trigger_keywords": [
         "../auth/ApiKeyManager.js",
-        "../auth/OAuthService.js",
         "ConfigStatusService",
         "ConfigDetail",
         "HTTPS_PROXY",
         "Evaluation",
         "http_proxy",
-        "Demo"
+        "Demo",
+        "../auth/OAuthService.js"
       ]
     },
     {
@@ -1368,14 +1405,14 @@
       "suggested_name": "`EnvConfig`",
       "description": "Auto-generated anchor for services/config/EnvService.ts",
       "trigger_keywords": [
-        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
         "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
         "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
         "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",
         "CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL",
         "DISABLE_NON_ESSENTIAL_MODEL_CALLS",
         "CLAUDE_CODE_PROXY_RESOLVES_HOSTS",
-        "SLASH_COMMAND_TOOL_CHAR_BUDGET"
+        "SLASH_COMMAND_TOOL_CHAR_BUDGET",
+        "CLAUDE_CODE_HIDE_ACCOUNT_INFO"
       ]
     },
     {
@@ -1398,14 +1435,14 @@
       "suggested_name": "`SettingSource`",
       "description": "Auto-generated anchor for services/config/SettingsService.ts",
       "trigger_keywords": [
+        "Support/ClaudeCode/managed-settings.json",
         "CLAUDE_FLAG_SETTINGS_PATH",
         "../hooks/HookTypes.js",
         "managed-settings.json",
+        "/Library/Application",
         "SettingsService",
-        "plansDirectory",
-        "SettingSource",
-        "ProgramData",
-        "ClaudeCode"
+        "legacySettings",
+        "plansDirectory"
       ]
     },
     {
@@ -1464,8 +1501,8 @@
         "DocumentationService",
         "DEBUG_DOCS",
         "sections",
-        "Related",
-        "core"
+        "core",
+        "docs"
       ]
     },
     {
@@ -1696,22 +1733,22 @@
         "stdio",
         "cannot",
         "name",
-        "../config/SettingsService.js"
+        "server"
       ]
     },
     {
       "suggested_path": "`src/services/mcp/PluginManager.ts`",
-      "suggested_name": "`PluginInstallation`",
+      "suggested_name": "`ConfigScope`",
       "description": "Auto-generated anchor for services/mcp/PluginManager.ts",
       "trigger_keywords": [
+        "./McpClientManager.js",
         "./McpServerManager.js",
-        "PluginInstallation",
         "PluginManager",
         "Uninstalling",
+        "ConfigScope",
         "Uninstalled",
         "Updating",
-        "Toggling",
-        "global"
+        "Toggling"
       ]
     },
     {
@@ -1792,11 +1829,11 @@
         "./SandboxSettings.js",
         "SandboxInterceptor",
         "--die-with-parent",
+        "/etc/alternatives",
         "interceptCommand",
         "claude-sandbox-",
-        "--new-session",
-        "--unshare-net",
-        "--unshare-pid"
+        "--unshare-user",
+        "/etc/ssl/certs"
       ]
     },
     {
@@ -1824,9 +1861,9 @@
         "//statsig.anthropic.com/v1/",
         "statsig-api-key",
         "application/json",
-        "Content-Type",
         "Statsig",
-        "POST"
+        "POST",
+        "Content-Type"
       ]
     },
     {
@@ -2055,9 +2092,9 @@
         "CLAUDE_TELEMETRY_URL",
         "STATSIG_CLIENT_KEY",
         "client-claude-key",
+        "tengu_wait_time",
         "events.jsonl",
-        "node-lite",
-        "Shutdown."
+        "node-lite"
       ]
     },
     {
@@ -2147,7 +2184,7 @@
         "commands...",
         "history.",
         "bug.",
-        "Initializing"
+        "compact"
       ]
     },
     {
@@ -2197,14 +2234,29 @@
       "suggested_name": "`HealthCheckResult`",
       "description": "Auto-generated anchor for services/terminal/DoctorService.ts",
       "trigger_keywords": [
+        "../agents/AgentPersistence.js",
         "node_modules/.bin/claude",
+        "TASK_MAX_OUTPUT_LENGTH",
         "statsig.anthropic.com",
         ".local/bin/claude",
         "api.anthropic.com",
         "HealthCheckResult",
-        "package-manager",
-        "installations.",
-        "DoctorService"
+        "package-manager"
+      ]
+    },
+    {
+      "suggested_path": "`src/services/terminal/FeedbackService.ts`",
+      "suggested_name": "`submitFeedback`",
+      "description": "Auto-generated anchor for services/terminal/FeedbackService.ts",
+      "trigger_keywords": [
+        "deobfuscated-env",
+        "FeedbackService",
+        "submitFeedback",
+        "simulations",
+        "Submission",
+        "/0.0.1",
+        "../auth/OAuthService.js",
+        "User-Agent"
       ]
     },
     {
@@ -2243,8 +2295,8 @@
       "description": "Auto-generated anchor for services/terminal/NotificationService.tsx",
       "trigger_keywords": [
         "NotificationService",
-        "Notification",
         "stub",
+        "Notification",
         "success",
         "warn",
         "info",
@@ -2273,13 +2325,13 @@
       "description": "Auto-generated anchor for services/terminal/ShellSnapshotService.ts",
       "trigger_keywords": [
         "ShellSnapshotService",
+        "Exported",
         "unalias",
         "/alias",
-        "createShellSnapshot",
-        "shell-snapshots",
-        "ShellSnapshot",
-        "SNAPSHOT_FILE",
-        "snapshot-"
+        "OLDPWD",
+        "SHLVL",
+        "HOME",
+        "LANG"
       ]
     },
     {
@@ -2320,10 +2372,10 @@
         "local_agent",
         "TaskManager",
         "local_bash",
+        "SIGKILL",
+        "kill",
         "AbortError",
-        "cancelled",
-        "pending",
-        "completed"
+        "cancelled"
       ]
     },
     {
@@ -2366,8 +2418,8 @@
         "WebSocket",
         "sending",
         "closed",
-        "open",
         "connected",
+        "open",
         "close"
       ]
     },
@@ -2411,9 +2463,9 @@
         "//registry.npmjs.org/",
         "npm_package_version",
         "update-available",
-        "claude-update-",
         "UpdaterService",
-        "Downloading"
+        "UpdateInfo",
+        "dist-tags"
       ]
     },
     {
@@ -2453,12 +2505,12 @@
       "trigger_keywords": [
         "ENTER_PLAN_MODE_DESCRIPTION",
         "EnterPlanModeTool",
+        "implementation",
         "EnterPlanMode",
         "approach.",
         "codebase.",
         "designing",
-        "exploring",
-        "requiring"
+        "exploring"
       ]
     },
     {
@@ -2468,12 +2520,12 @@
       "trigger_keywords": [
         "FileEditInput",
         "FileEditTool",
-        "replacing",
         "FileEdit",
-        "string.",
         "exact",
         "made.",
-        "old_string"
+        "old_string",
+        "existing",
+        "changes"
       ]
     },
     {
@@ -2502,8 +2554,8 @@
         "write.",
         "wrote",
         "full",
-        "file.",
-        "file_path"
+        "file_path",
+        "absolute"
       ]
     },
     {
@@ -2574,11 +2626,11 @@
         "NotebookEditInput",
         "NotebookEditTool",
         "NotebookEdit",
-        "replacement.",
         "deletion.",
+        "ID/index",
         ".ipynb",
-        "markdown",
-        "Jupyter"
+        "Jupyter",
+        "replace"
       ]
     },
     {
@@ -2651,9 +2703,9 @@
         "WebFetchTool",
         "Mozilla/5.0",
         "compatible",
-        "User-Agent",
         "markdown.",
-        "converts"
+        "converts",
+        "turndown"
       ]
     },
     {
@@ -2661,14 +2713,14 @@
       "suggested_name": "`WebSearchInput`",
       "description": "Auto-generated anchor for tools/WebSearchTool.ts",
       "trigger_keywords": [
+        "//news.example.com/search",
+        "//en.wikipedia.org/wiki/",
+        "search_results_received",
+        "//example.com/facts/",
+        "//reddit.com/r/",
         "WebSearchInput",
         "WebSearchTool",
-        "Searching",
-        "WebSearch",
-        "Performs",
-        "query.",
-        "Stub",
-        "../utils/shared/runtime.js"
+        "query_update"
       ]
     },
     {
@@ -2710,8 +2762,8 @@
         "AgentTypes",
         "AgentMode",
         "tool_use",
-        "tool_result",
         "progress",
+        "tool_result",
         "help",
         "assistant"
       ]
@@ -2819,7 +2871,7 @@
         "Watcher",
         "unlink",
         "../shared/runtimeAndEnv.js",
-        "settings.json"
+        "flagSettings"
       ]
     },
     {
@@ -2846,10 +2898,10 @@
         "EACCES",
         ".html",
         ".scss",
-        "rules",
         ".css",
         ".jsx",
-        ".tsx"
+        "codespan",
+        "managed"
       ]
     },
     {
@@ -2940,8 +2992,8 @@
         "parameter",
         "PathError",
         "segments",
-        "passed",
-        "safely"
+        "safely",
+        "passed"
       ]
     },
     {
@@ -3048,10 +3100,10 @@
         "Unterminated",
         "character",
         "position",
+        "Unicode",
         "Unexpected",
-        "input",
-        "json",
-        "JSON"
+        "sequence",
+        "escape"
       ]
     },
     {
@@ -3063,9 +3115,9 @@
         "www.github.com",
         "SourceParser",
         "github.com",
-        "github",
         "exist",
         "manifest",
+        "github",
         "does"
       ]
     },
@@ -3183,9 +3235,9 @@
         "acquire",
         "another",
         "held",
-        "lock",
         "acquisition",
-        "release"
+        "release",
+        ".lock"
       ]
     },
     {
@@ -3349,9 +3401,9 @@
         "RequestAbortedError",
         "NotSupportedError",
         "argument",
-        "errors",
         "supported",
         "aborted",
+        "errors",
         "Request"
       ]
     },
@@ -3413,6 +3465,21 @@
         "location",
         "path.",
         "Warning"
+      ]
+    },
+    {
+      "suggested_path": "`src/utils/shared/git.ts`",
+      "suggested_name": "`isGitRepo`",
+      "description": "Auto-generated anchor for utils/shared/git.ts",
+      "trigger_keywords": [
+        "--is-inside-work-tree",
+        "--abbrev-ref",
+        "--porcelain",
+        "isGitRepo",
+        "rev-parse",
+        "get-url",
+        "origin",
+        "HEAD"
       ]
     },
     {
@@ -3484,8 +3551,33 @@
         "attachment",
         "Registered",
         "new_file",
-        "skill",
-        "messageUtils"
+        "invoked",
+        "skill"
+      ]
+    },
+    {
+      "suggested_path": "`src/utils/shared/open.ts`",
+      "suggested_name": "`openUrl`",
+      "description": "Auto-generated anchor for utils/shared/open.ts",
+      "trigger_keywords": [
+        "xdg-open",
+        "openUrl",
+        "start",
+        "open",
+        "darwin",
+        "child_process",
+        "win32",
+        "node"
+      ]
+    },
+    {
+      "suggested_path": "`src/utils/shared/process.ts`",
+      "suggested_name": "`platform`",
+      "description": "Auto-generated anchor for utils/shared/process.ts",
+      "trigger_keywords": [
+        "platform",
+        "process",
+        "unknown"
       ]
     },
     {
@@ -3515,7 +3607,7 @@
         "CLAUDE_CODE_DEMO",
         "standard",
         "aborted",
-        "valid"
+        "Expected"
       ]
     },
     {
@@ -3555,8 +3647,8 @@
         "rxjsOperators",
         "defaultValue",
         "EmptyError",
-        "sequence",
-        "elements"
+        "elements",
+        "sequence"
       ]
     },
     {
@@ -3614,18 +3706,28 @@
       ]
     },
     {
+      "suggested_path": "`src/utils/shared/transcript.ts`",
+      "suggested_name": "`formatTranscript`",
+      "description": "Auto-generated anchor for utils/shared/transcript.ts",
+      "trigger_keywords": [
+        "formatTranscript",
+        "transcript",
+        "string"
+      ]
+    },
+    {
       "suggested_path": "`src/utils/shared/treeSitter.ts`",
       "suggested_name": "`initTreeSitter`",
       "description": "Auto-generated anchor for utils/shared/treeSitter.ts",
       "trigger_keywords": [
+        "../../../../node_modules/web-tree-sitter",
+        "node_modules/web-tree-sitter",
         "tree-sitter-bash.wasm",
+        "web-tree-sitter.wasm",
         "../../../../assets",
         "DEBUG_TREESITTER",
         "tree-sitter.wasm",
-        "../../../assets",
-        "web-tree-sitter",
-        "initTreeSitter",
-        "functionality"
+        "../../../assets"
       ]
     },
     {
@@ -3666,8 +3768,8 @@
         "../../vendor/Fuse.js",
         "Suggestions",
         "Suggestion",
-        "description",
         "name",
+        "description",
         "prompt"
       ]
     },
@@ -3727,8 +3829,8 @@
         "../shared/bashUtils.js",
         "new-session",
         "tmux",
-        "Unknown",
-        "create"
+        "create",
+        "Unknown"
       ]
     },
     {
@@ -3738,10 +3840,10 @@
       "trigger_keywords": [
         "TerminalMarkdownRenderer",
         "MarkdownRenderer",
-        "escape",
         "strong",
         "plaintext",
         "codespan",
+        "escape",
         "cli-highlight",
         "marked"
       ]
@@ -3792,6 +3894,26 @@
   ],
   "name_hints": [
     {
+      "suggested_name": "`BugReportCommand`",
+      "logic_anchor": "We will use your feedback to debug related issues or to improve Claude Code's functionality."
+    },
+    {
+      "suggested_name": "`BugReportCommand`",
+      "logic_anchor": "to open your browser and draft a GitHub issue, or any other key to close."
+    },
+    {
+      "suggested_name": "`BugReportCommand`",
+      "logic_anchor": "https://github.com/anthropics/claude-code/issues/new?title="
+    },
+    {
+      "suggested_name": "`BugReportCommand`",
+      "logic_anchor": "Failed to submit feedback. Please try again."
+    },
+    {
+      "suggested_name": "`BugReportCommand`",
+      "logic_anchor": "Please provide a description of the issue."
+    },
+    {
       "suggested_name": "`CommandContext`",
       "logic_anchor": "Opening browser for login... If it doesn't open automatically, please visit this URL: ["
     },
@@ -3801,15 +3923,15 @@
     },
     {
       "suggested_name": "`CommandContext`",
+      "logic_anchor": "✅ Logged out successfully. Your credentials have been removed."
+    },
+    {
+      "suggested_name": "`CommandContext`",
       "logic_anchor": "✅ `CLAUDE.md` already exists in this directory."
     },
     {
       "suggested_name": "`CommandContext`",
       "logic_anchor": "Login successful! You can close this window."
-    },
-    {
-      "suggested_name": "`CommandContext`",
-      "logic_anchor": "_MEMORY.md not found in current directory._"
     },
     {
       "suggested_name": "`helpCommandDefinition`",
@@ -3869,23 +3991,23 @@
     },
     {
       "suggested_name": "`releaseNotesCommandDefinition`",
+      "logic_anchor": "https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md"
+    },
+    {
+      "suggested_name": "`releaseNotesCommandDefinition`",
+      "logic_anchor": "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
+    },
+    {
+      "suggested_name": "`releaseNotesCommandDefinition`",
+      "logic_anchor": "Unable to retrieve detailed release notes. Please visit:"
+    },
+    {
+      "suggested_name": "`releaseNotesCommandDefinition`",
       "logic_anchor": "Display the latest release notes and updates"
     },
     {
       "suggested_name": "`releaseNotesCommandDefinition`",
-      "logic_anchor": "release-notes"
-    },
-    {
-      "suggested_name": "`releaseNotesCommandDefinition`",
-      "logic_anchor": "release notes"
-    },
-    {
-      "suggested_name": "`releaseNotesCommandDefinition`",
-      "logic_anchor": "./helpers.js"
-    },
-    {
-      "suggested_name": "`releaseNotesCommandDefinition`",
-      "logic_anchor": "Focus on:"
+      "logic_anchor": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
     },
     {
       "suggested_name": "`MessageHistoryProps`",
@@ -4009,6 +4131,10 @@
     },
     {
       "suggested_name": "`ReconnectMcpServer`",
+      "logic_anchor": "../../services/mcp/McpClientManager.js"
+    },
+    {
+      "suggested_name": "`ReconnectMcpServer`",
       "logic_anchor": "Successfully reconnected to"
     },
     {
@@ -4018,10 +4144,6 @@
     {
       "suggested_name": "`ReconnectMcpServer`",
       "logic_anchor": "Reconnecting to"
-    },
-    {
-      "suggested_name": "`ReconnectMcpServer`",
-      "logic_anchor": "ink-spinner"
     },
     {
       "suggested_name": "`AgentsMenu`",
@@ -4101,7 +4223,7 @@
     },
     {
       "suggested_name": "`McpMenu`",
-      "logic_anchor": "Built-in MCPs (always available)"
+      "logic_anchor": "../../services/mcp/PluginManager.js"
     },
     {
       "suggested_name": "`SettingsMenu`",
@@ -4109,7 +4231,7 @@
     },
     {
       "suggested_name": "`SettingsMenu`",
-      "logic_anchor": "Usage statistics not available in this view yet."
+      "logic_anchor": "Rates vary by model. Calculations are estimates."
     },
     {
       "suggested_name": "`SettingsMenu`",
@@ -4169,19 +4291,19 @@
     },
     {
       "suggested_name": "`UserPromptMessageProps`",
+      "logic_anchor": "Play macro from register..."
+    },
+    {
+      "suggested_name": "`UserPromptMessageProps`",
+      "logic_anchor": "Recording into register..."
+    },
+    {
+      "suggested_name": "`UserPromptMessageProps`",
       "logic_anchor": "(reverse-i-search):"
     },
     {
       "suggested_name": "`UserPromptMessageProps`",
       "logic_anchor": "ink-text-input"
-    },
-    {
-      "suggested_name": "`UserPromptMessageProps`",
-      "logic_anchor": "claude-prompt-"
-    },
-    {
-      "suggested_name": "`UserPromptMessageProps`",
-      "logic_anchor": "child_process"
     },
     {
       "suggested_name": "`IdeOnboardingDialog`",
@@ -4362,6 +4484,26 @@
     {
       "suggested_name": "`PermissionOptionValue`",
       "logic_anchor": "Always allow"
+    },
+    {
+      "suggested_name": "`Doctor`",
+      "logic_anchor": "../../services/terminal/DoctorService.js"
+    },
+    {
+      "suggested_name": "`Doctor`",
+      "logic_anchor": "https://docs.anthropic.com/claude-code"
+    },
+    {
+      "suggested_name": "`Doctor`",
+      "logic_anchor": "To fix common issues, try running"
+    },
+    {
+      "suggested_name": "`Doctor`",
+      "logic_anchor": "or check the documentation at"
+    },
+    {
+      "suggested_name": "`Doctor`",
+      "logic_anchor": "Unreachable Permission Rules"
     },
     {
       "suggested_name": "`Logo`",
@@ -4669,23 +4811,23 @@
     },
     {
       "suggested_name": "`ApiKeyManager`",
-      "logic_anchor": "apiKeyHelper returned empty output"
+      "logic_anchor": "The command could not be found. Please check your apiKeyHelper setting in settings.json or ~/.claude.json."
+    },
+    {
+      "suggested_name": "`ApiKeyManager`",
+      "logic_anchor": "Example Linux helper: pass anthropic/api-key or secret-tool lookup service anthropic-api-key account user"
+    },
+    {
+      "suggested_name": "`ApiKeyManager`",
+      "logic_anchor": "Example macOS helper: security find-generic-password -s 'Anthropic API Key' -w"
+    },
+    {
+      "suggested_name": "`ApiKeyManager`",
+      "logic_anchor": "Tip: Ensure the command prints only the API key to stdout."
     },
     {
       "suggested_name": "`ApiKeyManager`",
       "logic_anchor": "Loopback server already exists."
-    },
-    {
-      "suggested_name": "`ApiKeyManager`",
-      "logic_anchor": "Invalid loopback address type."
-    },
-    {
-      "suggested_name": "`ApiKeyManager`",
-      "logic_anchor": "Error executing apiKeyHelper:"
-    },
-    {
-      "suggested_name": "`ApiKeyManager`",
-      "logic_anchor": "../config/SettingsService.js"
     },
     {
       "suggested_name": "`getAuthHeaders`",
@@ -4725,7 +4867,7 @@
     },
     {
       "suggested_name": "`KeychainInterface`",
-      "logic_anchor": "Keychain access denied for"
+      "logic_anchor": "Keychain access canceled by user for \""
     },
     {
       "suggested_name": "`TokenRequest`",
@@ -4793,10 +4935,6 @@
     },
     {
       "suggested_name": "`BugReportService`",
-      "logic_anchor": "Log collection implementation pending. [INFO] Bug report generation started."
-    },
-    {
-      "suggested_name": "`BugReportService`",
       "logic_anchor": "Failed to generate bug report:"
     },
     {
@@ -4805,11 +4943,15 @@
     },
     {
       "suggested_name": "`BugReportService`",
-      "logic_anchor": "claude-bugreport-"
+      "logic_anchor": "Error collecting logs:"
     },
     {
       "suggested_name": "`BugReportService`",
-      "logic_anchor": "system-info.json"
+      "logic_anchor": "Log file not found at"
+    },
+    {
+      "suggested_name": "`BugReportService`",
+      "logic_anchor": "claude-bugreport-"
     },
     {
       "suggested_name": "`ConfigDetail`",
@@ -4873,6 +5015,10 @@
     },
     {
       "suggested_name": "`SettingSource`",
+      "logic_anchor": "/Library/Application Support/ClaudeCode/managed-settings.json"
+    },
+    {
+      "suggested_name": "`SettingSource`",
       "logic_anchor": "C:\\ProgramData\\ClaudeCode\\managed-settings.json"
     },
     {
@@ -4886,10 +5032,6 @@
     {
       "suggested_name": "`SettingSource`",
       "logic_anchor": "[Settings] No path found for source:"
-    },
-    {
-      "suggested_name": "`SettingSource`",
-      "logic_anchor": "../../utils/shared/runtimeAndEnv.js"
     },
     {
       "suggested_name": "`ConversationOptions`",
@@ -5133,11 +5275,11 @@
     },
     {
       "suggested_name": "`MCPServerMultiselectDialog`",
-      "logic_anchor": "@modelcontextprotocol/sdk/client/sse.js"
+      "logic_anchor": "already connected, disconnecting first..."
     },
     {
       "suggested_name": "`MCPServerMultiselectDialog`",
-      "logic_anchor": "../../components/mcp/MCPServerDialog.js"
+      "logic_anchor": "@modelcontextprotocol/sdk/client/sse.js"
     },
     {
       "suggested_name": "`McpServerConfig`",
@@ -5224,24 +5366,24 @@
       "logic_anchor": "node:path"
     },
     {
-      "suggested_name": "`PluginInstallation`",
+      "suggested_name": "`ConfigScope`",
+      "logic_anchor": "../config/SettingsService.js"
+    },
+    {
+      "suggested_name": "`ConfigScope`",
       "logic_anchor": "[Plugins] Uninstalling"
     },
     {
-      "suggested_name": "`PluginInstallation`",
+      "suggested_name": "`ConfigScope`",
       "logic_anchor": "./McpServerManager.js"
     },
     {
-      "suggested_name": "`PluginInstallation`",
-      "logic_anchor": "Installed MCP server:"
+      "suggested_name": "`ConfigScope`",
+      "logic_anchor": "./McpClientManager.js"
     },
     {
-      "suggested_name": "`PluginInstallation`",
+      "suggested_name": "`ConfigScope`",
       "logic_anchor": "[Plugins] Installing"
-    },
-    {
-      "suggested_name": "`PluginInstallation`",
-      "logic_anchor": "[Plugins] Toggling"
     },
     {
       "suggested_name": "`ToolDetails`",
@@ -5309,10 +5451,6 @@
     },
     {
       "suggested_name": "`interceptCommand`",
-      "logic_anchor": "(allow file-read* file-write* (subpath \""
-    },
-    {
-      "suggested_name": "`interceptCommand`",
       "logic_anchor": "(allow network* (remote unix-socket))"
     },
     {
@@ -5321,11 +5459,15 @@
     },
     {
       "suggested_name": "`interceptCommand`",
-      "logic_anchor": "(deny file-write* (subpath \""
+      "logic_anchor": "(allow file-read* file-write*"
     },
     {
       "suggested_name": "`interceptCommand`",
-      "logic_anchor": "(deny file-read* (subpath \""
+      "logic_anchor": "(allow network-outbound)"
+    },
+    {
+      "suggested_name": "`interceptCommand`",
+      "logic_anchor": "(deny network-outbound)"
     },
     {
       "suggested_name": "`parseToolPermissionRule`",
@@ -5653,6 +5795,10 @@
     },
     {
       "suggested_name": "`startInteractionSpan`",
+      "logic_anchor": "../config/SettingsService.js"
+    },
+    {
+      "suggested_name": "`startInteractionSpan`",
       "logic_anchor": "claude_code.interaction"
     },
     {
@@ -5662,10 +5808,6 @@
     {
       "suggested_name": "`startInteractionSpan`",
       "logic_anchor": "claude_code.llm_request"
-    },
-    {
-      "suggested_name": "`startInteractionSpan`",
-      "logic_anchor": "interaction.sequence"
     },
     {
       "suggested_name": "`baggageHeaderToDynamicSamplingContext`",
@@ -5808,6 +5950,26 @@
       "logic_anchor": "No conflicting installations found."
     },
     {
+      "suggested_name": "`submitFeedback`",
+      "logic_anchor": "[FeedbackService] Submission simulations successful (no data sent to Anthropic)"
+    },
+    {
+      "suggested_name": "`submitFeedback`",
+      "logic_anchor": "No authentication token available"
+    },
+    {
+      "suggested_name": "`submitFeedback`",
+      "logic_anchor": "../../utils/shared/product.js"
+    },
+    {
+      "suggested_name": "`submitFeedback`",
+      "logic_anchor": "/0.0.1 (deobfuscated-env)"
+    },
+    {
+      "suggested_name": "`submitFeedback`",
+      "logic_anchor": "../auth/OAuthService.js"
+    },
+    {
       "suggested_name": "`Suggestion`",
       "logic_anchor": "../../utils/terminal/Suggestions.js"
     },
@@ -5873,11 +6035,15 @@
     },
     {
       "suggested_name": "`createShellSnapshot`",
+      "logic_anchor": "alias | sed 's/^alias //g' | sed 's/^/alias -- /' >> \"$SNAPSHOT_FILE\" # Exported variables from config"
+    },
+    {
+      "suggested_name": "`createShellSnapshot`",
       "logic_anchor": "echo \"# Snapshot\" >| \"$SNAPSHOT_FILE\" echo \"unalias -a 2>/dev/null || true\" >> \"$SNAPSHOT_FILE\""
     },
     {
       "suggested_name": "`createShellSnapshot`",
-      "logic_anchor": "alias | sed 's/^alias //g' | sed 's/^/alias -- /' >> \"$SNAPSHOT_FILE\""
+      "logic_anchor": "| grep -vE '^(HOME|PWD|SHLVL|OLDPWD|PATH|LANG|TERM|_)=' >> \"$SNAPSHOT_FILE\""
     },
     {
       "suggested_name": "`createShellSnapshot`",
@@ -5886,10 +6052,6 @@
     {
       "suggested_name": "`createShellSnapshot`",
       "logic_anchor": "../../utils/shared/runtimeAndEnv.js"
-    },
-    {
-      "suggested_name": "`createShellSnapshot`",
-      "logic_anchor": "../../utils/shared/bashUtils.js"
     },
     {
       "suggested_name": "`SwarmBackendInfo`",
@@ -5933,6 +6095,10 @@
     },
     {
       "suggested_name": "`Task`",
+      "logic_anchor": "Failed to kill process"
+    },
+    {
+      "suggested_name": "`Task`",
       "logic_anchor": "User cancelled"
     },
     {
@@ -5946,10 +6112,6 @@
     {
       "suggested_name": "`Task`",
       "logic_anchor": "local_bash"
-    },
-    {
-      "suggested_name": "`Task`",
-      "logic_anchor": "AbortError"
     },
     {
       "suggested_name": "`ThemeName`",
@@ -6053,10 +6215,6 @@
     },
     {
       "suggested_name": "`UpdateInfo`",
-      "logic_anchor": "[Updater] Downloading binary for version"
-    },
-    {
-      "suggested_name": "`UpdateInfo`",
       "logic_anchor": "[Updater] Failed to check for updates:"
     },
     {
@@ -6066,6 +6224,10 @@
     {
       "suggested_name": "`UpdateInfo`",
       "logic_anchor": "application/vnd.npm.install-v1+json"
+    },
+    {
+      "suggested_name": "`UpdateInfo`",
+      "logic_anchor": "../terminal/NotificationService.js"
     },
     {
       "suggested_name": "`AgentGeneratorInput`",
@@ -6133,7 +6295,7 @@
     },
     {
       "suggested_name": "`FileEditInput`",
-      "logic_anchor": "Edit a file by replacing a text string."
+      "logic_anchor": "Edit an existing file."
     },
     {
       "suggested_name": "`FileEditInput`",
@@ -6269,7 +6431,7 @@
     },
     {
       "suggested_name": "`NotebookEditInput`",
-      "logic_anchor": "Cell ID is required for 'replace' mode, or cell was not found."
+      "logic_anchor": "Cell ID/index is required for 'replace' mode, or cell was not found."
     },
     {
       "suggested_name": "`NotebookEditInput`",
@@ -6281,11 +6443,11 @@
     },
     {
       "suggested_name": "`NotebookEditInput`",
-      "logic_anchor": "not found for replacement."
+      "logic_anchor": "Failed to edit notebook:"
     },
     {
       "suggested_name": "`NotebookEditInput`",
-      "logic_anchor": "Failed to edit notebook:"
+      "logic_anchor": "not found for deletion."
     },
     {
       "suggested_name": "`TaskStopInput`",
@@ -6389,23 +6551,23 @@
     },
     {
       "suggested_name": "`WebSearchInput`",
+      "logic_anchor": "REMINDER: You MUST include the sources above in your response to the user using markdown hyperlinks."
+    },
+    {
+      "suggested_name": "`WebSearchInput`",
       "logic_anchor": "Performs a web search for the specified query."
     },
     {
       "suggested_name": "`WebSearchInput`",
-      "logic_anchor": "[WebSearch Stub] Searching for \""
+      "logic_anchor": "https://news.example.com/search?q="
     },
     {
       "suggested_name": "`WebSearchInput`",
-      "logic_anchor": "../utils/shared/runtime.js"
+      "logic_anchor": "Web search results for query: \""
     },
     {
       "suggested_name": "`WebSearchInput`",
-      "logic_anchor": "Searching for:"
-    },
-    {
-      "suggested_name": "`WebSearchInput`",
-      "logic_anchor": "WebSearch"
+      "logic_anchor": "https://en.wikipedia.org/wiki/"
     },
     {
       "suggested_name": "`CORE_TOOLS`",
@@ -6726,6 +6888,10 @@
     {
       "suggested_name": "`Token`",
       "logic_anchor": "delimiter"
+    },
+    {
+      "suggested_name": "`ParseOptions`",
+      "logic_anchor": "Invalid Unicode escape sequence \\u"
     },
     {
       "suggested_name": "`ParseOptions`",
@@ -7128,6 +7294,26 @@
       "logic_anchor": "./runtime.js"
     },
     {
+      "suggested_name": "`isGitRepo`",
+      "logic_anchor": "git rev-parse --is-inside-work-tree"
+    },
+    {
+      "suggested_name": "`isGitRepo`",
+      "logic_anchor": "git rev-parse --abbrev-ref HEAD"
+    },
+    {
+      "suggested_name": "`isGitRepo`",
+      "logic_anchor": "git remote get-url origin"
+    },
+    {
+      "suggested_name": "`isGitRepo`",
+      "logic_anchor": "git status --porcelain"
+    },
+    {
+      "suggested_name": "`isGitRepo`",
+      "logic_anchor": "node:child_process"
+    },
+    {
       "suggested_name": "`JSONSchemaOptions`",
       "logic_anchor": "draft-2020-12"
     },
@@ -7194,6 +7380,14 @@
     {
       "suggested_name": "`MessageContent`",
       "logic_anchor": "attachment"
+    },
+    {
+      "suggested_name": "`openUrl`",
+      "logic_anchor": "node:child_process"
+    },
+    {
+      "suggested_name": "`openUrl`",
+      "logic_anchor": "xdg-open"
     },
     {
       "suggested_name": "`getProductName`",
@@ -7329,19 +7523,19 @@
     },
     {
       "suggested_name": "`initTreeSitter`",
+      "logic_anchor": "../../../../../node_modules/web-tree-sitter"
+    },
+    {
+      "suggested_name": "`initTreeSitter`",
+      "logic_anchor": "../../../../node_modules/web-tree-sitter"
+    },
+    {
+      "suggested_name": "`initTreeSitter`",
       "logic_anchor": "[TreeSitter] Failed to load language"
     },
     {
       "suggested_name": "`initTreeSitter`",
       "logic_anchor": "../../services/config/EnvService.js"
-    },
-    {
-      "suggested_name": "`initTreeSitter`",
-      "logic_anchor": "tree-sitter-bash.wasm"
-    },
-    {
-      "suggested_name": "`initTreeSitter`",
-      "logic_anchor": "../../../../assets"
     },
     {
       "suggested_name": "`getTTY`",

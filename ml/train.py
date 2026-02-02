@@ -16,6 +16,27 @@ from constants import NODE_TYPES, MAX_NODES, MAX_LITERALS
 # Suppress transformer nested tensor prototype warnings for cleaner sweep logs.
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.modules.transformer")
 
+def infer_model_dims_from_checkpoint(checkpoint, default_embed=32, default_hidden=128):
+    embed_dim = default_embed
+    hidden_dim = default_hidden
+    if not checkpoint:
+        return embed_dim, hidden_dim
+    for key in ("transformer_encoder.embedding.weight", "embedding.weight"):
+        if key in checkpoint:
+            try:
+                embed_dim = int(checkpoint[key].shape[1])
+            except Exception:
+                pass
+            break
+    for name, param in checkpoint.items():
+        if name.endswith("linear1.weight") and hasattr(param, "shape") and len(param.shape) == 2:
+            try:
+                hidden_dim = int(param.shape[0])
+            except Exception:
+                pass
+            break
+    return embed_dim, hidden_dim
+
 def _collect_identifier_names(node, limit=6):
     names = []
     stack = [node]
@@ -465,8 +486,54 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
         print(f"[*] Training on device: {device}")
 
     model_path = os.path.join(os.path.dirname(__file__), "model.pth") if load_checkpoint else None
+    checkpoint_dir = None
+    if not is_sweep:
+        checkpoint_dir = checkpoint_dir_override or os.getenv("ML_CHECKPOINT_DIR") or os.path.join(os.path.dirname(__file__), "checkpoints")
+
+    def get_latest_checkpoint(checkpoint_dir_path):
+        if not checkpoint_dir_path or not os.path.exists(checkpoint_dir_path):
+            return None, 0
+        latest_epoch = 0
+        latest_path = None
+        for name in os.listdir(checkpoint_dir_path):
+            if not name.startswith("model_epoch_") or not name.endswith(".pth"):
+                continue
+            try:
+                epoch = int(name.replace("model_epoch_", "").replace(".pth", ""))
+            except ValueError:
+                continue
+            if epoch > latest_epoch:
+                latest_epoch = epoch
+                latest_path = os.path.join(checkpoint_dir_path, name)
+        return latest_path, latest_epoch
+
+    checkpoint_path_for_shapes = model_path
+    if load_checkpoint and not is_sweep:
+        load_path = None
+        latest_path, _ = get_latest_checkpoint(checkpoint_dir)
+        if latest_path:
+            load_path = latest_path
+        elif model_path and os.path.exists(model_path):
+            load_path = model_path
+        if load_path:
+            checkpoint_path_for_shapes = load_path
+            try:
+                checkpoint = torch.load(load_path, map_location="cpu")
+                inferred_embed, inferred_hidden = infer_model_dims_from_checkpoint(
+                    checkpoint, default_embed=embed_dim, default_hidden=hidden_dim
+                )
+                if inferred_embed != embed_dim or inferred_hidden != hidden_dim:
+                    print(
+                        f"[*] Overriding dims from checkpoint: "
+                        f"embed {embed_dim}->{inferred_embed}, hidden {hidden_dim}->{inferred_hidden}"
+                    )
+                    embed_dim = inferred_embed
+                    hidden_dim = inferred_hidden
+            except Exception as e:
+                print(f"[!] Warning: Failed to infer dims from checkpoint: {e}")
+
     effective_max_nodes, source = resolve_max_nodes(
-        device, max_nodes_override=max_nodes_override, checkpoint_path=model_path
+        device, max_nodes_override=max_nodes_override, checkpoint_path=checkpoint_path_for_shapes
     )
     if not is_sweep:
         print(f"[*] Context Window: {effective_max_nodes} nodes ({source})")
@@ -616,28 +683,8 @@ def train_brain(bootstrap_dir, epochs=50, batch_size=64, force=False, lr=0.001, 
     model = CodeFingerprinter(vocab_size=current_vocab_size, embed_dim=embed_dim, hidden_dim=hidden_dim, max_nodes=effective_max_nodes).to(device)
     
     # Checkpoint directory and resume behavior
-    checkpoint_dir = None
-    if not is_sweep:
-        checkpoint_dir = checkpoint_dir_override or os.getenv("ML_CHECKPOINT_DIR") or os.path.join(os.path.dirname(__file__), "checkpoints")
-        if checkpoint_interval and checkpoint_interval > 0:
-            os.makedirs(checkpoint_dir, exist_ok=True)
-
-    def get_latest_checkpoint(checkpoint_dir_path):
-        if not checkpoint_dir_path or not os.path.exists(checkpoint_dir_path):
-            return None, 0
-        latest_epoch = 0
-        latest_path = None
-        for name in os.listdir(checkpoint_dir_path):
-            if not name.startswith("model_epoch_") or not name.endswith(".pth"):
-                continue
-            try:
-                epoch = int(name.replace("model_epoch_", "").replace(".pth", ""))
-            except ValueError:
-                continue
-            if epoch > latest_epoch:
-                latest_epoch = epoch
-                latest_path = os.path.join(checkpoint_dir_path, name)
-        return latest_path, latest_epoch
+    if not is_sweep and checkpoint_interval and checkpoint_interval > 0:
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
     start_epoch = 0
 

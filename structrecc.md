@@ -1,12 +1,13 @@
 # structrecc
 
 Purpose: Proposed filesystem map for LLM-guided deobfuscation/refinement.
-Generated: 2026-02-01T00:57:13.989Z
+Generated: 2026-02-02T01:37:16.236Z
 
 src/
   AgentGeneratorTool.ts
   AgentTypes.ts
   BashTool.ts
+  BugReportCommand.tsx
   EnterPlanModeTool.tsx
   FileEditTool.ts
   FileReadTool.ts
@@ -102,7 +103,9 @@ src/
     ControlStreamClient.ts
     ControlStreamService.ts
     CostService.ts
+    Doctor.tsx
     DoctorService.ts
+    FeedbackService.ts
     FileIndexService.ts
     HistoryService.ts
     Logo.tsx
@@ -254,11 +257,14 @@ src/
     fileTypeUtils.ts
     fixtureUtils.ts
     formatUri.ts
+    git.ts
     jsonSchema.ts
     lodashUtils.ts
     loggingUtils.ts
     lspFormatter.ts
     messageUtils.ts
+    open.ts
+    process.ts
     product.ts
     runtime.ts
     runtimeAndEnv.ts
@@ -268,6 +274,7 @@ src/
     schemaRegistry.ts
     screenshotUtils.ts
     timeUtils.ts
+    transcript.ts
     treeSitter.ts
     uiUtils.ts
   text/

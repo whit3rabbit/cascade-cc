@@ -47,6 +47,27 @@ def resolve_max_nodes(device, max_nodes_override=None, checkpoint_path=None):
 
 from encoder import TransformerCodeEncoder
 
+def infer_model_dims_from_checkpoint(checkpoint, default_embed=32, default_hidden=128):
+    embed_dim = default_embed
+    hidden_dim = default_hidden
+    if not checkpoint:
+        return embed_dim, hidden_dim
+    for key in ("transformer_encoder.embedding.weight", "embedding.weight"):
+        if key in checkpoint:
+            try:
+                embed_dim = int(checkpoint[key].shape[1])
+            except Exception:
+                pass
+            break
+    for name, param in checkpoint.items():
+        if name.endswith("linear1.weight") and hasattr(param, "shape") and len(param.shape) == 2:
+            try:
+                hidden_dim = int(param.shape[0])
+            except Exception:
+                pass
+            break
+    return embed_dim, hidden_dim
+
 class CodeFingerprinter(nn.Module):
     def __init__(self, vocab_size=100, embed_dim=32, hidden_dim=128, max_nodes=MAX_NODES):
         super().__init__()
@@ -172,6 +193,15 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
         device = torch.device(device_name)
     
     model_path = os.path.join(os.path.dirname(__file__), "model.pth")
+    checkpoint = None
+    embed_dim = 32
+    hidden_dim = 128
+    if os.path.exists(model_path):
+        try:
+            checkpoint = torch.load(model_path, map_location="cpu")
+            embed_dim, hidden_dim = infer_model_dims_from_checkpoint(checkpoint, embed_dim, hidden_dim)
+        except Exception:
+            checkpoint = None
 
     # Dynamic Context Window Adjustment
     effective_max_nodes, source = resolve_max_nodes(
@@ -184,12 +214,18 @@ def run_vectorization(version_path, force=False, device_name="cuda", max_nodes_o
         print("[!] Error: NODE_TYPES is unexpectedly small; run 'npm run sync-vocab' before vectorizing.")
         sys.exit(1)
     current_vocab_size = node_type_count + 100
-    model = CodeFingerprinter(vocab_size=current_vocab_size, max_nodes=effective_max_nodes).to(device)
+    model = CodeFingerprinter(
+        vocab_size=current_vocab_size,
+        embed_dim=embed_dim,
+        hidden_dim=hidden_dim,
+        max_nodes=effective_max_nodes,
+    ).to(device)
     
     if os.path.exists(model_path):
         print(f"[*] Loading pre-trained weights from {model_path} onto {device}")
         try:
-            checkpoint = torch.load(model_path, map_location=device)
+            if checkpoint is None:
+                checkpoint = torch.load(model_path, map_location=device)
             if 'transformer_encoder.embedding.weight' in checkpoint:
                 embedding_key = 'transformer_encoder.embedding.weight'
             elif 'embedding.weight' in checkpoint:
