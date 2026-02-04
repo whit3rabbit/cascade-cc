@@ -1,11 +1,21 @@
-
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { PluginManager } from './PluginManager.js';
+import { PluginManager, PluginInstallation } from '../mcp/PluginManager.js';
 
 // Official marketplace constants
 const OFFICIAL_MARKETPLACE_REPO = 'anthropics/claude-plugins-official';
 const OFFICIAL_MARKETPLACE_ID = 'plugin:claude-plugins-official';
+
+export interface LoadedMarketplace {
+    name: string;
+    config: any;
+    status: 'loaded' | 'failed';
+}
+
+export interface MarketplaceFailure {
+    name: string;
+    error: string;
+}
 
 /**
  * Service to load marketplace metadata.
@@ -20,7 +30,7 @@ export class MarketplaceLoader {
         try {
             // 1. Check if official marketplace is installed
             let plugins = await PluginManager.getInstalledPlugins();
-            let marketplacePlugin = plugins.find(p => p.id === OFFICIAL_MARKETPLACE_ID);
+            let marketplacePlugin = plugins.find((p: PluginInstallation) => p.id === OFFICIAL_MARKETPLACE_ID);
 
             // 2. If not installed, auto-install it
             if (!marketplacePlugin) {
@@ -40,7 +50,7 @@ export class MarketplaceLoader {
 
                 // Refresh list to get the install path
                 plugins = await PluginManager.getInstalledPlugins();
-                marketplacePlugin = plugins.find(p => p.id === OFFICIAL_MARKETPLACE_ID);
+                marketplacePlugin = plugins.find((p: PluginInstallation) => p.id === OFFICIAL_MARKETPLACE_ID);
             }
 
             if (!marketplacePlugin || !marketplacePlugin.installPath) {
