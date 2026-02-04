@@ -12,6 +12,7 @@ import { writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import Fuse from 'fuse.js';
+import { useTerminalInput } from '../../hooks/useTerminalInput.js';
 
 export interface UserPromptMessageProps {
     onSubmit: (value: string) => void;
@@ -655,7 +656,52 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
         if (searchIndex !== -1) setCursorPos(searchIndex);
     };
 
-    useInput(handleKey);
+    const { onInput: terminalInputHandler } = useTerminalInput({
+        value,
+        onChange: setValue,
+        onSubmit: (val: string) => {
+            onSubmit(val);
+            setValue('');
+            setCursorPos(0);
+            setHistoryIndex(-1);
+        },
+        onExit: props.onCancel || (() => { }),
+        onClearInput: () => setValue(''),
+        onHistoryUp: () => {
+            if (historyIndex < history.length - 1) {
+                const newIndex = historyIndex + 1;
+                setHistoryIndex(newIndex);
+                setValue(history[history.length - 1 - newIndex] || '');
+                setCursorPos(0);
+            }
+        },
+        onHistoryDown: () => {
+            if (historyIndex > -1) {
+                const newIndex = historyIndex - 1;
+                setHistoryIndex(newIndex);
+                if (newIndex === -1) {
+                    setValue('');
+                } else {
+                    setValue(history[history.length - 1 - newIndex] || '');
+                }
+                setCursorPos(0);
+            }
+        },
+        multiline: true,
+        cursorOffset: cursorPos,
+        setCursorOffset: setCursorPos
+    });
+
+    useInput((input, key) => {
+        // Handle search and vim modes first
+        if (isSearching || isBufferSearching || recordingPending || playingMacroPending || (props.vimModeEnabled && vimMode !== 'INSERT')) {
+            handleKey(input, key);
+            return;
+        }
+
+        // Use unified terminal input handler for most actions
+        terminalInputHandler(input, key);
+    });
 
     const renderValue = () => {
         if (vimMode === 'VISUAL' && selectionStart !== null) {
@@ -711,7 +757,21 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                                 value={commandValue}
                                 onChange={setCommandValue}
                                 onSubmit={(val) => {
-                                    if (val === 'q') props.onCancel?.();
+                                    const cmd = val.trim();
+                                    if (cmd === 'q' || cmd === 'q!' || cmd === 'qa') {
+                                        props.onCancel?.();
+                                    } else if (cmd === 'w') {
+                                        // In a REPL, :w usually implies "submit" or just "save buffer" (no-op here since we auto-save history)
+                                        // We'll treat it as submit for now or just return to normal
+                                        setVimMode('NORMAL');
+                                    } else if (cmd === 'wq' || cmd === 'x') {
+                                        props.onSubmit(value); // Submit as "save"
+                                        // props.onCancel?.(); // Then quit? REPL semantics are tricky. 
+                                        // Actually :wq usually means write file and quit editor. 
+                                        // Here it might mean "submit query".
+                                    } else {
+                                        // Unknown command
+                                    }
                                     setVimMode('NORMAL');
                                 }}
                             />

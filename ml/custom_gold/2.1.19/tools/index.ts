@@ -13,6 +13,7 @@ import { AgentGeneratorTool } from './AgentGeneratorTool.js';
 import { WebSearchTool } from './WebSearchTool.js';
 import { WebFetchTool } from './WebFetchTool.js';
 import { NotebookCellIdentificationTool } from './NotebookCellIdentificationTool.js';
+import { SendMessageTool } from './SendMessageTool.js';
 
 export * from './BashTool.js';
 export * from './FileReadTool.js';
@@ -39,5 +40,6 @@ export const CORE_TOOLS = [
     TaskStopTool,
     TaskCreateTool,
     TaskUpdateTool,
-    TaskListTool
+    TaskListTool,
+    SendMessageTool
 ];

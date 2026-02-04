@@ -9,28 +9,35 @@ import { createCommandHelper, CommandContext } from './helpers.js';
  * Standardized /init command definition.
  * Used for project initialization and CLAUDE.md creation.
  */
-export const initCommandDefinition = createCommandHelper("init", "Initialize the project configuration and create CLAUDE.md", {
+export const initCommandDefinition = createCommandHelper("init", "Initialize a new CLAUDE.md file with codebase documentation", {
+    progressMessage: "analyzing your codebase",
     async getPromptForCommand(userInput: string, _context: CommandContext) {
         return [
             {
                 type: "text",
-                text: `You are an AI assistant helping the user initialize their project for use with Claude Code.
-Your goal is to create or update a CLAUDE.md file in the project root.
+                text: `Please analyze this codebase and create a CLAUDE.md file, which will be given to future instances of Claude Code to operate in this repository.
 
-Instructions:
-1.  **Check for existence**: Determine if CLAUDE.md exists in the current directory.
-2.  **Analyze project**: If it doesn't exist, analyze the project structure (e.g., look for package.json, go.mod, etc.) to infer build, test, and lint commands.
-3.  **Propose content**: Propose a CLAUDE.md content including:
-    -   **Build Commands**: How to build the project.
-    -   **Test Commands**: How to run tests.
-    -   **Lint Commands**: How to run linting.
-    -   **Code Style Guidelines**: Any project-specific style rules.
-4.  **Interactive process**: Ask the user to confirm or provide the correct commands if they cannot be inferred.
-5.  **Completion**: Once the user is satisfied, write the CLAUDE.md file.
+What to add:
+1. Commands that will be commonly used, such as how to build, lint, and run tests. Include the necessary commands to develop in this codebase, such as how to run a single test.
+2. High-level code architecture and structure so that future instances can be productive more quickly. Focus on the "big picture" architecture that requires reading multiple files to understand.
 
-${userInput ? `Additional User Request: ${userInput}` : ""}
+Usage notes:
+- If there's already a CLAUDE.md, suggest improvements to it.
+- When you make the initial CLAUDE.md, do not repeat yourself and do not include obvious instructions like "Provide helpful error messages to users", "Write unit tests for all new utilities", "Never include sensitive information (API keys, tokens) in code or commits".
+- Avoid listing every component or file structure that can be easily discovered.
+- Don't include generic development practices.
+- If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include the important parts.
+- If there is a README.md, make sure to include the important parts.
+- Do not make up information such as "Common Development Tasks", "Tips for Development", "Support and Documentation" unless this is expressly included in other files that you read.
+- Be sure to prefix the file with the following text:
 
-Please guide the user through this process in a friendly and helpful manner.`
+\`\`\`
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+\`\`\`
+
+${userInput ? `Additional User Request: ${userInput}` : ""}`
             }
         ];
     },

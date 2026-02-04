@@ -9,6 +9,9 @@ import { EnvService } from '../services/config/EnvService.js';
 import { getSessionEnvScript } from '../utils/shared/runtimeAndEnv.js';
 import { parseCommandWithRedirections } from '../utils/shared/commandStringProcessing.js';
 import { interceptCommand } from '../services/sandbox/SandboxInterceptor.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 
 export interface BashToolInput {
     command: string;
@@ -100,10 +103,17 @@ export const BashTool = {
 
             let commandToExecute = command;
             const maintainCwd = EnvService.get('CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR') === 'true';
+            let cwdTempFile = '';
 
             if (maintainCwd) {
-                // Append a marker with the current CWD after execution
-                commandToExecute = `${command}; printf "\\n<cwd>%s</cwd>\\n" "$PWD"`;
+                // Generate a temp file for CWD
+                const tmpDir = os.tmpdir();
+                const randomId = Math.random().toString(36).substring(2, 10);
+                cwdTempFile = path.join(tmpDir, `claude-cwd-${randomId}`);
+
+                // Append command to write CWD to temp file
+                // Use >| to force overwrite if noclobber is set, consistent with 2.1.19
+                commandToExecute = `${command} && pwd -P >| "${cwdTempFile}"`;
             }
 
             if (shellPrefix) {
@@ -134,12 +144,24 @@ export const BashTool = {
             let displayStdout = stdout;
             let newCwd = cwd;
 
-            if (maintainCwd) {
-                const cwdMatch = displayStdout.match(/<cwd>(.*)<\/cwd>/);
-                if (cwdMatch) {
-                    newCwd = cwdMatch[1].trim();
-                    displayStdout = displayStdout.replace(/<cwd>.*<\/cwd>/, "").trim();
+            if (maintainCwd && cwdTempFile && exitCode === 0) {
+                try {
+                    if (fs.existsSync(cwdTempFile)) {
+                        const content = fs.readFileSync(cwdTempFile, 'utf8').trim();
+                        if (content) {
+                            newCwd = content;
+                        }
+                        // Cleanup
+                        fs.unlinkSync(cwdTempFile);
+                    }
+                } catch (e) {
+                    console.error('Failed to read CWD temp file:', e);
                 }
+            } else if (maintainCwd && cwdTempFile) {
+                // Cleanup if failed
+                try {
+                    if (fs.existsSync(cwdTempFile)) fs.unlinkSync(cwdTempFile);
+                } catch { }
             }
 
             if (displayStdout.length > maxOutputLength) {

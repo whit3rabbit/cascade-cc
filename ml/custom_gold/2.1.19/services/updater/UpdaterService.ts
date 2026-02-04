@@ -64,6 +64,28 @@ export class UpdaterService {
     }
 
     /**
+     * Verifies the GPG signature of a file.
+     * Requires 'gpg' to be available in the system PATH.
+     */
+    static async verifySignature(filePath: string, signaturePath: string): Promise<boolean> {
+        try {
+            const { execFile } = await import('child_process');
+            const { promisify } = await import('util');
+            const execFileAsync = promisify(execFile);
+
+            // TODO: Ideally we should bundle the public key or fetch it from a trusted source.
+            // For now, this assumes the user has the relevant public key in their keyring.
+            await execFileAsync('gpg', ['--verify', signaturePath, filePath]);
+            return true;
+        } catch (error) {
+            if (EnvService.isTruthy("DEBUG_UPDATER")) {
+                console.error('[Updater] Signature verification failed:', error);
+            }
+            return false;
+        }
+    }
+
+    /**
      * Atomically installs a binary for the specified version.
      */
     static async atomicallyInstallBinary(version: string, newBinaryPath: string): Promise<boolean> {

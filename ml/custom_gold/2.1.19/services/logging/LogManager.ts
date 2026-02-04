@@ -22,7 +22,8 @@ export interface BufferedFileWriter {
 export interface BufferedFileWriterOptions {
     filePath: string;
     flushIntervalMs?: number;
-    maxBufferSize?: number;
+    maxBufferSize?: number; // Kept for backward compat but unused if not specified
+    maxBufferLength?: number; // Size in bytes
 }
 
 /**
@@ -38,11 +39,17 @@ let currentSessionLogFile: string | null = null;
 
 /**
  * Creates a buffered file writer to reduce disk I/O.
- * Based on gold reference chunk014 (clearConversation_71).
+ * Batches log entries and flushes them every 5 seconds or when the buffer exceeds 10KB.
  */
 export function createBufferedFileWriter(options: BufferedFileWriterOptions): BufferedFileWriter {
-    const { filePath, flushIntervalMs = 1000, maxBufferSize = 100 } = options;
+    const {
+        filePath,
+        flushIntervalMs = 5000,
+        maxBufferLength = 10 * 1024 // 10KB
+    } = options;
+
     let buffer: string[] = [];
+    let currentBufferLength = 0;
     let timeout: NodeJS.Timeout | null = null;
 
     function flush() {
@@ -59,6 +66,7 @@ export function createBufferedFileWriter(options: BufferedFileWriterOptions): Bu
             }
             appendFileSync(filePath, buffer.join(""));
             buffer = [];
+            currentBufferLength = 0;
         } catch (err) {
             // Silently fail if logging fails to avoid crashing the app
         }
@@ -73,7 +81,9 @@ export function createBufferedFileWriter(options: BufferedFileWriterOptions): Bu
     return {
         write(data: string) {
             buffer.push(data);
-            if (buffer.length >= maxBufferSize) {
+            currentBufferLength += Buffer.byteLength(data, 'utf8');
+
+            if (currentBufferLength >= maxBufferLength) {
                 flush();
             } else {
                 scheduleFlush();
@@ -154,11 +164,11 @@ export async function initializeLogging(): Promise<void> {
     // Initialize main log writer
     mainLogWriter = createBufferedFileWriter({
         filePath: currentSessionLogFile,
-        flushIntervalMs: 2000,
-        maxBufferSize: 50
+        flushIntervalMs: 5000,
+        maxBufferLength: 10 * 1024 // 10KB
     });
 
-    // Log rotation: Keep last 10 session logs
+    // Log rotation: Keep last 10 session logs to prevent bloating
     try {
         const files = readdirSync(logDir)
             .filter(f => f.startsWith("session_") && f.endsWith(".log"))

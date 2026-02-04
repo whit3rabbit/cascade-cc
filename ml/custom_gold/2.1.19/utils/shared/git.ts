@@ -31,3 +31,22 @@ export async function getGitState(): Promise<any> {
         return null;
     }
 }
+
+export async function gitClone(url: string, targetPath: string): Promise<void> {
+    try {
+        execSync(`git clone ${url} "${targetPath}"`, { stdio: 'ignore' });
+    } catch (e) {
+        throw new Error(`Failed to clone ${url}: ${(e as Error).message}`);
+    }
+}
+
+export async function gitPull(targetPath: string): Promise<void> {
+    try {
+        execSync('git pull', {
+            cwd: targetPath,
+            stdio: 'ignore'
+        });
+    } catch (e) {
+        throw new Error(`Failed to pull in ${targetPath}: ${(e as Error).message}`);
+    }
+}

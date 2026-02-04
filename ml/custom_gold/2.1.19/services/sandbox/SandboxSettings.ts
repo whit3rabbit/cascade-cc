@@ -133,58 +133,68 @@ export const MACOS_SBPL_PROFILE = `
 `;
 
 export const LINUX_BWRAP_BASE_ARGS = [
-    "--new-session",
-    "--die-with-parent",
-    "--dev", "/dev",
-    "--unshare-pid",
-    "--proc", "/proc"
+  "--new-session",
+  "--die-with-parent",
+  "--dev", "/dev",
+  "--unshare-pid",
+  "--proc", "/proc",
+  // Base system mounts for networking and basic tools
+  "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf",
+  "--ro-bind", "/etc/hosts", "/etc/hosts",
+  "--ro-bind", "/etc/nsswitch.conf", "/etc/nsswitch.conf",
+  "--ro-bind", "/etc/ssl/certs", "/etc/ssl/certs",
+  "--ro-bind", "/etc/ca-certificates", "/etc/ca-certificates",
+  // We strictly need to bind / to access standard binaries if we aren't building a full rootfs
+  "--ro-bind", "/", "/",
+  // Writeable tmp
+  "--bind", "/tmp", "/tmp"
 ];
 
 export interface SandboxOptions {
-    needsNetworkRestriction?: boolean;
-    readAllowPaths?: string[];
-    readDenyPaths?: string[];
-    writeAllowPaths?: string[];
-    writeDenyPaths?: string[];
-    allowUnixSockets?: boolean;
+  needsNetworkRestriction?: boolean;
+  readAllowPaths?: string[];
+  readDenyPaths?: string[];
+  writeAllowPaths?: string[];
+  writeDenyPaths?: string[];
+  allowUnixSockets?: boolean;
 }
 
 /**
  * Checks if the sandbox is enabled via environment variables.
  */
 export function isSandboxEnabled(): boolean {
-    return process.env.CLAUDE_CODE_DISABLE_SANDBOX !== 'true';
+  return process.env.CLAUDE_CODE_DISABLE_SANDBOX !== 'true';
 }
 
 /**
  * Checks if unsandboxed (dangerous) commands are allowed.
  */
 export function areUnsandboxedCommandsAllowed(): boolean {
-    return process.env.CLAUDE_CODE_ALLOW_DANGEROUS_COMMANDS === 'true';
+  return process.env.CLAUDE_CODE_ALLOW_DANGEROUS_COMMANDS === 'true';
 }
 
 /**
  * Checks if a URL is allowed to be fetched based on the sandbox policy.
  */
 export function isUrlAllowed(url: string): boolean {
-    // Basic policy: allow most public URLs but block local/private network by default
-    // In a real implementation, this would be more sophisticated.
-    try {
-        const parsed = new URL(url);
-        const host = parsed.hostname.toLowerCase();
+  // Basic policy: allow most public URLs but block local/private network by default
+  // In a real implementation, this would be more sophisticated.
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
 
-        // Block localhost and private IPs
-        if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
-            return false;
-        }
-
-        // Example: block internal domains
-        if (host.endsWith('.internal')) {
-            return false;
-        }
-
-        return true;
-    } catch {
-        return false;
+    // Block localhost and private IPs
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      return false;
     }
+
+    // Example: block internal domains
+    if (host.endsWith('.internal')) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }

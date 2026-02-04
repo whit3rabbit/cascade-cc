@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
-import { DoctorService, DoctorDiagnostics, HealthCheckResult } from '../../services/terminal/DoctorService.js';
+import { DoctorService, DiagnosticInfo } from '../../services/terminal/DoctorService.js';
 
 const DiagnosticSection = ({ title, children }: { title: string, children: React.ReactNode }) => (
     <Box flexDirection="column" marginBottom={1}>
@@ -13,7 +13,7 @@ const DiagnosticSection = ({ title, children }: { title: string, children: React
 
 const DiagnosticItem = ({ label, status, message, details }: {
     label: string,
-    status: 'ok' | 'warn' | 'error' | 'valid' | 'invalid' | 'capped' | 'not-set',
+    status: 'ok' | 'warn' | 'error' | 'capped' | 'not-set',
     message: string,
     details?: string
 }) => {
@@ -21,21 +21,17 @@ const DiagnosticItem = ({ label, status, message, details }: {
         ok: 'green',
         warn: 'yellow',
         error: 'red',
-        valid: 'green',
-        invalid: 'red',
         capped: 'yellow',
         'not-set': 'gray'
-    }[status];
+    }[status] || 'white';
 
     const statusSymbol = {
         ok: '✓',
         warn: '⚠',
         error: '✗',
-        valid: '✓',
-        invalid: '✗',
         capped: '!',
         'not-set': '○'
-    }[status];
+    }[status] || '?';
 
     return (
         <Box flexDirection="column">
@@ -43,7 +39,7 @@ const DiagnosticItem = ({ label, status, message, details }: {
                 <Box width={2}>
                     <Text color={statusColor}>{statusSymbol}</Text>
                 </Box>
-                <Box width={20}>
+                <Box width={25}>
                     <Text bold>{label}:</Text>
                 </Box>
                 <Text color={statusColor}>{message}</Text>
@@ -58,13 +54,13 @@ const DiagnosticItem = ({ label, status, message, details }: {
 };
 
 export const Doctor: React.FC = () => {
-    const [diagnostics, setDiagnostics] = useState<DoctorDiagnostics | null>(null);
+    const [diagnostics, setDiagnostics] = useState<DiagnosticInfo | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        DoctorService.getDiagnostics()
+        DoctorService.getDiagnosticInfo()
             .then(setDiagnostics)
-            .catch(e => setError(e.message));
+            .catch((e: Error) => setError(e.message));
     }, []);
 
     if (error) {
@@ -89,14 +85,15 @@ export const Doctor: React.FC = () => {
         let warn = 0;
         let errorCount = 0;
 
-        const checkStatus = (status: string) => {
-            if (status === 'ok' || status === 'valid') ok++;
-            else if (status === 'warn' || status === 'capped') warn++;
-            else if (status === 'error' || status === 'invalid') errorCount++;
+        const checkStatus = (status: 'ok' | 'capped' | 'error' | 'not-set') => {
+            if (status === 'ok') ok++;
+            else if (status === 'capped' || status === 'warn' as any) warn++;
+            else if (status === 'error') errorCount++;
         };
 
-        diagnostics.healthChecks.forEach(c => checkStatus(c.status));
-        diagnostics.environmentVariables.forEach(v => checkStatus(v.status));
+        diagnostics.envVars.forEach(v => checkStatus(v.status));
+        if (diagnostics.ripgrepStatus.workingDirectory) ok++; else errorCount++;
+        if (diagnostics.ghStatus.installed && diagnostics.ghStatus.authenticated) ok++; else warn++;
 
         return { ok, warn, errorCount };
     }, [diagnostics]);
@@ -115,57 +112,49 @@ export const Doctor: React.FC = () => {
             </Box>
 
             <DiagnosticSection title="Installation Information">
-                <DiagnosticItem label="Version" status="ok" message={diagnostics.installation.version} />
-                <DiagnosticItem label="Type" status="ok" message={diagnostics.installation.type} />
-                <DiagnosticItem label="Install Method" status="ok" message={diagnostics.installation.installMethod} />
-                <DiagnosticItem label="Auto Updates" status="ok" message={diagnostics.installation.autoUpdates} />
+                <DiagnosticItem label="Version" status="ok" message={diagnostics.version} />
+                <DiagnosticItem label="Type" status="ok" message={diagnostics.installationType} />
+                <DiagnosticItem label="Path" status="ok" message={diagnostics.installationPath} />
+                <DiagnosticItem label="Auto Updates" status="ok" message={diagnostics.autoUpdates} />
                 <DiagnosticItem
                     label="Ripgrep"
-                    status={diagnostics.installation.ripgrep.ok ? 'ok' : 'error'}
-                    message={`${diagnostics.installation.ripgrep.mode} mode`}
-                    details={diagnostics.installation.ripgrep.details}
+                    status={diagnostics.ripgrepStatus.workingDirectory ? 'ok' : 'error'}
+                    message={`${diagnostics.ripgrepStatus.mode} mode`}
+                    details={diagnostics.ripgrepStatus.systemPath || undefined}
                 />
             </DiagnosticSection>
 
             <DiagnosticSection title="Environment Variables">
-                {diagnostics.environmentVariables.map(v => (
+                {diagnostics.envVars.map(v => (
                     <DiagnosticItem
                         key={v.name}
                         label={v.name}
                         status={v.status}
-                        message={v.status === 'not-set' ? 'Not Set' : v.value}
-                        details={v.message}
+                        message={v.message}
                     />
                 ))}
             </DiagnosticSection>
 
-            <DiagnosticSection title="Health Checks">
-                {diagnostics.healthChecks.map((c, i) => (
-                    <DiagnosticItem
-                        key={i}
-                        label={c.name}
-                        status={c.status}
-                        message={c.message}
-                        details={c.details}
-                    />
-                ))}
+            <DiagnosticSection title="External Tools">
+                <DiagnosticItem
+                    label="GitHub CLI"
+                    status={diagnostics.ghStatus.installed ? (diagnostics.ghStatus.authenticated ? 'ok' : 'warn') : 'error'}
+                    message={diagnostics.ghStatus.installed ? (diagnostics.ghStatus.authenticated ? 'Authenticated' : 'Not Authenticated') : 'Not Installed'}
+                />
+                <DiagnosticItem
+                    label="Git"
+                    status={diagnostics.gitStatus.isRepo ? 'ok' : 'warn'}
+                    message={diagnostics.gitStatus.isRepo ? 'Inside Repository' : 'Not a Repository'}
+                />
             </DiagnosticSection>
 
-            {diagnostics.versionLock?.locked && (
-                <DiagnosticSection title="Version Lock">
-                    <DiagnosticItem
-                        label="Locked Version"
-                        status="warn"
-                        message={diagnostics.versionLock.version || 'Unknown'}
-                        details={`Source: ${diagnostics.versionLock.source}`}
-                    />
-                </DiagnosticSection>
-            )}
-
-            {diagnostics.permissions.unreachableRules.length > 0 && (
-                <DiagnosticSection title="Unreachable Permission Rules">
-                    {diagnostics.permissions.unreachableRules.map((rule, i) => (
-                        <DiagnosticItem key={i} label={`Rule ${i + 1}`} status="warn" message={rule} />
+            {diagnostics.warnings.length > 0 && (
+                <DiagnosticSection title="Warnings & Issues">
+                    {diagnostics.warnings.map((w, i) => (
+                        <Box key={i} flexDirection="column" marginBottom={1}>
+                            <Text color="yellow" bold>Issue: {w.issue}</Text>
+                            <Text dimColor>Fix: {w.fix}</Text>
+                        </Box>
                     ))}
                 </DiagnosticSection>
             )}

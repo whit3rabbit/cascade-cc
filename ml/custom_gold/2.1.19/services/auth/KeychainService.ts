@@ -6,6 +6,12 @@
 import { spawnSync } from 'node:child_process';
 import { userInfo } from 'node:os';
 import { EnvService } from '../config/EnvService.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, chmodSync } from 'node:fs';
+
+const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+const PLAINTEXT_STORAGE_PATH = join(CONFIG_DIR, '.credentials.json');
 
 /**
  * In-memory cache to avoid repeated slow system calls.
@@ -44,15 +50,68 @@ export interface KeychainInterface {
 }
 
 /**
+ * Plaintext fallback storage (chunk713: createPlaintextStorage logic).
+ */
+const PlaintextStorage = {
+    read(serviceName: string): string | null {
+        if (existsSync(PLAINTEXT_STORAGE_PATH)) {
+            try {
+                const data = JSON.parse(readFileSync(PLAINTEXT_STORAGE_PATH, 'utf8'));
+                return data[serviceName] || null;
+            } catch {
+                return null;
+            }
+        }
+        return null;
+    },
+    save(serviceName: string, token: string): boolean {
+        try {
+            if (!existsSync(CONFIG_DIR)) {
+                mkdirSync(CONFIG_DIR, { recursive: true });
+            }
+            let data: Record<string, string> = {};
+            if (existsSync(PLAINTEXT_STORAGE_PATH)) {
+                try {
+                    data = JSON.parse(readFileSync(PLAINTEXT_STORAGE_PATH, 'utf8'));
+                } catch {
+                    data = {};
+                }
+            }
+            data[serviceName] = token;
+            writeFileSync(PLAINTEXT_STORAGE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8' });
+            chmodSync(PLAINTEXT_STORAGE_PATH, 0o600);
+            return true;
+        } catch {
+            return false;
+        }
+    },
+    delete(serviceName: string): boolean {
+        if (existsSync(PLAINTEXT_STORAGE_PATH)) {
+            try {
+                const data = JSON.parse(readFileSync(PLAINTEXT_STORAGE_PATH, 'utf8'));
+                if (data[serviceName]) {
+                    delete data[serviceName];
+                    writeFileSync(PLAINTEXT_STORAGE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8' });
+                }
+                return true;
+            } catch {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+/**
  * Service for cross-platform Keychain operations.
  */
 export const KeychainService: KeychainInterface = {
     isAvailable(): boolean {
         const platform = process.platform;
         if (platform === "darwin") {
-            // Gold standard check: 0 or sometimes 36 implies success/initialized state
+            // Gold standard check: 0 or 36 or 128 implies it's "available" but might be locked
             const res = runCommand("security", ["show-keychain-info"]);
-            return res.code === 0 || res.code === 36;
+            return res.code === 0 || res.code === 36 || res.code === 128;
         }
         if (platform === "win32") {
             const res = runCommand("powershell", ["-Command", "[Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType=WindowsRuntime] > $null"]);
@@ -61,7 +120,7 @@ export const KeychainService: KeychainInterface = {
         if (platform === "linux") {
             return runCommand("which", ["secret-tool"]).code === 0;
         }
-        return false;
+        return true; // Plaintext fallback is always available
     },
 
     readToken(serviceName: string): string | null {
@@ -72,11 +131,12 @@ export const KeychainService: KeychainInterface = {
         const user = getUserName();
         const platform = process.platform;
         let token: string | null = null;
+        let useFallback = false;
 
         if (platform === "darwin") {
             let res = runCommand("security", ["find-generic-password", "-a", user, "-w", "-s", serviceName]);
             if (res.code !== 0 && res.code !== 128) {
-                // Fallback: try without specifying account (handles legacy items with different account names)
+                // Fallback: try without specifying account
                 const fallbackRes = runCommand("security", ["find-generic-password", "-w", "-s", serviceName]);
                 if (fallbackRes.code === 0) {
                     res = fallbackRes;
@@ -86,14 +146,13 @@ export const KeychainService: KeychainInterface = {
             if (res.code === 0) {
                 token = res.stdout;
             } else {
-                // Return codes: 44 = item not found (silent), 36 = access denied/locked, 128 = user canceled
+                // Return codes: 36 = access denied/locked, 128 = user canceled
                 if (res.code === 36 || res.stderr.includes("errSecAuthFailed")) {
-                    console.warn(`Keychain access denied for "${serviceName}" on macOS.`);
-                    console.warn("Guidance: Ensure the terminal has 'Developer Tools' permissions in System Settings > Privacy & Security, or that the binary is properly signed.");
+                    console.warn(`Keychain access denied for "${serviceName}" on macOS. Falling back to plaintext storage.`);
+                    useFallback = true;
                 } else if (res.code === 128) {
-                    console.warn(`Keychain access canceled by user for "${serviceName}".`);
-                } else if (res.code !== 44) {
-                    console.debug(`Keychain error (${res.code}): ${res.stderr}`);
+                    console.warn(`Keychain access canceled by user for "${serviceName}". Falling back to plaintext storage.`);
+                    useFallback = true;
                 }
             }
         }
@@ -103,7 +162,17 @@ export const KeychainService: KeychainInterface = {
             if (res.code === 0) token = res.stdout;
         } else if (platform === "linux") {
             const res = runCommand("secret-tool", ["lookup", "service", serviceName, "account", user]);
-            if (res.code === 0) token = res.stdout;
+            if (res.code === 0) {
+                token = res.stdout;
+            } else {
+                useFallback = true;
+            }
+        } else {
+            useFallback = true;
+        }
+
+        if (useFallback || (!token && platform !== "win32")) {
+            token = PlaintextStorage.read(serviceName);
         }
 
         tokenCache[serviceName] = token;
@@ -114,19 +183,33 @@ export const KeychainService: KeychainInterface = {
         const user = getUserName();
         const platform = process.platform;
         let success = false;
+        let useFallback = false;
 
         if (platform === "darwin") {
             const tokenHex = Buffer.from(token, "utf-8").toString("hex");
-            // Use -i for interactive-like input of the password via -X to avoid command line leaking
             const res = runCommand("security", ["add-generic-password", "-U", "-a", user, "-s", serviceName, "-X", tokenHex]);
-            success = res.code === 0;
+            if (res.code === 0) {
+                success = true;
+            } else if (res.code === 36 || res.code === 128) {
+                useFallback = true;
+            }
         } else if (platform === "win32") {
             const script = `$vault = New-Object Windows.Security.Credentials.PasswordVault; $c = New-Object Windows.Security.Credentials.PasswordCredential("${serviceName}", "${user}", "${token}"); $vault.Add($c)`;
             const res = runCommand("powershell", ["-Command", script]);
             success = res.code === 0;
         } else if (platform === "linux") {
             const res = runCommand("secret-tool", ["store", "--label=Claude Code Token", "service", serviceName, "account", user], token);
-            success = res.code === 0;
+            if (res.code === 0) {
+                success = true;
+            } else {
+                useFallback = true;
+            }
+        } else {
+            useFallback = true;
+        }
+
+        if (useFallback) {
+            success = PlaintextStorage.save(serviceName, token);
         }
 
         if (success) {
@@ -139,21 +222,22 @@ export const KeychainService: KeychainInterface = {
         delete tokenCache[serviceName];
         const user = getUserName();
         const platform = process.platform;
+        let success = false;
 
         if (platform === "darwin") {
             const res = runCommand("security", ["delete-generic-password", "-a", user, "-s", serviceName]);
-            return res.code === 0;
-        }
-        if (platform === "win32") {
+            success = res.code === 0;
+        } else if (platform === "win32") {
             const script = `$vault = New-Object Windows.Security.Credentials.PasswordVault; try { $c = $vault.Retrieve("${serviceName}", "${user}"); $vault.Remove($c) } catch { exit 1 }`;
             const res = runCommand("powershell", ["-Command", script]);
-            return res.code === 0;
-        }
-        if (platform === "linux") {
+            success = res.code === 0;
+        } else if (platform === "linux") {
             const res = runCommand("secret-tool", ["clear", "service", serviceName, "account", user]);
-            return res.code === 0;
+            success = res.code === 0;
         }
 
-        return false;
+        // Always attempt to delete from plaintext fallback
+        const fallbackSuccess = PlaintextStorage.delete(serviceName);
+        return success || fallbackSuccess;
     }
 };

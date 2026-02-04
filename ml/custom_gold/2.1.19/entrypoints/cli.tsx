@@ -9,6 +9,7 @@ import { ConversationService } from "../services/conversation/ConversationServic
 import { initializeApp } from "../services/terminal/AppInitializer.js";
 import { terminalLog } from "../utils/shared/runtime.js";
 import { commandRegistry } from "../services/terminal/CommandRegistry.js";
+import { configManager } from "../services/config/ConfigManager.js";
 
 async function main() {
     const program = new Command();
@@ -63,6 +64,7 @@ async function main() {
             terminalLog("Claude Code starting...");
 
             // 1. Initialize services
+            configManager.initialize(process.cwd());
             const { isFirstRun } = await initializeApp();
 
             // 2. Handle auto-join if requested
@@ -95,9 +97,35 @@ async function main() {
         });
 
     program.command('doctor')
-        .description('Check the health of your Claude Code auto-updater')
-        .action(() => {
-            console.log("Doctor command initialized in skeleton mode.");
+        .description('Check the health of your Claude Code installation and diagnostic info')
+        .action(async () => {
+            const { DoctorService } = await import("../services/terminal/DoctorService.js");
+            console.log(chalk.cyan("Gathering diagnostic information...\n"));
+            const info = await DoctorService.getDiagnosticInfo();
+
+            console.log(chalk.bold("## Diagnostics"));
+            console.log(`└ Currently running: ${chalk.green(info.version)}`);
+            console.log(`└ Installation Type: ${info.installationType}`);
+            console.log(`└ Path: ${info.installationPath}`);
+            console.log(`└ Invoked: ${info.invokedBinary}`);
+            console.log(`└ Search (ripgrep): ${info.ripgrepStatus.workingDirectory ? chalk.green("OK") : chalk.red("Not working")} (${info.ripgrepStatus.mode})`);
+            console.log(`└ GitHub CLI: ${info.ghStatus.installed ? chalk.green("Installed") : chalk.red("Not found")} (Authenticated: ${info.ghStatus.authenticated ? chalk.green("Yes") : chalk.red("No")})`);
+            console.log(`└ Git Repository: ${info.gitStatus.isRepo ? chalk.green("Yes") : chalk.red("No")}`);
+
+            if (info.warnings.length > 0) {
+                console.log(chalk.yellow("\n## ⚠️ Warnings"));
+                for (const w of info.warnings) {
+                    console.log(`${chalk.yellow("●")} ${chalk.bold(w.issue)}`);
+                    console.log(`  ${chalk.dim("Fix:")} ${w.fix}`);
+                }
+            }
+
+            console.log(chalk.bold("\n## Environment Variables"));
+            for (const ev of info.envVars) {
+                const statusIcon = ev.status === 'ok' ? chalk.green("✅") : (ev.status === 'capped' ? chalk.yellow("⚠️") : chalk.red("❌"));
+                console.log(`${statusIcon} ${chalk.bold(ev.name)}: ${ev.message}`);
+            }
+            console.log("");
         });
 
     program.command('install [target]')
@@ -181,6 +209,7 @@ async function runPrintMode(prompt: string, options: any) {
 
 import { render } from "ink";
 import { REPL } from "../components/terminal/REPL.js";
+import { AppStateProvider } from "../hooks/useAppState.js";
 
 // ...
 
@@ -192,13 +221,15 @@ async function runInteractiveMode(options: any, isFirstRun: boolean = false) {
     terminalLog("Entering interactive mode...");
 
     const { unmount } = render(
-        <REPL
-            initialPrompt={options.prompt}
-            verbose={options.verbose}
-            model={options.model}
-            agent={options.agent}
-            isFirstRun={isFirstRun}
-        />
+        <AppStateProvider initialState={{ verbose: options.verbose }}>
+            <REPL
+                initialPrompt={options.prompt}
+                verbose={options.verbose}
+                model={options.model}
+                agent={options.agent}
+                isFirstRun={isFirstRun}
+            />
+        </AppStateProvider>
     );
 
     // Keep process alive if needed, or handle exit via REPL

@@ -41,7 +41,24 @@ export async function getProjectHistory(projectPath: string): Promise<HistoryEnt
             })
             .filter((entry): entry is HistoryEntry => entry && entry.project === projectPath);
 
-        return entries.slice(-MAX_ENTRIES_PER_PROJECT).reverse();
+        // Deduplicate: keep only the most recent occurrence of each command
+        const uniqueEntriesMap = new Map<string, HistoryEntry>();
+        for (const entry of entries) {
+            // Map preserves insertion order, but we want the *last* occurrence to overwrite earlier ones
+            // effectively moving it to the "end" if we were re-inserting, but here we just update value.
+            // Actually, to preserve "most recent" and its position relative to others, standard Map behavior
+            // iterates in insertion order. 
+            // If we iterate array forward, we overwrite keys.
+            uniqueEntriesMap.set(entry.display.trim(), entry);
+        }
+
+        // Convert back to array. The Map values are unique by command text.
+        // However, we want them sorted by time (which they effectively are if the file is append-only).
+        const uniqueEntries = Array.from(uniqueEntriesMap.values());
+
+        // Slice the last N, then reverse so most recent is first in the returned list (if that's the contract)
+        // The original code did slice(-MAX).reverse().
+        return uniqueEntries.slice(-MAX_ENTRIES_PER_PROJECT).reverse();
     } catch (error) {
         console.error("Failed to read history:", error);
         return [];

@@ -19,7 +19,7 @@ export class StatsigClient extends StatsigClientBase {
         return this._initializePromise;
     }
 
-    private async _initializeAsyncImpl(options?: any): Promise<any> {
+    async _initializeAsyncImpl(options?: any): Promise<any> {
         Log.info("Starting Statsig initialization...");
         this._setStatus("Initializing", null);
         return this.updateUserAsync(this._user, options);
@@ -59,7 +59,6 @@ export class StatsigClient extends StatsigClientBase {
     }
 
     checkGate(gateName: string): boolean {
-        // Implementation based on _getFeatureGateImpl in chunk 414
         if (this.loadingStatus !== "Ready") return false;
 
         return this._memoize("gate", (name) => {

@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { getTeamsDir, sanitizeTeamName } from "./TeamManager.js";
+import { SendMessageContentType, SendMessageSubtype } from "../../types/AgentTypes.js";
 
 export interface TeammateMailboxMessage {
     from: string;
@@ -14,6 +15,11 @@ export interface TeammateMailboxMessage {
     timestamp: string;
     color?: string;
     read?: boolean;
+    subtype?: SendMessageSubtype;
+    contentType?: SendMessageContentType;
+    requestId?: string;
+    approve?: boolean;
+    context?: any;
 }
 
 function normalizeMailboxId(value: string): string {

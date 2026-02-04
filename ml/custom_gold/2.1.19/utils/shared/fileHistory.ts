@@ -25,6 +25,7 @@ export interface Snapshot {
 export interface HistoryState {
     snapshots: Snapshot[];
     trackedFiles: Set<string>;
+    trackedFilePaths: Record<string, string>; // Maps fileKey to absolutePath
 }
 
 export interface DiffStats {
@@ -116,15 +117,18 @@ export async function trackFileModification(
             }
         };
 
-        updateState({
             ...state,
             snapshots: [...state.snapshots.slice(0, -1), updatedSnapshot],
-            trackedFiles: newTrackedFiles
-        });
+                trackedFiles: newTrackedFiles,
+                    trackedFilePaths: {
+                ...state.trackedFilePaths,
+                [fileKey]: absolutePath
+        }
+    });
 
-    } catch (error) {
-        console.error(`[FileHistory] Failed to track modification for ${filePath}:`, error);
-    }
+} catch (error) {
+    console.error(`[FileHistory] Failed to track modification for ${filePath}:`, error);
+}
 }
 
 /**

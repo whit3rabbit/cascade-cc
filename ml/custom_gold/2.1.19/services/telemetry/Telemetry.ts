@@ -47,6 +47,29 @@ async function flushEvents() {
     }
 }
 
+/**
+ * Synchronously flushes events to disk. Safe for use in exit handlers.
+ */
+export function flushSync() {
+    if (telemetryBuffer.length === 0) return;
+
+    try {
+        const { appendFileSync, mkdirSync } = require('node:fs');
+        const eventsToWrite = [...telemetryBuffer];
+        telemetryBuffer.length = 0;
+
+        mkdirSync(TELEMETRY_DIR, { recursive: true });
+        const data = eventsToWrite.map(e => JSON.stringify(e)).join('\n') + '\n';
+        appendFileSync(TELEMETRY_FILE, data, 'utf8');
+
+        if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
+            console.log(`[Telemetry] Synchronously flushed ${eventsToWrite.length} events`);
+        }
+    } catch (error) {
+        console.error('[Telemetry] Failed to sync flush:', error);
+    }
+}
+
 const TELEMETRY_ENDPOINT = EnvService.get("CLAUDE_TELEMETRY_URL") || "https://statsigapi.net/v1/log_event";
 
 async function uploadEvents() {

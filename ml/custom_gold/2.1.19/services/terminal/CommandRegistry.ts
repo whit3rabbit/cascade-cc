@@ -3,9 +3,16 @@
  * Role: Central registry for all CLI commands and slash commands.
  */
 
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { CommandDefinition } from '../../commands/helpers.js';
 import { helpCommandDefinition, mobileCommandDefinition } from '../../commands/help.js';
 import { initCommandDefinition } from '../../commands/init.js';
+import { prCommentsCommandDefinition } from '../../commands/pr_comments.js';
+import { doctorCommandDefinition } from '../../commands/doctor.js';
+import { bugCommandDefinition } from '../../commands/bug.js';
+
+const execAsync = promisify(exec);
 
 export class CommandRegistry {
     private commands: Map<string, CommandDefinition>;
@@ -48,13 +55,38 @@ export class CommandRegistry {
 
     /**
      * Returns commands filtered by eligibility and search term.
+     * Prioritizes tools/agents if many unstaged changes are detected in CWD.
      */
     async getFilteredCommands(filter: string = ""): Promise<CommandDefinition[]> {
         const all = this.getAllCommands();
-        return all.filter(cmd =>
+        let filtered = all.filter(cmd =>
             cmd.name.includes(filter) ||
             (cmd.description && cmd.description.includes(filter))
         );
+
+        // Git Change Tracking: Check for unstaged changes
+        if (filter === "") {
+            try {
+                const { stdout } = await execAsync('git status --porcelain', { cwd: process.cwd() });
+                const lineCount = stdout.split('\n').filter(line => line.trim().length > 0).length;
+
+                if (lineCount > 5) {
+                    // Prioritize git-related commands or specific agents if many changes
+                    // For now, we hoist 'pr-comments' or similar if they exist/match criteria
+                    filtered.sort((a, b) => {
+                        const aIsGit = a.name.includes('pr-') || a.name.includes('git');
+                        const bIsGit = b.name.includes('pr-') || b.name.includes('git');
+                        if (aIsGit && !bIsGit) return -1;
+                        if (!aIsGit && bIsGit) return 1;
+                        return 0;
+                    });
+                }
+            } catch (e) {
+                // Ignore git errors (not a repo, etc)
+            }
+        }
+
+        return filtered;
     }
 }
 
@@ -70,6 +102,9 @@ export async function initializeCommandDefinitions(): Promise<void> {
     commandRegistry.register(helpCommandDefinition as CommandDefinition);
     commandRegistry.register(mobileCommandDefinition as CommandDefinition);
     commandRegistry.register(initCommandDefinition as CommandDefinition);
+    commandRegistry.register(prCommentsCommandDefinition as CommandDefinition);
+    commandRegistry.register(doctorCommandDefinition as CommandDefinition);
+    commandRegistry.register(bugCommandDefinition as CommandDefinition);
 
     // Register simple stubs for other common commands to avoid 'Unknown command' errors
     // These will eventually be moved to their own files
@@ -100,24 +135,6 @@ export async function initializeCommandDefinitions(): Promise<void> {
             isEnabled: () => true,
             isHidden: false,
             call: () => { /* Handled by REPL/SlashCommandDispatcher */ }
-        },
-        {
-            name: "doctor",
-            description: "Check the health of your Claude Code installation",
-            type: "local",
-            userFacingName: () => "doctor",
-            isEnabled: () => true,
-            isHidden: false,
-            call: () => { /* Handled by REPL/SlashCommandDispatcher */ }
-        },
-        {
-            name: "bug",
-            description: "Report a bug in Claude Code",
-            type: "prompt",
-            userFacingName: () => "bug",
-            isEnabled: () => true,
-            isHidden: false,
-            getPromptForCommand: async () => [{ type: "text", text: "I found a bug. Please help me report it." }]
         }
     ];
 

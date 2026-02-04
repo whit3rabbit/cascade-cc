@@ -9,20 +9,8 @@ import { Box, Text, useInput } from 'ink';
 import { usePermissionDialog, UsePermissionDialogProps, PermissionOptionValue } from './usePermissionDialog.js';
 import { PermissionOption } from './PermissionOption.js';
 
-// Simple Diff View Placeholder
-const FileDiffView = ({ filePath, edits }: { filePath?: string, edits: any[] }) => {
-    return (
-        <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
-            <Text underline>{filePath || 'Unknown file'}</Text>
-            {edits.map((edit, i) => (
-                <Box key={i} flexDirection="column" marginTop={1}>
-                    <Text color="red">- {edit.old_string?.slice(0, 200).replace(/\n/g, '↵') || ''}</Text>
-                    <Text color="green">+ {edit.new_string?.slice(0, 200).replace(/\n/g, '↵') || ''}</Text>
-                </Box>
-            ))}
-        </Box>
-    )
-}
+
+import { StructuredDiff } from '../StructuredDiff.js';
 
 export const PermissionDialog: React.FC<UsePermissionDialogProps> = (props) => {
     const {
@@ -70,7 +58,16 @@ export const PermissionDialog: React.FC<UsePermissionDialogProps> = (props) => {
 
                 <Box marginY={1}>
                     {isFileEdit ? (
-                        <FileDiffView filePath={props.toolUseConfirm.input?.file_path || props.toolUseConfirm.input?.TargetFile} edits={edits} />
+                        <Box flexDirection="column">
+                            {edits.map((edit, i) => (
+                                <StructuredDiff
+                                    key={i}
+                                    filePath={props.toolUseConfirm.input?.file_path || props.toolUseConfirm.input?.TargetFile}
+                                    oldContent={edit.old_string}
+                                    newContent={edit.new_string}
+                                />
+                            ))}
+                        </Box>
                     ) : (
                         <Box borderStyle="single" borderColor="gray" paddingX={1}>
                             <Text dimColor>{JSON.stringify(props.toolUseConfirm.input, null, 2)}</Text>

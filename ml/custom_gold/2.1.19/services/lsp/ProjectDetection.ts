@@ -1,5 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execAsync = promisify(exec);
 
 export interface ProjectType {
     type: string;
@@ -60,4 +64,50 @@ export async function detectProjectType(rootPath: string): Promise<ProjectType |
         }
     }
     return null;
+}
+
+/**
+ * Generates a summary of the project, including type, version, and Git info.
+ * Refined using Git logic from chunk1271.
+ */
+export async function getProjectSummary(rootPath: string): Promise<string> {
+    const project = await detectProjectType(rootPath);
+    const summaryArr: string[] = [];
+
+    if (project) {
+        summaryArr.push(project.description);
+    }
+
+    // Try to get info from package.json
+    if (existsSync(join(rootPath, 'package.json'))) {
+        try {
+            const pkg = JSON.parse(readFileSync(join(rootPath, 'package.json'), 'utf-8'));
+            if (pkg.name) summaryArr.push(pkg.name);
+            if (pkg.version) summaryArr.push(`v${pkg.version}`);
+        } catch (e) { }
+    }
+
+    // Check git via command line for richer info (as done in chunk1271)
+    try {
+        const { stdout: isRepo } = await execAsync('git rev-parse --is-inside-work-tree', { cwd: rootPath });
+        if (isRepo.trim() === 'true') {
+            try {
+                const { stdout: remoteUrl } = await execAsync('git remote get-url origin', { cwd: rootPath });
+                const match = remoteUrl.trim().match(/github\.com[:/]([^/]+\/[^/]+)(\.git)?$/);
+                if (match) {
+                    summaryArr.push(`GitHub: ${match[1].replace(/\.git$/, '')}`);
+                } else {
+                    summaryArr.push("Git repo");
+                }
+            } catch {
+                summaryArr.push("Local Git repo");
+            }
+        }
+    } catch {
+        if (existsSync(join(rootPath, '.git'))) {
+            summaryArr.push("(Git detected)");
+        }
+    }
+
+    return summaryArr.length > 0 ? summaryArr.join(' - ') : "Unknown Project";
 }

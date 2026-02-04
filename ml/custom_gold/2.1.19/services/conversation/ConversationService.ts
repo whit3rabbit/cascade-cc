@@ -14,6 +14,9 @@ import { EnvService } from "../config/EnvService.js";
 import { hookService } from "../hooks/HookService.js";
 import { ModelResolver } from "./ModelResolver.js";
 
+import { findAgent } from "../agents/AgentPersistence.js";
+import { mcpClientManager } from "../mcp/McpClientManager.js";
+
 export interface ConversationOptions {
     commands: any[];
     tools: any[];
@@ -29,17 +32,60 @@ export interface ConversationOptions {
     model?: string;
     agent?: string;
     shellSnapshotPath?: string;
-}
-
-export interface ConversationResult {
-    type: "success" | "error";
-    result: string;
-    turns: number;
-    durationMs: number;
-    usage: any;
+    agents?: Record<string, any>;
+    extraToolSchemas?: any[];
 }
 
 export class ConversationService {
+    /**
+     * Activates agent-specific configurations.
+     */
+    private static async handleAgentActivation(options: ConversationOptions) {
+        if (!options.agent) return;
+
+        const agentDef = findAgent(options.agent);
+        if (!agentDef) return;
+
+        terminalLog(`Activating agent: ${agentDef.name}`, "info");
+
+        // 1. Model Override
+        if (agentDef.model && !options.model) {
+            options.model = agentDef.model;
+        }
+
+        // 2. Tool Overrides
+        if (agentDef.tools && agentDef.tools.length > 0) {
+            // Keep specialized tools like ToolManager if present in original options
+            const currentTools = options.tools || [];
+            options.tools = currentTools.filter(t =>
+                agentDef.tools?.includes(t.name) ||
+                t.name === 'ToolManager' ||
+                t.name === 'Task'
+            );
+        }
+
+        if (agentDef.disallowedTools && agentDef.disallowedTools.length > 0) {
+            options.tools = (options.tools || []).filter(t => !agentDef.disallowedTools?.includes(t.name));
+        }
+
+        // 3. MCP Server Activation
+        if (agentDef.mcpServers && Array.isArray(agentDef.mcpServers)) {
+            for (const mcpConfig of agentDef.mcpServers) {
+                try {
+                    // Extract name/id from config or generate one
+                    const serverName = (mcpConfig as any).name || (mcpConfig as any).id || `agent-mcp-${Math.random().toString(36).substring(7)}`;
+                    terminalLog(`Connecting to agent MCP server: ${serverName}...`, "info");
+                    await mcpClientManager.connect(serverName, mcpConfig as any);
+
+                    // Note: Tools from these servers will be automatically picked up by mcpClientManager.getTools()
+                    // when it's eventually called by the orchestrator.
+                } catch (err) {
+                    terminalLog(`Failed to connect to agent-defined MCP server: ${err}`, "error");
+                }
+            }
+        }
+    }
+
     static async *startConversation(prompt: string, options: ConversationOptions): AsyncGenerator<any> {
         terminalLog(`Starting conversation: "${prompt}"`, "debug");
 
@@ -49,6 +95,11 @@ export class ConversationService {
 
         const systemPrompt = await PromptManager.assembleSystemPrompt(options);
         const resolvedModel = ModelResolver.resolveModel(options.model || 'claude-3-5-sonnet-20241022', !!options.planMode);
+
+        // 1. Handle Agent-specific overrides (Tools, MCP Servers, Model)
+        if (options.agent) {
+            await this.handleAgentActivation(options);
+        }
 
         yield {
             type: "system",

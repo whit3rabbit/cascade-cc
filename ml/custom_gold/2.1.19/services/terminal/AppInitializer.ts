@@ -18,24 +18,21 @@ import { McpServerManager } from '../mcp/McpServerManager.js';
 import { mcpClientManager } from '../mcp/McpClientManager.js';
 import { initTreeSitter } from '../../utils/shared/treeSitter.js';
 import { MailboxPollingService } from '../teams/MailboxPollingService.js';
+import { getLeaderPaneId } from '../../utils/terminal/terminalDetection.js';
+
+
+import { MarketplaceService } from '../mcp/MarketplaceService.js';
 
 async function initializeMcpServers() {
-    const servers = await McpServerManager.getAllMcpServers();
-    const connectionPromises = Object.entries(servers).map(async ([name, config]) => {
-        if (!McpServerManager.isMcpServerEnabled(name)) {
-            // console.log(`[MCP] Skipping disabled server: ${name}`);
-            return;
-        }
-
-        try {
-            await mcpClientManager.connect(name, config as any);
-        } catch (err) {
-            console.error(`Failed to connect to MCP server ${name}:`, err);
-        }
-    });
-
-    // Wait for all connections to either succeed, fail, or time out (managed by McpClientManager)
-    await Promise.all(connectionPromises);
+    try {
+        await mcpClientManager.initializeAllServers();
+        // Fire and forget marketplace auto-install
+        MarketplaceService.checkAndInstallOfficialPlugins().catch(err =>
+            console.error("Marketplace auto-install failed:", err)
+        );
+    } catch (err) {
+        console.error("Failed to initialize MCP servers:", err);
+    }
 }
 
 import { EnvService } from '../config/EnvService.js';
@@ -85,6 +82,21 @@ export async function initializeApp(): Promise<{ isFirstRun: boolean }> {
 
         // 5. Team Services
         MailboxPollingService.start();
+
+        // 6. Terminal Detection
+        try {
+            const leaderPane = await getLeaderPaneId();
+            if (leaderPane) {
+                terminalLog(`Leader Pane ID detected: ${leaderPane}`);
+                // Store in EnvService or similar if needed, or it's just available for other services to query dynamically 
+                // if they are in the same process/pane. 
+                // Note: If we spawn new processes, they inherit env but not this JS state. 
+                // Ideally we'd set an env var for children.
+                process.env.CLAUDE_LEADER_PANE_ID = leaderPane;
+            }
+        } catch (e) {
+            // ignore
+        }
 
         terminalLog("Initialization complete.");
         return { isFirstRun };

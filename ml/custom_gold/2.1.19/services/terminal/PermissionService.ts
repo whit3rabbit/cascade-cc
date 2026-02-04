@@ -7,6 +7,7 @@
 import { terminalLog } from "../../utils/shared/runtime.js";
 import { getToolSettings, updateSettingsForSource } from "../../services/config/SettingsService.js";
 import { hookService } from "../hooks/HookService.js";
+import { isBubblewrapSandbox, isDocker } from "../../utils/shared/runtimeAndEnv.js";
 
 export interface PermissionResponse {
     behavior: "passthrough" | "allow" | "deny" | "ask";
@@ -140,6 +141,14 @@ export async function checkToolPermissions(
     // 4. Check Session Rules
     if (sessionPermissions.has(ruleKey)) {
         return { behavior: "allow", decisionReason: { type: "rule", reason: "Session allowed." } };
+    }
+
+    // 0.5. Sandbox Override (more permissive in containers)
+    if (isBubblewrapSandbox() || isDocker()) {
+        return {
+            behavior: "allow",
+            decisionReason: { type: "sandboxOverride", reason: "Container/Sandbox detected." }
+        };
     }
 
     // 5. Default: Ask

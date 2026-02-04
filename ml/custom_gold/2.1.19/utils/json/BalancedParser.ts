@@ -9,12 +9,12 @@ export interface Token {
 }
 
 export function tokenize(input: string): Token[] {
-    const tokens: Token[] = [];
     let i = 0;
+    const tokens: Token[] = [];
     while (i < input.length) {
         const char = input[i];
         if (char === "\\") {
-            i += 2;
+            i++;
             continue;
         }
         if (char === "{") {
@@ -47,40 +47,70 @@ export function tokenize(input: string): Token[] {
             i++;
             continue;
         }
-
         if (char === '"') {
             let str = "";
-            i++;
-            while (i < input.length && input[i] !== '"') {
-                if (input[i] === "\\") {
-                    str += input[i + 1] || "";
-                    i += 2;
-                } else {
-                    str += input[i];
+            let escaped = false;
+            let current = input[++i];
+            while (current !== '"') {
+                if (i === input.length) {
+                    escaped = true;
+                    break;
+                }
+                if (current === "\\") {
                     i++;
+                    if (i === input.length) {
+                        escaped = true;
+                        break;
+                    }
+                    str += current + input[i];
+                    current = input[++i];
+                } else {
+                    str += current;
+                    current = input[++i];
                 }
             }
             i++;
-            tokens.push({ type: "string", value: str });
+            if (!escaped) {
+                tokens.push({ type: "string", value: str });
+            }
             continue;
         }
-
-        if (/\s/.test(char)) {
+        if (char && /\s/.test(char)) {
             i++;
             continue;
         }
 
-        const numMatch = input.slice(i).match(/^-?[0-9]*\.?[0-9]+/);
-        if (numMatch) {
-            tokens.push({ type: "number", value: numMatch[0] });
-            i += numMatch[0].length;
+        const isNum = /[0-9]/;
+        if ((char && isNum.test(char)) || char === "-" || char === ".") {
+            let num = "";
+            let current = char;
+            if (current === "-") {
+                num += current;
+                current = input[++i];
+            }
+            while (current && (isNum.test(current) || current === ".")) {
+                num += current;
+                current = input[++i];
+            }
+            tokens.push({ type: "number", value: num });
             continue;
         }
 
-        const nameMatch = input.slice(i).match(/^(true|false|null)/);
-        if (nameMatch) {
-            tokens.push({ type: "name", value: nameMatch[0] });
-            i += nameMatch[0].length;
+        const isAlpha = /[a-z]/i;
+        if (char && isAlpha.test(char)) {
+            let name = "";
+            let current = char;
+            while (current && isAlpha.test(current)) {
+                if (i === input.length) break;
+                name += current;
+                current = input[++i];
+            }
+            if (name === "true" || name === "false" || name === "null") {
+                tokens.push({ type: "name", value: name });
+            } else {
+                i++;
+                continue;
+            }
             continue;
         }
         i++;
@@ -91,8 +121,27 @@ export function tokenize(input: string): Token[] {
 export function cleanupTokens(tokens: Token[]): Token[] {
     if (tokens.length === 0) return tokens;
     const last = tokens[tokens.length - 1];
-    if (last.type === "separator" || last.type === "delimiter") {
-        return cleanupTokens(tokens.slice(0, -1));
+    switch (last.type) {
+        case "separator":
+            return cleanupTokens(tokens.slice(0, tokens.length - 1));
+        case "number": {
+            const lastChar = last.value[last.value.length - 1];
+            if (lastChar === "." || lastChar === "-") {
+                return cleanupTokens(tokens.slice(0, tokens.length - 1));
+            }
+            break;
+        }
+        case "string": {
+            const secondLast = tokens[tokens.length - 2];
+            if (secondLast?.type === "delimiter") {
+                return cleanupTokens(tokens.slice(0, tokens.length - 1));
+            } else if (secondLast?.type === "brace" && secondLast.value === "{") {
+                return cleanupTokens(tokens.slice(0, tokens.length - 1));
+            }
+            break;
+        }
+        case "delimiter":
+            return cleanupTokens(tokens.slice(0, tokens.length - 1));
     }
     return tokens;
 }
@@ -116,14 +165,30 @@ export function balanceBrackets(tokens: Token[]): Token[] {
         }
     });
 
-    stack.reverse().forEach((bracket) => {
-        tokens.push({ type: bracket === "}" ? "brace" : "paren", value: bracket });
-    });
+    if (stack.length > 0) {
+        stack.reverse().forEach((bracket) => {
+            tokens.push({
+                type: bracket === "}" ? "brace" : "paren",
+                value: bracket,
+            });
+        });
+    }
     return tokens;
 }
 
 export function stringifyTokens(tokens: Token[]): string {
-    return tokens.map((t) => (t.type === "string" ? `"${t.value}"` : t.value)).join("");
+    let result = "";
+    tokens.forEach((t) => {
+        switch (t.type) {
+            case "string":
+                result += '"' + t.value + '"';
+                break;
+            default:
+                result += t.value;
+                break;
+        }
+    });
+    return result;
 }
 
 /**
@@ -135,9 +200,14 @@ export function parseBalancedJSON(input: string): any {
         return JSON.parse(input);
     } catch {
         try {
-            return JSON.parse(stringifyTokens(balanceBrackets(cleanupTokens(tokenize(input)))));
+            const tokens = tokenize(input);
+            const cleaned = cleanupTokens(tokens);
+            const balanced = balanceBrackets(cleaned);
+            const stringified = stringifyTokens(balanced);
+            return JSON.parse(stringified);
         } catch {
             return null;
         }
     }
 }
+

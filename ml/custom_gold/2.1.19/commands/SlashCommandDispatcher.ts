@@ -4,7 +4,7 @@
  */
 
 import { PromptManager } from "../services/conversation/PromptManager.js";
-import { DoctorService, HealthCheckResult } from "../services/terminal/DoctorService.js";
+import { DoctorService } from "../services/terminal/DoctorService.js";
 import { EnvService } from "../services/config/EnvService.js";
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -20,7 +20,7 @@ export interface CommandContext {
     setIsTyping: (isTyping: boolean) => void;
     exit: () => void;
     cwd: string;
-    setCurrentMenu: (menu: 'config' | 'mcp' | 'tasks' | 'search' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | 'compact' | 'memory' | 'cost' | null) => void;
+    setCurrentMenu: (menu: 'config' | 'mcp' | 'tasks' | 'search' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | 'compact' | 'memory' | 'cost' | 'marketplace' | 'resources' | 'prompts' | null) => void;
     setBugReportInitialDescription: (description: string) => void;
     messages: any[];
 }
@@ -91,6 +91,18 @@ export class SlashCommandDispatcher {
                 context.setCurrentMenu('mcp');
                 return true;
 
+            case '/marketplace':
+                context.setCurrentMenu('marketplace');
+                return true;
+
+            case '/resources':
+                context.setCurrentMenu('resources');
+                return true;
+
+            case '/prompts':
+                context.setCurrentMenu('prompts');
+                return true;
+
             case '/init':
                 {
                     const claudeMdPath = join(context.cwd, 'CLAUDE.md');
@@ -151,75 +163,25 @@ export class SlashCommandDispatcher {
 
             case '/login':
                 (async () => {
-                    const { OAuthService, LoopbackServerHandler } = await import('../services/auth/OAuthService.js');
-                    const handler = new LoopbackServerHandler();
+                    const { OAuthService } = await import('../services/auth/OAuthService.js');
+                    const open = (await import('open')).default;
+
                     try {
-                        const { generateRandomString, pkceChallenge } = await import('../utils/shared/crypto.js');
-                        const open = (await import('open')).default;
-
-                        const state = generateRandomString(32);
-                        const codeVerifier = generateRandomString(64);
-                        const codeChallenge = pkceChallenge(codeVerifier);
-
-                        const port = await handler.start();
-                        const promise = handler.listenForAuthCode(
-                            "Login successful! You can close this window.",
-                            "Login failed. Please try again."
-                        );
-
-                        const authUrl = OAuthService.buildAuthUrl({
-                            codeChallenge,
-                            state,
-                            port,
-                            isManual: false
-                        });
-
-                        context.setMessages(prev => [...prev, {
-                            role: 'assistant',
-                            content: `Opening browser for login...\n\nIf it doesn't open automatically, please visit this URL:\n[${authUrl}](${authUrl})`
-                        }]);
-
-                        await open(authUrl);
-
-                        const params = await promise;
-                        if (params.state !== state) {
-                            throw new Error("Invalid state returned from OAuth flow.");
-                        }
-
                         context.setIsTyping(true);
-                        const tokenResponse = await OAuthService.exchangeToken(
-                            params.code!,
-                            state,
-                            codeVerifier,
-                            port
-                        );
-
-                        // Fetch profile and roles
-                        const profile = await OAuthService.fetchProfile(tokenResponse.access_token);
-                        const roles = await OAuthService.fetchRoles(tokenResponse.access_token);
-
-                        const authAccount = {
-                            accountUuid: profile.account.uuid,
-                            emailAddress: profile.account.email,
-                            organizationUuid: profile.organization.uuid,
-                            displayName: profile.account.display_name,
-                            hasExtraUsageEnabled: profile.organization.has_extra_usage_enabled,
-                            billingType: profile.organization.billing_type,
-                            organizationRole: roles.organization_role,
-                            workspaceRole: roles.workspace_role,
-                            organizationName: roles.organization_name
-                        };
-
-                        await OAuthService.saveToken({
-                            ...tokenResponse,
-                            account: authAccount
+                        await OAuthService.login({
+                            onUrl: async (url) => {
+                                context.setMessages(prev => [...prev, {
+                                    role: 'assistant',
+                                    content: `Opening browser for login...\n\nIf it doesn't open automatically, please visit this URL:\n[${url}](${url})`
+                                }]);
+                                await open(url);
+                            }
                         });
 
                         context.setMessages(prev => [...prev, { role: 'assistant', content: '✅ Successfully logged in! Your credentials have been saved to the system keychain.' }]);
                     } catch (e) {
                         context.setMessages(prev => [...prev, { role: 'assistant', content: `❌ Login failed: ${e instanceof Error ? e.message : String(e)}` }]);
                     } finally {
-                        handler.closeServer();
                         context.setIsTyping(false);
                     }
                 })();

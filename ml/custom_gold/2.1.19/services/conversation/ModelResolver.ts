@@ -1,6 +1,7 @@
 
 import { EnvService } from '../config/EnvService.js';
 import { getSettings } from '../config/SettingsService.js';
+import { DEFAULT_AGENT_MODEL } from '../../types/AgentTypes.js';
 
 /**
  * Resolves the user-facing model alias (e.g., 'sonnet', 'opus') to the specific API model identifier.
@@ -19,7 +20,7 @@ export class ModelResolver {
             if (isPlanMode) {
                 return EnvService.get('ANTHROPIC_DEFAULT_OPUS_MODEL') || 'claude-3-opus-20240229';
             } else {
-                return EnvService.get('ANTHROPIC_DEFAULT_SONNET_MODEL') || 'claude-3-5-sonnet-20241022';
+                return EnvService.get('ANTHROPIC_DEFAULT_SONNET_MODEL') || DEFAULT_AGENT_MODEL;
             }
         }
 
@@ -27,7 +28,7 @@ export class ModelResolver {
         // This is a simplified lookup map as per docs
         const map: Record<string, string> = {
             'haiku': EnvService.get('ANTHROPIC_DEFAULT_HAIKU_MODEL') || 'claude-3-5-haiku-20241022',
-            'sonnet': EnvService.get('ANTHROPIC_DEFAULT_SONNET_MODEL') || 'claude-3-5-sonnet-20241022',
+            'sonnet': EnvService.get('ANTHROPIC_DEFAULT_SONNET_MODEL') || DEFAULT_AGENT_MODEL,
             'opus': EnvService.get('ANTHROPIC_DEFAULT_OPUS_MODEL') || 'claude-3-opus-20240229',
             'subagent': EnvService.get('CLAUDE_CODE_SUBAGENT_MODEL') || 'claude-3-5-haiku-20241022'
         };

@@ -49,3 +49,23 @@ export const HookCallbackSchema = z.union([AsyncHookResult, SyncHookResult]);
 // Aliases for compatibility
 export const uv1 = ToolPermissionResponseSchema;
 export const PV1 = HookCallbackSchema;
+
+export const LspToolInputSchema = z.strictObject({
+    operation: z.enum(['goToDefinition', 'findReferences', 'hover', 'documentSymbol', 'workspaceSymbol', 'goToImplementation', 'prepareCallHierarchy', 'incomingCalls', 'outgoingCalls']).describe('The LSP operation to perform'),
+    filePath: z.string().describe('The absolute or relative path to the file'),
+    lineNumber: z.number().int().positive().describe('The line number (1-based, as shown in editors)'),
+    character: z.number().int().positive().describe('The character offset (1-based, as shown in editors)')
+});
+
+export const LspToolOutputSchema = z.object({
+    operation: z.enum(['goToDefinition', 'findReferences', 'hover', 'documentSymbol', 'workspaceSymbol', 'goToImplementation', 'prepareCallHierarchy', 'incomingCalls', 'outgoingCalls']).describe('The LSP operation that was performed'),
+    result: z.string().describe('The formatted result of the LSP operation'),
+    filePath: z.string().describe('The file path the operation was performed on'),
+    resultCount: z.number().int().nonnegative().optional().describe('Number of results (definitions, references, symbols)'),
+    fileCount: z.number().int().nonnegative().optional().describe('Number of files containing results')
+});
+
+export type LspOperation = z.infer<typeof LspToolInputSchema>;
+export type LspToolOutput = z.infer<typeof LspToolOutputSchema>;
+// Compatibility alias if needed
+export type LspToolResult = LspToolOutput;

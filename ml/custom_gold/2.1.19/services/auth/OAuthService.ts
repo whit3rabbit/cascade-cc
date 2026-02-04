@@ -1,54 +1,44 @@
 /**
  * File: src/services/auth/OAuthService.ts
- * Role: Utilities for handling OAuth flows and managing tokens.
+ * Role: Utilities for handling OAuth flows and managing tokens, aligned with 2.1.19.
  */
 
-import http from "node:http";
-import fs from 'node:fs';
+import * as http from "node:http";
+import { createHash, randomBytes } from "node:crypto";
 import {
-    createLoopbackServerAlreadyExistsError,
-    createUnableToLoadRedirectUrlError,
-    createNoLoopbackServerExistsError,
-    createInvalidLoopbackAddressTypeError
-} from "./ApiKeyManager.js";
-import { HTTP_PROTOCOL, LOCALHOST, CLIENT_ID, TOKEN_URL, ROLES_URL, API_KEY_URL, CLAUDE_AI_AUTHORIZE_URL, CONSOLE_AUTHORIZE_URL, MANUAL_REDIRECT_URL } from "../../constants/product.js";
-import { IDENTITY_ENDPOINT, IMDS_ENDPOINT } from "../../constants/keys.js";
-import { AzureArc } from "../../utils/shared/envContext.js";
-import RetryStrategy from "../../utils/http/RetryStrategy.js";
-import { getStatsigStorage, setStatsigStorage } from "./MsalAuthService.js";
+    CLIENT_ID,
+    TOKEN_URL,
+    ROLES_URL,
+    CLAUDE_AI_AUTHORIZE_URL,
+    CONSOLE_AUTHORIZE_URL,
+    MANUAL_REDIRECT_URL,
+    OAUTH_BETA_HEADER,
+    PROFILE_URL
+} from "../../constants/product.js";
 import { KeychainService } from "./KeychainService.js";
 import { getProductName } from "../../utils/shared/product.js";
+import RetryStrategy from "../../utils/http/RetryStrategy.js";
 
-const HIMDS_EXECUTABLE = "/opt/azcmagent/bin/himds";
-const HIMDS_ENDPOINT = "http://localhost:40342";
-
-// Constants
-const SCOPES_INFERENCE = "inference";
-const SCOPES_DEFAULT = ["profile", "email", "openid"];
-
-/**
- * Interface for token exchange response.
- */
-export interface TokenExchangeResponse {
-    access_token: string;
-    refresh_token?: string;
-    expires_in: number;
-    scope: string;
-    account?: OAuthAccount;
-    [key: string]: any;
+// Helper for base64url encoding (chunk755: bD6 logic)
+function base64url(buffer: Buffer): string {
+    return buffer.toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=/g, "");
 }
 
-/**
- * Interface for refreshed token data.
- */
-export interface RefreshedTokenData {
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: number;
-    scopes: string[];
-    subscriptionType?: string;
-    rateLimitTier?: string;
-    account?: OAuthAccount;
+// PKCE Helpers (chunk755: mZ7, gZ7 logic)
+export function createCodeVerifier(): string {
+    return base64url(randomBytes(32));
+}
+
+export function createCodeChallenge(verifier: string): string {
+    const hash = createHash("sha256").update(verifier).digest();
+    return base64url(hash);
+}
+
+export function createOAuthState(): string {
+    return base64url(randomBytes(32));
 }
 
 export interface OAuthAccount {
@@ -61,227 +51,310 @@ export interface OAuthAccount {
     organizationRole?: string;
     workspaceRole?: string;
     organizationName?: string;
+    subscriptionType?: string | null;
+    rateLimitTier?: string | null;
 }
+
+export interface TokenExchangeResponse {
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+    scope: string;
+    account?: {
+        uuid: string;
+        email_address: string;
+    };
+    organization?: {
+        uuid: string;
+    };
+}
+
+export interface AuthSession {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    scopes: string[];
+    account?: OAuthAccount;
+}
+
+const SCOPES_DEFAULT = ["profile", "email", "openid"];
+const SCOPES_INFERENCE = "inference";
+
+let currentSession: AuthSession | null = null;
 
 /**
  * Service to handle OAuth flow.
  */
 export const OAuthService = {
-
     /**
      * Gets a valid OAuth token, refreshing if necessary.
-     * @returns {Promise<string | null>} The valid access token or null.
      */
     async getValidToken(): Promise<string | null> {
-        // 1. Check in-memory storage first
-        const storage = getStatsigStorage();
-        if (storage.accessToken) {
-            // In a real implementation, we'd check expiration here
-            return storage.accessToken;
+        if (currentSession?.accessToken && currentSession.expiresAt > Date.now() + 60000) {
+            return currentSession.accessToken;
         }
 
-        // 2. Try keychain
-        if (KeychainService.isAvailable()) {
-            const serviceName = getProductName("-credentials");
-            const dataStr = KeychainService.readToken(serviceName);
-            if (dataStr) {
-                try {
-                    const rawData = JSON.parse(dataStr);
-                    const data = rawData.claudeAiOauth || rawData;
-                    if (data.accessToken) {
-                        // Check if expiration is near
-                        const now = Date.now();
-                        const fiveMinutes = 5 * 60 * 1000;
-                        if (data.expiresAt && now + fiveMinutes < data.expiresAt) {
-                            setStatsigStorage({ accessToken: data.accessToken, oauthAccount: data.account || data.oauthAccount });
-                            return data.accessToken;
-                        }
-
-                        // Try refresh
-                        if (data.refreshToken) {
-                            const refreshed = await this.refreshToken(data.refreshToken, data.scopes);
-                            await this.saveToken(refreshed);
-                            return refreshed.accessToken;
-                        }
-                    }
-                } catch (e) {
-                    console.error("[OAuthService] Failed to parse keychain token", e);
-                }
+        const persisted = await this.loadSession();
+        if (persisted) {
+            currentSession = persisted;
+            if (currentSession.expiresAt > Date.now() + 60000) {
+                return currentSession.accessToken;
+            }
+            // Try refresh
+            try {
+                const refreshed = await this.refreshToken(currentSession.refreshToken, currentSession.scopes);
+                await this.saveSession(refreshed);
+                return refreshed.accessToken;
+            } catch (e) {
+                console.error("[OAuth] Refresh failed:", e);
+                await this.logout();
             }
         }
-
         return null;
     },
 
     /**
-     * Saves tokens to persistence.
+     * Builds the authorization URL (chunk809: KK6 logic).
      */
-    async saveToken(data: RefreshedTokenData | TokenExchangeResponse): Promise<void> {
-        const accessToken = (data as any).accessToken || (data as TokenExchangeResponse).access_token;
-        const refreshToken = (data as any).refreshToken || (data as TokenExchangeResponse).refresh_token;
-        const expiresAt = (data as any).expiresAt || (Date.now() + (data as TokenExchangeResponse).expires_in * 1000);
-        const account = (data as any).account;
-        const scopes = (data as any).scopes || (data as TokenExchangeResponse).scope?.split(" ").filter(Boolean) || [];
-
-        setStatsigStorage({ accessToken, oauthAccount: account });
-
-        if (KeychainService.isAvailable()) {
-            const serviceName = getProductName("-credentials");
-            const tokenData = JSON.stringify({
-                claudeAiOauth: {
-                    accessToken,
-                    refreshToken,
-                    expiresAt,
-                    account,
-                    scopes
-                }
-            });
-            KeychainService.saveToken(serviceName, tokenData);
-        }
-    },
-
-    /**
-     * Builds the authorization URL for the OAuth flow.
-     */
-    buildAuthUrl({
-        codeChallenge,
-        state,
-        port,
-        isManual,
-        loginWithClaudeAi,
-        inferenceOnly,
-        orgUUID,
-    }: {
+    buildAuthUrl(options: {
         codeChallenge: string;
         state: string;
-        port?: number;
+        port: number;
         isManual?: boolean;
         loginWithClaudeAi?: boolean;
         inferenceOnly?: boolean;
         orgUUID?: string;
     }): string {
-        const baseUrl = loginWithClaudeAi ? CLAUDE_AI_AUTHORIZE_URL : CONSOLE_AUTHORIZE_URL;
+        const baseUrl = options.loginWithClaudeAi ? CLAUDE_AI_AUTHORIZE_URL : CONSOLE_AUTHORIZE_URL;
         const url = new URL(baseUrl);
-        url.searchParams.append("code", "true");
-        url.searchParams.append("client_id", CLIENT_ID);
         url.searchParams.append("response_type", "code");
-        url.searchParams.append("redirect_uri", isManual ? MANUAL_REDIRECT_URL : `http://localhost:${port}/callback`);
-        const scopes = inferenceOnly ? [SCOPES_INFERENCE] : SCOPES_DEFAULT;
-        url.searchParams.append("scope", scopes.join(" "));
-        url.searchParams.append("code_challenge", codeChallenge);
+        url.searchParams.append("client_id", CLIENT_ID);
+        url.searchParams.append("redirect_uri", options.isManual ? MANUAL_REDIRECT_URL : `http://localhost:${options.port}/callback`);
+        url.searchParams.append("code_challenge", options.codeChallenge);
         url.searchParams.append("code_challenge_method", "S256");
-        url.searchParams.append("state", state);
-        if (orgUUID) {
-            url.searchParams.append("orgUUID", orgUUID);
+        url.searchParams.append("state", options.state);
+
+        const scopes = options.inferenceOnly ? [SCOPES_INFERENCE] : SCOPES_DEFAULT;
+        url.searchParams.append("scope", scopes.join(" "));
+
+        if (options.orgUUID) {
+            url.searchParams.append("org_uuid", options.orgUUID);
         }
         return url.toString();
     },
 
     /**
-     * Exchanges an authorization code for tokens.
+     * Maps organization type to subscription type (chunk407: YK6 logic).
+     */
+    mapSubscriptionType(orgType?: string | null): string | null {
+        switch (orgType) {
+            case "claude_max": return "max";
+            case "claude_pro": return "pro";
+            case "claude_enterprise": return "enterprise";
+            case "claude_team": return "team";
+            default: return null;
+        }
+    },
+
+    /**
+     * Exchanges code for tokens (chunk809: TN4 logic).
      */
     async exchangeToken(
         code: string,
         state: string,
         codeVerifier: string,
-        port?: number,
+        port: number,
         isManual: boolean = false,
         expiresIn?: number
     ): Promise<TokenExchangeResponse> {
         const body: any = {
             grant_type: "authorization_code",
-            code: code,
-            redirect_uri: isManual ? MANUAL_REDIRECT_URL : `http://localhost:${port}/callback`,
+            code,
             client_id: CLIENT_ID,
             code_verifier: codeVerifier,
-            state: state,
+            redirect_uri: isManual ? MANUAL_REDIRECT_URL : `http://localhost:${port}/callback`,
+            state
         };
 
-        if (expiresIn !== undefined) {
-            body.expires_in = expiresIn;
-        }
+        if (expiresIn) body.expires_in = expiresIn;
 
         const response = await RetryStrategy.post(TOKEN_URL, body, {
-            headers: {
-                "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" }
         });
 
         if (response.status !== 200) {
-            const errorMessage =
-                response.status === 401
-                    ? "Authentication failed: Invalid authorization code"
-                    : `Token exchange failed (${response.status}): ${response.statusText}`;
-            throw new Error(errorMessage);
+            throw new Error(`Token exchange failed: ${response.statusText}`);
         }
 
-        // track("tengu_oauth_token_exchange_success", {});
         return response.data;
     },
 
     /**
-     * Refreshes an access token using a refresh token.
+     * Refreshes access token.
      */
-    async refreshToken(refreshTokenValue: string, scopes?: string[]): Promise<RefreshedTokenData> {
+    async refreshToken(refreshToken: string, scopes: string[]): Promise<AuthSession> {
         const body = {
             grant_type: "refresh_token",
-            refresh_token: refreshTokenValue,
+            refresh_token: refreshToken,
             client_id: CLIENT_ID,
-            scope: (scopes && scopes.length > 0) ? scopes.join(" ") : SCOPES_DEFAULT.join(" "),
+            scope: scopes.join(" ")
         };
 
-        try {
-            const response = await RetryStrategy.post(TOKEN_URL, body, {
-                headers: {
-                    "Content-Type": "application/json",
-                },
-            });
+        const response = await RetryStrategy.post(TOKEN_URL, body, {
+            headers: { "Content-Type": "application/json" }
+        });
 
-            if (response.status !== 200) {
-                throw new Error(`Token refresh failed: ${response.statusText}`);
+        if (response.status !== 200) {
+            throw new Error(`Token refresh failed: ${response.statusText}`);
+        }
+
+        const data = response.data;
+        const accessToken = data.access_token;
+        const newRefreshToken = data.refresh_token || refreshToken;
+
+        // Fetch profile and roles (aligned with chunk809 and chunk407 YK6)
+        const profile = await this.fetchProfile(accessToken);
+        const roles = await this.fetchRoles(accessToken);
+
+        // Map organization_type to subscriptionType (chunk407: YK6 logic)
+        const subscriptionType = this.mapSubscriptionType(profile.organization?.organization_type);
+
+        return {
+            accessToken,
+            refreshToken: newRefreshToken,
+            expiresAt: Date.now() + (data.expires_in * 1000),
+            scopes: data.scope?.split(" ") || scopes,
+            account: {
+                accountUuid: profile.account.uuid,
+                emailAddress: profile.account.email,
+                organizationUuid: profile.organization.uuid,
+                displayName: profile.account.display_name,
+                hasExtraUsageEnabled: profile.organization.has_extra_usage_enabled,
+                billingType: profile.organization.billing_type,
+                organizationRole: roles.organization_role,
+                workspaceRole: roles.workspace_role,
+                organizationName: roles.organization_name,
+                subscriptionType,
+                rateLimitTier: profile.organization?.rate_limit_tier ?? null
             }
+        };
+    },
 
-            const data = response.data;
-            const {
-                access_token: accessToken,
-                refresh_token: newRefreshToken = refreshTokenValue,
-                expires_in: expiresIn,
-            } = data;
-            const expiresAt = Date.now() + expiresIn * 1000;
-            const scopes = data.scope?.split(" ").filter(Boolean) ?? [];
-
-            // track("tengu_oauth_token_refresh_success", {});
-
-            return {
-                accessToken,
-                refreshToken: newRefreshToken,
-                expiresAt,
-                scopes,
-                // These would come from a profile fetch typically
-                subscriptionType: undefined,
-                rateLimitTier: undefined,
-            };
-        } catch (error) {
-            // track("tengu_oauth_token_refresh_failure", { error: error.message });
-            throw error;
+    /**
+     * Persists session to keychain.
+     */
+    async saveSession(session: AuthSession): Promise<void> {
+        currentSession = session;
+        if (KeychainService.isAvailable()) {
+            const serviceName = getProductName("-credentials");
+            KeychainService.saveToken(serviceName, JSON.stringify(session));
         }
     },
 
     /**
-     * Fetches the user profile.
+     * Loads session from keychain.
      */
-    async fetchProfile(accessToken: string): Promise<any> {
-        const response = await RetryStrategy.get(`${CONSOLE_AUTHORIZE_URL.replace("/oauth/authorize", "")}/api/oauth/profile`, {
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json"
+    async loadSession(): Promise<AuthSession | null> {
+        if (KeychainService.isAvailable()) {
+            const serviceName = getProductName("-credentials");
+            const data = KeychainService.readToken(serviceName);
+            if (data) {
+                try {
+                    return JSON.parse(data);
+                } catch {
+                    return null;
+                }
             }
+        }
+        return null;
+    },
+
+    /**
+     * Logs out (chunk808: yN6 cleanup).
+     */
+    async logout(): Promise<void> {
+        currentSession = null;
+        if (KeychainService.isAvailable()) {
+            const serviceName = getProductName("-credentials");
+            KeychainService.deleteToken(serviceName);
+        }
+        // Additional cleanup like clearing remote-settings cache would go here
+    },
+
+    /**
+     * Orchestrates the full login flow (chunk809: startOAuthFlow logic).
+     */
+    async login(options: {
+        onUrl: (url: string) => Promise<void>,
+        orgUUID?: string,
+        loginWithClaudeAi?: boolean
+    }): Promise<AuthSession> {
+        const server = new LocalAuthServer();
+        const port = await server.start();
+        const state = createOAuthState();
+        const verifier = createCodeVerifier();
+        const challenge = createCodeChallenge(verifier);
+
+        const url = this.buildAuthUrl({
+            codeChallenge: challenge,
+            state,
+            port,
+            orgUUID: options.orgUUID,
+            loginWithClaudeAi: options.loginWithClaudeAi
         });
 
+        try {
+            const code = await server.waitForCode(state, () => options.onUrl(url));
+
+            const tokenResponse = await this.exchangeToken(code, state, verifier, port);
+
+            // Fetch profile and roles (chunk809: YK6 and zK6 logic)
+            const profile = await this.fetchProfile(tokenResponse.access_token);
+            const roles = await this.fetchRoles(tokenResponse.access_token);
+
+            // Map organization_type to subscriptionType (chunk407: YK6 logic)
+            const subscriptionType = this.mapSubscriptionType(profile.organization?.organization_type);
+
+            const session: AuthSession = {
+                accessToken: tokenResponse.access_token,
+                refreshToken: tokenResponse.refresh_token,
+                expiresAt: Date.now() + (tokenResponse.expires_in * 1000),
+                scopes: tokenResponse.scope.split(" "),
+                account: {
+                    accountUuid: profile.account.uuid,
+                    emailAddress: profile.account.email,
+                    organizationUuid: profile.organization.uuid,
+                    displayName: profile.account.display_name,
+                    hasExtraUsageEnabled: profile.organization.has_extra_usage_enabled,
+                    billingType: profile.organization.billing_type,
+                    organizationRole: roles.organization_role,
+                    workspaceRole: roles.workspace_role,
+                    organizationName: roles.organization_name,
+                    subscriptionType,
+                    rateLimitTier: profile.organization?.rate_limit_tier ?? null
+                }
+            };
+
+            await this.saveSession(session);
+            return session;
+        } finally {
+            server.close();
+        }
+    },
+
+    /**
+     * Fetches the user profile (chunk809: YK6 logic).
+     */
+    async fetchProfile(accessToken: string): Promise<any> {
+        const response = await RetryStrategy.get(PROFILE_URL, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "anthropic-beta": OAUTH_BETA_HEADER
+            }
+        });
         if (response.status !== 200) {
             throw new Error(`Failed to fetch profile: ${response.statusText}`);
         }
-
         return response.data;
     },
 
@@ -292,124 +365,84 @@ export const OAuthService = {
         const response = await RetryStrategy.get(ROLES_URL, {
             headers: {
                 Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json"
+                "anthropic-beta": OAUTH_BETA_HEADER
             }
         });
-
         if (response.status !== 200) {
             throw new Error(`Failed to fetch roles: ${response.statusText}`);
         }
-
         return response.data;
-    },
-
-    /**
-     * Logs out the user by clearing local persistence.
-     */
-    async logout(): Promise<void> {
-        setStatsigStorage({ accessToken: undefined, oauthAccount: undefined });
-        if (KeychainService.isAvailable()) {
-            const serviceName = getProductName("-credentials");
-            KeychainService.deleteToken(serviceName);
-        }
     }
 };
 
 /**
- * Handles the local loopback server for creating an auth callback.
+ * Port of chunk754 hD6 (Local Auth Server).
  */
-export class LoopbackServerHandler {
-    private server: http.Server | undefined;
+export class LocalAuthServer {
+    private server: http.Server;
+    private port: number = 0;
+    private expectedState: string | null = null;
+    private resolve: ((code: string) => void) | null = null;
+    private reject: ((err: Error) => void) | null = null;
 
-    /**
-     * Starts the loopback server on a random port and returns it.
-     */
+    constructor() {
+        this.server = http.createServer();
+    }
+
     async start(): Promise<number> {
-        if (this.server) {
-            throw createLoopbackServerAlreadyExistsError();
-        }
-
         return new Promise((resolve, reject) => {
-            this.server = http.createServer();
-            this.server.on('error', reject);
+            this.server.on("error", reject);
             this.server.listen(0, "127.0.0.1", () => {
-                const address = this.server!.address();
-                if (typeof address === 'string' || !address?.port) {
-                    this.closeServer();
-                    reject(createInvalidLoopbackAddressTypeError());
-                    return;
-                }
-                resolve(address.port);
+                const addr = this.server.address();
+                this.port = (addr as any).port;
+                resolve(this.port);
             });
         });
     }
 
-    /**
-     * Listens for the auth code on the current server.
-     */
-    async listenForAuthCode(successMessage?: string, errorMessage?: string): Promise<Record<string, string>> {
-        if (!this.server) {
-            await this.start();
-        }
-
+    async waitForCode(state: string, onStart: () => void): Promise<string> {
+        this.expectedState = state;
         return new Promise((resolve, reject) => {
-            this.server!.on('request', (req, res) => {
-                const reqUrl = req.url;
-                if (!reqUrl) {
-                    res.end(errorMessage || "Error occurred loading redirectUrl");
-                    reject(createUnableToLoadRedirectUrlError());
+            this.resolve = resolve;
+            this.reject = reject;
+            this.server.on("request", (req, res) => {
+                const url = new URL(req.url || "", `http://localhost:${this.port}`);
+                if (url.pathname !== "/callback") {
+                    res.writeHead(404);
+                    res.end();
                     return;
                 }
 
-                if (reqUrl === "/") {
-                    res.end(successMessage || "Auth code was successfully acquired. You can close this window now.");
+                const code = url.searchParams.get("code");
+                const returnedState = url.searchParams.get("state");
+
+                if (!code) {
+                    res.writeHead(400);
+                    res.end("Missing code");
+                    reject(new Error("No code received"));
                     return;
                 }
 
-                try {
-                    const redirectUri = this.getRedirectUri();
-                    const urlObj = new URL(reqUrl, redirectUri);
-                    const params = Object.fromEntries(urlObj.searchParams);
-
-                    if (params.code) {
-                        res.writeHead(302, { location: redirectUri });
-                        res.end();
-                        resolve(params);
-                    } else if (params.error) {
-                        res.end(errorMessage || `Error occurred: ${params.error}`);
-                        reject(new Error(params.error));
-                    }
-                } catch (e) {
-                    res.end(errorMessage || String(e));
-                    reject(e);
+                if (returnedState !== this.expectedState) {
+                    res.writeHead(400);
+                    res.end("Invalid state");
+                    reject(new Error("State mismatch"));
+                    return;
                 }
+
+                // Chunk754 style success redirect
+                res.writeHead(302, { Location: "https://claude.ai/login_successful" });
+                res.end();
+
+                resolve(code);
+                this.close();
             });
+            onStart();
         });
     }
 
-    getRedirectUri(): string {
-        if (!this.server || !this.server.listening) {
-            throw createNoLoopbackServerExistsError();
-        }
-
-        const serverAddress = this.server.address();
-        if (typeof serverAddress === "string" || !serverAddress?.port) {
-            this.closeServer();
-            throw createInvalidLoopbackAddressTypeError();
-        }
-
-        const port = serverAddress.port;
-        return `${HTTP_PROTOCOL}${LOCALHOST}:${port}`;
-    }
-
-    closeServer(): void {
-        if (this.server) {
-            this.server.close();
-            if (typeof (this.server as any).closeAllConnections === "function") {
-                (this.server as any).closeAllConnections();
-            }
-            this.server.unref();
-            this.server = undefined;
-        }
+    close() {
+        this.server.close();
+        this.server.unref();
     }
 }

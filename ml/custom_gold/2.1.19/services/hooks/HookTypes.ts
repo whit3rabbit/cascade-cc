@@ -8,6 +8,7 @@ export const HookEventSchema = z.enum([
     'PostToolUseFailure',
     'Notification',
     'PermissionRequest',
+    'PreCompact',
     // 'Setup', // Noted in deobfuscated code but typically less common, including for completeness
     // 'SubagentStart' // Ditto
 ]);
@@ -25,6 +26,7 @@ export const HookInputSchema = z.object({
     transcript_path: z.string().optional(),
     cwd: z.string().optional(),
     permission_mode: z.string().optional(), // 'prompt-always' | 'prompt-sensitive' etc.
+    reason: z.string().optional(),
 
     // Specific fields per event
     // PreToolUse
@@ -47,6 +49,10 @@ export const HookInputSchema = z.object({
 
     // PermissionRequest
     // Use schema from chunk1154 implementation if possible for more specific fields
+
+    // PreCompact
+    trigger: z.enum(['auto', 'manual']).optional(),
+    customInstructions: z.string().nullable().optional(),
 });
 
 export type HookInput = z.infer<typeof HookInputSchema>;

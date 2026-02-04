@@ -5,6 +5,7 @@
 
 import { getBaseConfigDir } from "../../utils/shared/runtimeAndEnv.js";
 import { terminalLog } from "../../utils/shared/runtime.js";
+import { AgentMessage, AgentMetadata } from "../../types/AgentTypes.js";
 
 export interface TokenBreakdown {
     categories: TokenCategory[];
@@ -128,24 +129,41 @@ When referencing specific functions or pieces of code include the pattern \`file
     private static async assembleAgentPrompt(options: any): Promise<string> {
         if (options.agentPrompt) return options.agentPrompt;
 
-        // logic to load agent definitions from options.agents or config
-        if (options.agent) {
-            const agentDef = options.agents?.[options.agent];
+        const { CategoryRuleCache } = await import('./CategoryRuleCache.js');
+        const { findAgent } = await import('../agents/AgentPersistence.js');
+
+        const customInstructions = CategoryRuleCache.getInstance().getInstructions();
+
+        let agentPrompt = "";
+        let agentName = options.agent;
+
+        if (agentName) {
+            const agentDef = findAgent(agentName);
             if (agentDef) {
-                return `
-# Role: ${options.agent}
-${agentDef.description ? `Description: ${agentDef.description}` : ""}
-${agentDef.prompt || ""}
+                agentPrompt = `
+# Role: ${agentDef.name}
+${agentDef.whenToUse ? `Description: ${agentDef.whenToUse}` : agentDef.description ? `Description: ${agentDef.description}` : ""}
+${agentDef.systemPrompt || ""}
+`;
+            } else if (options.agents?.[agentName]) {
+                // Fallback to inline agents from options
+                const inlineDef = options.agents[agentName];
+                agentPrompt = `
+# Role: ${agentName}
+${inlineDef.description ? `Description: ${inlineDef.description}` : ""}
+${inlineDef.prompt || ""}
 `;
             }
         }
-        return "";
+
+        const sections = [agentPrompt, customInstructions].filter(Boolean);
+        return sections.join("\n\n");
     }
 
     /**
      * Compacts message history by summarizing older turns.
      */
-    static async compactMessages(messages: any[], options: any): Promise<any[]> {
+    static async compactMessages(messages: AgentMessage[], options: any): Promise<AgentMessage[]> {
         if (messages.length < 10) return messages; // Don't compact small history
 
         const { Anthropic } = await import('../anthropic/AnthropicClient.js');
@@ -171,7 +189,7 @@ The user will use this summary as context for future turns. DO NOT include meta-
                     {
                         role: "user",
                         content: "Summarize the following conversation history:\n\n" +
-                            messagesToSummarize.map(m => `${m.role.toUpperCase()}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`).join("\n\n")
+                            messagesToSummarize.map(m => `${m.role?.toUpperCase() || 'USER'}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`).join("\n\n")
                     }
                 ]
             });
@@ -180,11 +198,18 @@ The user will use this summary as context for future turns. DO NOT include meta-
 
             return [
                 {
+                    type: "system",
                     role: "system",
                     content: `SUMMARY OF PREVIOUS CONVERSATION:\n${summary}`,
                     subtype: "compact_boundary",
-                    isCompactSummary: true
-                },
+                    isMeta: false,
+                    timestamp: new Date().toISOString(),
+                    level: "info",
+                    compactMetadata: {
+                        trigger: "auto",
+                        preTokens: messagesToSummarize.length // Placeholder, ideally actual token count
+                    }
+                } as AgentMessage,
                 ...recentMessages
             ];
         } catch (e) {
@@ -199,14 +224,15 @@ The user will use this summary as context for future turns. DO NOT include meta-
      * Calculates the token breakdown for the current session.
      * Equivalent to `clearConversation_83` in chunk1084.
      */
-    static async getTokenBreakdown(options: any, messages: any[], systemPrompt: string): Promise<TokenBreakdown> {
+    static async getTokenBreakdown(options: any, messages: AgentMessage[], systemPrompt: string): Promise<TokenBreakdown> {
         const cacheKey = JSON.stringify({ messages, systemPrompt, tools: options.tools?.map((t: any) => t.name) });
         if (this.tokenCache.has(cacheKey)) {
             return this.tokenCache.get(cacheKey)!;
         }
 
         // Local estimation (rough fallback to avoid latency)
-        const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
+        // Aligned with chunk1080: Math.ceil(charCount * 1.3333333333333333)
+        const estimateTokens = (text: string) => Math.ceil(text.length * 1.3333333333333333);
 
         const localSystemTokens = estimateTokens(systemPrompt) + (options.tools?.length * 100 || 0);
         const localMessageTokens = messages.reduce((acc, m) => acc + estimateTokens(typeof m.content === 'string' ? m.content : JSON.stringify(m.content)), 0);
@@ -216,11 +242,11 @@ The user will use this summary as context for future turns. DO NOT include meta-
         const client = new Anthropic();
 
         try {
-            // We only call the API if we really need a precise count, otherwise we use the estimate or a background refresh
+            // We only call the API if we really need a precise count or if it's the first time
             const response = await client.messages.countTokens({
                 model: options.model || "claude-3-5-sonnet-20241022",
                 system: systemPrompt,
-                messages: messages.map(m => ({ role: m.role, content: m.content })),
+                messages: messages.map(m => ({ role: m.role || 'user', content: m.content || m.message })),
                 tools: options.tools?.map((t: any) => ({
                     name: t.name,
                     description: t.description,
@@ -228,13 +254,13 @@ The user will use this summary as context for future turns. DO NOT include meta-
                 }))
             });
 
-            const totalTokens = response.data.data.input_tokens || 0;
+            const totalTokens = response.input_tokens || (response as any).data?.input_tokens || 0;
             const maxTokens = 200000;
 
-            const result = {
+            const result: TokenBreakdown = {
                 categories: [
-                    { name: "System & Tools", tokens: response.data.data.system_tokens || 0, color: "promptBorder" },
-                    { name: "Messages", tokens: response.data.data.message_tokens || 0, color: "purple" }
+                    { name: "System & Tools", tokens: (response as any).system_tokens || 0, color: "promptBorder" },
+                    { name: "Messages", tokens: (response as any).message_tokens || 0, color: "purple" }
                 ],
                 totalTokens,
                 maxTokens,

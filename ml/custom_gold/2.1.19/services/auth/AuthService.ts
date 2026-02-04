@@ -42,7 +42,13 @@ function mapPlanName(orgType: string, tier: string): string {
 
     if (tier && tier !== 'default') {
         // Clean up tier name (e.g., 'default_claude_max_20x' -> '20x')
-        const shortTier = tier.replace(`default_${orgType}_`, '').replace(/_/g, ' ');
+        // Removing prefix commonly found in tier names
+        const prefix = `default_${orgType}_`;
+        let shortTier = tier;
+        if (shortTier.startsWith(prefix)) {
+            shortTier = shortTier.substring(prefix.length);
+        }
+        shortTier = shortTier.replace(/_/g, ' ');
         return `${basePlan} Plan (${shortTier})`;
     }
 
@@ -83,14 +89,6 @@ async function fetchProfile(accessToken: string): Promise<{ plan: string, displa
  * Returns the appropriate authentication headers for Anthropic API requests.
  */
 export async function getAuthHeaders(): Promise<Record<string, string>> {
-    // 0. Check for custom Auth Token
-    const customToken = process.env.ANTHROPIC_AUTH_TOKEN;
-    if (customToken) {
-        return {
-            "Authorization": `Bearer ${customToken}`
-        };
-    }
-
     // 1. Try OAuth first if available
     const oauthToken = await OAuthService.getValidToken();
     if (oauthToken) {
@@ -101,7 +99,7 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
         };
     }
 
-    // 2. Fallback to API Key
+    // 2. Fallback to API Key Manager
     const apiKey = await ApiKeyManager.getApiKey();
     if (apiKey) {
         return {
@@ -127,6 +125,7 @@ export async function isAuthenticated(): Promise<boolean> {
 export async function getAuthDetails(): Promise<{ type: 'oauth' | 'apikey' | 'none', plan: string }> {
     const oauthToken = await OAuthService.getValidToken();
     if (oauthToken) {
+        const session = (OAuthService as any).session; // Accessing internal for details if possible
         const profile = await fetchProfile(oauthToken);
         return {
             type: 'oauth',

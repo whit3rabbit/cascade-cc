@@ -113,10 +113,17 @@ export function extractAndNormalizeFileExtensions(fileNames: string, extensionSt
 }
 
 /**
- * Placeholder for process metrics.
+ * Gathers process metrics (memory and CPU) for telemetry.
  */
 export function getProcessMetrics(): any {
-    return undefined;
+    const memory = process.memoryUsage();
+    return {
+        heapTotalMB: Math.round(memory.heapTotal / 1024 / 1024),
+        heapUsedMB: Math.round(memory.heapUsed / 1024 / 1024),
+        rssMB: Math.round(memory.rss / 1024 / 1024),
+        cpuUsage: process.cpuUsage(),
+        uptime: Math.round(process.uptime())
+    };
 }
 
 import { EnvService } from '../../services/config/EnvService.js';

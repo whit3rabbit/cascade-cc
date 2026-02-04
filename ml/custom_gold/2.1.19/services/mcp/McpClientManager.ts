@@ -10,19 +10,7 @@ import { WebSocketClientTransport } from "@modelcontextprotocol/sdk/client/webso
 import { LogManager } from "../logging/LogManager.js";
 import { getSettings } from "../config/SettingsService.js";
 import { EnvService } from "../config/EnvService.js";
-
-// Re-exports for convenience (Legacy/Compatibility)
-export { MCPServerMultiselectDialog } from '../../components/mcp/MCPServerDialog.js';
-export { togglePlugin, enablePlugin, disablePlugin, updatePlugin } from './PluginManager.js';
-
-interface McpServerConfig {
-    type?: "stdio" | "sse" | "ws" | "http" | "sse-ide" | "ws-ide" | "claudeai-proxy";
-    command?: string;
-    args?: string[];
-    env?: Record<string, string>;
-    url?: string;
-    authToken?: string;
-}
+import { McpServerManager, McpServerConfig } from "./McpServerManager.js";
 
 interface ActiveClient {
     client: Client;
@@ -51,29 +39,76 @@ export class McpClientManager {
             await this.disconnect(serverId);
         }
 
-        console.log(`[MCP] Connecting to server: ${serverId} (${config.type || 'stdio'})`);
+        const { expanded: expandedConfig, missingVars } = McpServerManager.expandConfig(config);
+
+        if (missingVars.length > 0) {
+            console.warn(`[MCP] Server ${serverId} missing environment variables: ${missingVars.join(", ")}`);
+        }
+
+        console.log(`[MCP] Connecting to server: ${serverId} (${expandedConfig.type || 'stdio'})`);
 
         try {
             let transport: any;
 
-            if (config.type === "stdio" || !config.type) {
-                if (!config.command) {
+            if (expandedConfig.type === "stdio" || !expandedConfig.type) {
+                if (!expandedConfig.command) {
                     throw new Error(`MCP Server ${serverId} missing 'command' for stdio transport`);
                 }
 
                 transport = new StdioClientTransport({
-                    command: config.command,
-                    args: config.args || [],
-                    env: { ...(process.env as Record<string, string>), ...(config.env || {}) }
+                    command: expandedConfig.command,
+                    args: expandedConfig.args || [],
+                    env: { ...(process.env as Record<string, string>), ...(expandedConfig.env || {}) }
                 });
-            } else if (config.type === "sse") {
-                if (!config.url) throw new Error(`MCP Server ${serverId} missing 'url' for sse transport`);
-                transport = new SSEClientTransport(new URL(config.url));
-            } else if (config.type === "ws") {
-                if (!config.url) throw new Error(`MCP Server ${serverId} missing 'url' for ws transport`);
-                transport = new WebSocketClientTransport(new URL(config.url));
+            } else if (expandedConfig.type === "sse") {
+                if (!expandedConfig.url) throw new Error(`MCP Server ${serverId} missing 'url' for transport`);
+                transport = new SSEClientTransport(new URL(expandedConfig.url));
+            } else if (expandedConfig.type === "ws") {
+                if (!expandedConfig.url) throw new Error(`MCP Server ${serverId} missing 'url' for ws transport`);
+                transport = new WebSocketClientTransport(new URL(expandedConfig.url));
+            } else if (expandedConfig.type === "claudeai-proxy" || expandedConfig.type === "http") {
+                // Handling for claudeai-proxy and http which might need auth
+                let targetUrl = expandedConfig.url;
+
+                if (expandedConfig.type === "claudeai-proxy") {
+                    const { OAuthService } = await import('../auth/OAuthService.js');
+                    const { getSessionId } = await import('../../utils/shared/runtimeAndEnv.js');
+
+                    // Construct URL if missing
+                    if (!targetUrl) {
+                        const proxyUrlBase = EnvService.get('MCP_PROXY_URL') || 'https://api.claude.ai';
+                        const proxyPath = EnvService.get('MCP_PROXY_PATH') || '/api/mcp/proxy/{server_id}/sse';
+                        targetUrl = proxyUrlBase + proxyPath.replace('{server_id}', serverId);
+                    }
+
+                    // Custom transport options with Auth
+                    transport = new SSEClientTransport(new URL(targetUrl), {
+                        eventSourceInit: {
+                            fetch: async (input: any, init: any) => {
+                                const accessToken = await OAuthService.getValidToken();
+                                if (!accessToken) {
+                                    throw new Error("Authentication required for claude.ai proxy. Please run /login.");
+                                }
+
+                                const headers = new Headers(init?.headers);
+                                headers.set('Authorization', `Bearer ${accessToken}`);
+                                headers.set('X-Mcp-Client-Session-Id', getSessionId() || 'unknown');
+                                headers.set('User-Agent', `claude-code/${process.env.npm_package_version || 'unknown'}`);
+
+                                return fetch(input, {
+                                    ...init,
+                                    headers
+                                });
+                            }
+                        }
+                    } as any);
+                } else {
+                    // Standard HTTP/SSE
+                    if (!targetUrl) throw new Error(`MCP Server ${serverId} missing 'url'`);
+                    transport = new SSEClientTransport(new URL(targetUrl));
+                }
             } else {
-                throw new Error(`Unsupported transport type: ${config.type}`);
+                throw new Error(`Unsupported transport type: ${expandedConfig.type}`);
             }
 
             const client = new Client(
@@ -103,7 +138,7 @@ export class McpClientManager {
             this.activeClients.set(serverId, {
                 client,
                 transport,
-                config,
+                config: expandedConfig,
                 capabilities,
                 cleanup: async () => {
                     try {
@@ -117,6 +152,31 @@ export class McpClientManager {
         } catch (error) {
             console.error(`[MCP] Failed to connect to ${serverId}:`, error);
             throw error;
+        }
+    }
+
+    /**
+     * Initializes all configured MCP servers.
+     */
+    async initializeAllServers(): Promise<void> {
+        console.log("[MCP] Initializing all servers...");
+        const allServers = await McpServerManager.getAllMcpServers();
+
+        for (const [name, config] of Object.entries(allServers)) {
+            if (McpServerManager.isMcpServerDenied(name)) {
+                console.log(`[MCP] Server ${name} is denied, skipping...`);
+                continue;
+            }
+            if (!McpServerManager.isMcpServerEnabled(name, config)) {
+                console.log(`[MCP] Server ${name} is disabled, skipping...`);
+                continue;
+            }
+
+            try {
+                await this.connect(name, config);
+            } catch (err) {
+                console.error(`[MCP] Auto-connect failed for ${name}:`, err);
+            }
         }
     }
 
@@ -260,9 +320,6 @@ export class McpClientManager {
     }
 }
 
-/**
- * Global initialization for the MCP client ecosystem.
- */
 /**
  * Global initialization for the MCP client ecosystem.
  */

@@ -69,14 +69,14 @@ export function installKeybindings(terminalName: string): InstallResult {
 
         if (existsSync(keybindingsPath)) {
             content = readFileSync(keybindingsPath, "utf-8");
-            // Basic JSON parse - keeping it simple for now, might need comment stripping
+            // Improved JSON parse - strip comments and trailing commas for VS Code compatibility
             try {
-                keybindings = JSON.parse(content);
+                const stripped = content
+                    .replace(/\/\/.*|\/\*[\s\S]*?\*\//g, "") // Strip comments
+                    .replace(/,(\s*[\]}])/g, "$1"); // Strip trailing commas
+                keybindings = JSON.parse(stripped);
             } catch (e) {
-                // If it fails to parse (e.g. comments), we might want to warn
-                // But specifically for this deobfuscation, we'll try to be robust
-                console.warn("Failed to parse keybindings.json, treating as empty array or trying to append.");
-                // For now, let's assume valid JSON or bail
+                console.warn("Failed to parse keybindings.json, treating as empty array.");
             }
 
             // Backup

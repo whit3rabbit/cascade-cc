@@ -7,16 +7,11 @@ import { join, basename } from 'node:path';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { getBaseConfigDir } from '../../utils/shared/runtimeAndEnv.js';
 import matter from 'gray-matter';
+import { AgentMetadata } from '../../types/AgentTypes.js';
 
-export interface AgentData {
-    name: string;
-    description: string;
-    agentType: string;
-    tools?: string[];
-    systemPrompt: string;
-    color?: string;
-    model?: string;
+export interface AgentData extends AgentMetadata {
     scope?: 'user' | 'project' | 'builtin';
+    systemPrompt: string; // Ensure systemPrompt is present (as per original AgentData)
     [key: string]: any;
 }
 
@@ -108,6 +103,24 @@ export function listAgents(): AgentData[] {
     }
 
     return agents;
+}
+
+/**
+ * Finds a single agent by its agentType (filename without .md).
+ * Checks project scope first, then user scope.
+ */
+export function findAgent(agentType: string): AgentData | null {
+    // 1. Check Project scope
+    const projectFilePath = join(process.cwd(), '.claude', 'agents', `${agentType}.md`);
+    const projectAgent = loadAgent(projectFilePath, 'project');
+    if (projectAgent) return projectAgent;
+
+    // 2. Check User scope
+    const userFilePath = join(getBaseConfigDir(), 'agents', `${agentType}.md`);
+    const userAgent = loadAgent(userFilePath, 'user');
+    if (userAgent) return userAgent;
+
+    return null;
 }
 
 /**

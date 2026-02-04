@@ -173,6 +173,38 @@ export function getConfigDir(): string {
 }
 
 /**
+ * Returns the platform-specific directory for enterprise/policy settings.
+ */
+export function getPolicySettingsDirectory(): string {
+    switch (process.platform) {
+        case 'darwin':
+            return '/Library/Application Support/ClaudeCode';
+        case 'win32':
+            // Check both potential locations on Windows
+            return EnvService.get("PROGRAMFILES")
+                ? join(EnvService.get("PROGRAMFILES"), 'ClaudeCode')
+                : 'C:\\ProgramData\\ClaudeCode';
+        default:
+            return '/etc/claude-code';
+    }
+}
+
+
+/**
+ * Returns the path to the enterprise MCP configuration file.
+ */
+export function getEnterpriseMcpConfigPath(): string {
+    return join(getPolicySettingsDirectory(), 'mcp.json');
+}
+
+/**
+ * Returns the directory for managed rules/instructions.
+ */
+export function getManagedRulesDirectory(): string {
+    return join(getPolicySettingsDirectory(), 'rules');
+}
+
+/**
  * Returns the platform-specific host identifier (e.g., 'darwin-arm64').
  */
 export function getHostPlatform(): string {
@@ -261,3 +293,38 @@ export const propagation = {
     getBaggage: (context: any) => context.baggage,
     setBaggage: (context: any, baggage: any) => ({ ...context, baggage })
 };
+
+/**
+ * Checks if running inside a Bubblewrap sandbox.
+ */
+export function isBubblewrapSandbox(): boolean {
+    return process.platform === "linux" && EnvService.get("CLAUDE_CODE_BUBBLEWRAP") === "1";
+}
+
+/**
+ * Checks if running inside a Docker container.
+ */
+export function isDocker(): boolean {
+    if (existsSync("/.dockerenv")) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Checks if running in a Musl environment (Alpine, etc.).
+ */
+export function isMuslEnvironment(): boolean {
+    if (process.platform !== "linux") {
+        return false;
+    }
+    try {
+        if (existsSync("/lib/libc.musl-x86_64.so.1") || existsSync("/lib/libc.musl-aarch64.so.1")) {
+            return true;
+        }
+        // Fallback: check ldd output if available (simplified check)
+        return false;
+    } catch {
+        return false;
+    }
+}
