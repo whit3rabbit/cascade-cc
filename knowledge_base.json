@@ -349,6 +349,7 @@
         "files": [
           "InMemoryTaskMessageQueue.ts",
           "InMemoryTaskStore.ts",
+          "PersistentTaskStore.ts",
           "TaskManager.ts",
           "TaskTypes.ts"
         ]
@@ -531,8 +532,8 @@
         "calculating",
         "Estimated",
         "Usage",
-        "Tokens",
-        "Cache"
+        "Cache",
+        "Tokens"
       ]
     },
     {
@@ -602,12 +603,12 @@
       "trigger_keywords": [
         "doctorCommandDefinition",
         "Diagnose",
+        "Total",
+        "Metrics",
         "verify",
         "../services/terminal/DoctorService.js",
         "Warnings",
-        "Invoked",
-        "manager",
-        "capped"
+        "Invoked"
       ]
     },
     {
@@ -620,9 +621,9 @@
         "helpCommandDefinition",
         "com.anthropic.claude",
         "local-jsx",
-        "SCANNER",
         "../services/terminal/CommandRegistry.js",
-        "../constants/product.js"
+        "../constants/product.js",
+        "android"
       ]
     },
     {
@@ -708,8 +709,8 @@
         "changes",
         "detected",
         "single",
-        "Unknown",
-        "green"
+        "green",
+        "Unknown"
       ]
     },
     {
@@ -924,14 +925,14 @@
       "suggested_name": "`PromptMenu`",
       "description": "Auto-generated anchor for components/menus/PromptMenu.tsx",
       "trigger_keywords": [
+        "conversation.",
         "PromptMenu",
         "prompts...",
-        "servers.",
-        "TODO",
-        "ink-spinner",
-        "prompts",
-        "Prompts",
-        "dots"
+        "provided.",
+        "TUI.",
+        "implemented",
+        "Arguments",
+        "servers."
       ]
     },
     {
@@ -940,13 +941,13 @@
       "description": "Auto-generated anchor for components/menus/ResourceMenu.tsx",
       "trigger_keywords": [
         "ResourceMenu",
-        "item",
+        "resource...",
         "resources...",
+        "truncated",
         "servers.",
-        "header",
-        "TODO",
-        "view",
-        "ink-spinner"
+        "resource",
+        "Resource",
+        "Binary"
       ]
     },
     {
@@ -954,14 +955,14 @@
       "suggested_name": "`SettingsMenu`",
       "description": "Auto-generated anchor for components/menus/SettingsMenu.tsx",
       "trigger_keywords": [
-        "cddd10df-23a5-4a75-aad6-6af8f7dba417",
         "/.claude/CLAUDE.md",
         "showCodeDiffFooter",
         "showPrStatusFooter",
         "promptSuggestions",
         "autoConnectIde",
         "permissionMode",
-        "vimModeEnabled"
+        "vimModeEnabled",
+        "chromeEnabled"
       ]
     },
     {
@@ -1120,8 +1121,8 @@
       "trigger_keywords": [
         "SandboxPermissionDialogProps",
         "SandboxPermissionDialog",
-        "attempting",
         "domain",
+        "attempting",
         "restricts",
         "access.",
         "./PermissionOption.js",
@@ -1294,11 +1295,11 @@
         "../../hooks/useVimMode.js",
         "TerminalInput",
         "dimColor",
+        "48BB78",
+        "ECC94B",
+        "ffffff",
         "../../hooks/useTerminalInput.js",
-        "TerminalInputProps",
-        "stashed",
-        "recording",
-        "restore"
+        "TerminalInputProps"
       ]
     },
     {
@@ -1373,7 +1374,7 @@
         "claude-cli/",
         "anthropic-ai/claude-code",
         "CLAUDE_CODE_ENTRYPOINT",
-        "../services/config/EnvService.js"
+        "external"
       ]
     },
     {
@@ -1396,14 +1397,14 @@
       "suggested_name": "`PRODUCT_NAME`",
       "description": "Auto-generated anchor for constants/product.ts",
       "trigger_keywords": [
+        "//platform.claude.com/oauth/code/success",
         "//api.anthropic.com/api/oauth/profile",
         "//platform.claude.com/oauth/authorize",
         "//platform.claude.com/v1/oauth/token",
         "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+        "//platform.claude.com/buy_credits",
         "fcoeoabgfenejglbffodgkkbkcdhcgfn",
-        "token-efficient-tools-2024-12-04",
-        "//claude.ai/oauth/authorize",
-        "oauth-2025-04-20"
+        "token-efficient-tools-2024-12-04"
       ]
     },
     {
@@ -1425,10 +1426,10 @@
         "../services/updater/UpdaterService.js",
         "--allow-dangerously-skip-permissions",
         "../services/config/ConfigManager.js",
-        "--dangerously-skip-permissions",
         "../components/terminal/REPL.js",
         "--include-partial-messages",
-        "--disable-slash-commands"
+        "--disable-slash-commands",
+        "--no-session-persistence"
       ]
     },
     {
@@ -1753,14 +1754,14 @@
       "suggested_name": "`createCodeVerifier`",
       "description": "Auto-generated anchor for services/auth/OAuthService.ts",
       "trigger_keywords": [
+        "../../utils/process/ProcessLock.js",
+        "../config/RemoteSettingsService.js",
         "../../utils/http/RetryStrategy.js",
-        "//claude.ai/login_successful",
+        "../statsig/StatsigManager.js",
         "code_challenge_method",
+        "./MsalAuthService.js",
         "authorization_code",
-        "createCodeVerifier",
-        "code_challenge",
-        "refresh_token",
-        "response_type"
+        "createCodeVerifier"
       ]
     },
     {
@@ -1868,13 +1869,13 @@
       "description": "Auto-generated anchor for services/config/EnvService.ts",
       "trigger_keywords": [
         "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
-        "CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING",
         "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
         "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",
         "CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL",
         "DISABLE_NON_ESSENTIAL_MODEL_CALLS",
         "CLAUDE_CODE_PROXY_RESOLVES_HOSTS",
-        "SLASH_COMMAND_TOOL_CHAR_BUDGET"
+        "SLASH_COMMAND_TOOL_CHAR_BUDGET",
+        "CLAUDE_CODE_HIDE_ACCOUNT_INFO"
       ]
     },
     {
@@ -1946,10 +1947,10 @@
         "../tools/ToolExecutionManager.js",
         "../../utils/http/SseParser.js",
         "updatedMCPToolOutput",
+        "content_block_delta",
         "content_block_start",
         "ConversationOptions",
-        "ConversationService",
-        "./ModelResolver.js"
+        "ConversationService"
       ]
     },
     {
@@ -2096,8 +2097,8 @@
         "LspState",
         "exited",
         "workspace",
-        "stopped",
-        "initialized"
+        "inherit",
+        "stopped"
       ]
     },
     {
@@ -2139,25 +2140,25 @@
         "ProjectDetection",
         "requirements.txt",
         "pyproject.toml",
-        "rust-analyzer",
         "build.gradle",
         "java-gradle",
-        "ProjectType"
+        "ProjectType",
+        "Cargo.toml"
       ]
     },
     {
       "suggested_path": "`src/services/marketplace/MarketplaceLoader.ts`",
-      "suggested_name": "`MarketplaceLoader`",
+      "suggested_name": "`LoadedMarketplace`",
       "description": "Auto-generated anchor for services/marketplace/MarketplaceLoader.ts",
       "trigger_keywords": [
-        ".claude/marketplace.json",
+        "../mcp/PluginManager.js",
+        "LoadedMarketplace",
         "plugins.json",
         "fetchPluginDirectory",
         "auto-installing...",
         "MarketplaceLoader",
         "marketplace.json",
-        "directory...",
-        "plugin."
+        "directory..."
       ]
     },
     {
@@ -2170,9 +2171,9 @@
         "configured.",
         "refreshed",
         "plugins.",
-        "loaded",
         "MarketplaceService",
-        "refreshing"
+        "refreshing",
+        "Refreshing"
       ]
     },
     {
@@ -2195,14 +2196,14 @@
       "suggested_name": "`MarketplaceService`",
       "description": "Auto-generated anchor for services/mcp/MarketplaceService.ts",
       "trigger_keywords": [
-        "plugins...",
+        "git_unavailable",
+        "auto-installed",
+        "previously",
         "disabled.",
         "MarketplaceService",
+        "Attempting",
         "anthropics/claude-plugins-official",
-        "claude-plugins-official",
-        "./PluginManager.js",
-        "auto-install",
-        "Installing"
+        "claude-plugins-official"
       ]
     },
     {
@@ -2320,8 +2321,8 @@
         "Uninstalling",
         "ConfigScope",
         "--no-audit",
-        "--no-fund",
-        "index.js"
+        "Dependency",
+        "--no-fund"
       ]
     },
     {
@@ -2461,12 +2462,12 @@
       "trigger_keywords": [
         "./StatsigClientBase.js",
         "initialization...",
+        "tengu_lsp_enabled",
+        "tool_use_examples",
+        "tengu_tool_pear",
         "StatsigManager",
         "StatsigClient",
-        "/initialize",
-        "production",
-        "Periodic",
-        "gate"
+        "/initialize"
       ]
     },
     {
@@ -2477,8 +2478,8 @@
         "StatsigMetadataProvider",
         "claude-code-node",
         "StatsigMetadata",
-        "../../constants/build.js",
         "en-US",
+        "../../constants/build.js",
         "crypto",
         "node"
       ]
@@ -2521,18 +2522,33 @@
       ]
     },
     {
+      "suggested_path": "`src/services/tasks/PersistentTaskStore.ts`",
+      "suggested_name": "`PersistentTaskStore`",
+      "description": "Auto-generated anchor for services/tasks/PersistentTaskStore.ts",
+      "trigger_keywords": [
+        "PersistentTaskStore",
+        "tasks.json",
+        "./TaskTypes.js",
+        "killed",
+        "save",
+        "cancelled",
+        "completed",
+        "tasks"
+      ]
+    },
+    {
       "suggested_path": "`src/services/tasks/TaskManager.ts`",
       "suggested_name": "`TaskManager`",
       "description": "Auto-generated anchor for services/tasks/TaskManager.ts",
       "trigger_keywords": [
         "./InMemoryTaskMessageQueue.js",
-        "./InMemoryTaskStore.js",
+        "./PersistentTaskStore.js",
         "execution.",
         "TaskManager",
         "Client",
         "./TaskTypes.js",
-        "killed",
-        "notification"
+        "notification",
+        "killed"
       ]
     },
     {
@@ -2547,7 +2563,7 @@
         "remote_agent",
         "local_agent",
         "local_bash",
-        "killed"
+        "notification"
       ]
     },
     {
@@ -2560,8 +2576,8 @@
         "../terminal/NotificationService.js",
         "CLAUDE_CODE_AGENT_NAME",
         "CLAUDE_CODE_TEAM_NAME",
-        "../../utils/shared/runtimeAndEnv.js",
         "message",
+        "../../utils/shared/runtimeAndEnv.js",
         "info"
       ]
     },
@@ -2584,8 +2600,8 @@
         "TeamManager",
         "TeamMember",
         "teams",
-        ".claude",
         ".json",
+        ".claude",
         "tasks",
         "utf-8"
       ]
@@ -2763,8 +2779,8 @@
         "limit",
         "size",
         "exceeded",
-        "skipping",
-        "Baggage"
+        "Baggage",
+        "Tracing"
       ]
     },
     {
@@ -2861,11 +2877,11 @@
       "trigger_keywords": [
         "//cli.github.com/",
         "ANTHROPIC_API_KEY",
+        "./CostService.js",
         "DiagnosticInfo",
         "DoctorService",
         "/pr-comments",
         "2.1.19-deob",
-        "implemented",
         "npm-global"
       ]
     },
@@ -2910,8 +2926,8 @@
         "CLAUDE_CODE_SKIP_PROMPT_HISTORY",
         "history",
         "write",
-        "../../utils/shared/runtimeAndEnv.js",
-        "read"
+        "read",
+        "../../utils/shared/runtimeAndEnv.js"
       ]
     },
     {
@@ -3044,8 +3060,8 @@
         "connecting",
         "closed",
         "connected",
-        "close",
-        "open"
+        "open",
+        "close"
       ]
     },
     {
@@ -3240,7 +3256,7 @@
         "MCPSearch",
         "across",
         "matching",
-        "Resource"
+        "servers."
       ]
     },
     {
@@ -3338,14 +3354,14 @@
       "suggested_name": "`TeammateToolInput`",
       "description": "Auto-generated anchor for tools/TeammateTool.ts",
       "trigger_keywords": [
+        "CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS",
         "../services/terminal/SwarmConstants.js",
         "../services/terminal/TmuxBackend.js",
         "../services/teams/TeamIdentity.js",
         "../services/teams/TeamMessages.js",
         "TeammateToolInput",
         "approveShutdown",
-        "requestShutdown",
-        "target_agent_id"
+        "requestShutdown"
       ]
     },
     {
@@ -3383,14 +3399,14 @@
       "suggested_name": "`WebFetchInput`",
       "description": "Auto-generated anchor for tools/WebFetchTool.ts",
       "trigger_keywords": [
+        "CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS",
         "ClaudeCode/2.1",
         "WebFetchInput",
         "WebFetchTool",
         "Mozilla/5.0",
         "compatible",
         "markdown.",
-        "converts",
-        "turndown"
+        "converts"
       ]
     },
     {
@@ -3920,12 +3936,12 @@
       "trigger_keywords": [
         "ProcessLock",
         "LockData",
-        "acquire",
         "another",
         "held",
-        "lock",
         "acquisition",
-        "release"
+        "acquire",
+        "release",
+        ".lock"
       ]
     },
     {
@@ -4007,7 +4023,7 @@
         "__DOUBLE_QUOTE_",
         "__SINGLE_QUOTE_",
         "__NEW_LINE_",
-        "comment"
+        "__HEREDOC_"
       ]
     },
     {
@@ -4062,12 +4078,12 @@
       "trigger_keywords": [
         "CLAUDE_AGENT_SDK_VERSION",
         "SWE_BENCH_INSTANCE_ID",
-        "./runtimeAndEnv.js",
         "SWE_BENCH_TASK_ID",
         "SWE_BENCH_RUN_ID",
         "processMetrics",
         "envContext",
-        "AzureArc"
+        "AzureArc",
+        "mcp_tool"
       ]
     },
     {
@@ -4102,10 +4118,17 @@
     },
     {
       "suggested_path": "`src/utils/shared/fileHistory.ts`",
-      "suggested_name": "`fileHistory`",
+      "suggested_name": "`BackupInfo`",
       "description": "Auto-generated anchor for utils/shared/fileHistory.ts",
       "trigger_keywords": [
-        "fileHistory"
+        "file-history",
+        "modification",
+        "BackupInfo",
+        "attach",
+        "CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING",
+        "./runtimeAndEnv.js",
+        "fileHistory",
+        "FileHistory"
       ]
     },
     {
@@ -4251,8 +4274,8 @@
         "open",
         "start",
         "darwin",
-        "win32",
         "child_process",
+        "win32",
         "node"
       ]
     },
@@ -4452,10 +4475,10 @@
       "suggested_name": "`Suggestion`",
       "description": "Auto-generated anchor for utils/terminal/Suggestions.ts",
       "trigger_keywords": [
-        "arguments",
         "aliases",
         "../../vendor/Fuse.js",
         "Suggestions",
+        "arguments",
         "Suggestion",
         "description",
         "name",
@@ -4543,7 +4566,7 @@
         "../shared/bashUtils.js",
         "tmux",
         "create",
-        "session"
+        "Unknown"
       ]
     },
     {
@@ -4773,15 +4796,15 @@
     },
     {
       "suggested_name": "`helpCommandDefinition`",
-      "logic_anchor": "(Please open the link above on your mobile device)"
-    },
-    {
-      "suggested_name": "`helpCommandDefinition`",
       "logic_anchor": "../services/terminal/CommandRegistry.js"
     },
     {
       "suggested_name": "`helpCommandDefinition`",
       "logic_anchor": "Tab to switch platform • Esc to close"
+    },
+    {
+      "suggested_name": "`helpCommandDefinition`",
+      "logic_anchor": "Show available commands and help"
     },
     {
       "suggested_name": "`CommandContext`",
@@ -5065,7 +5088,11 @@
     },
     {
       "suggested_name": "`PromptMenu`",
-      "logic_anchor": "Press Enter to use (TODO) · Esc to go back"
+      "logic_anchor": "To use: Not yet implemented in TUI. Use prompt name in conversation."
+    },
+    {
+      "suggested_name": "`PromptMenu`",
+      "logic_anchor": "Press Enter to view details · Esc to go back"
     },
     {
       "suggested_name": "`PromptMenu`",
@@ -5077,11 +5104,7 @@
     },
     {
       "suggested_name": "`PromptMenu`",
-      "logic_anchor": "Failed to load prompts:"
-    },
-    {
-      "suggested_name": "`PromptMenu`",
-      "logic_anchor": "Press Esc to go back"
+      "logic_anchor": "No description provided."
     },
     {
       "suggested_name": "`ResourceMenu`",
@@ -5089,11 +5112,11 @@
     },
     {
       "suggested_name": "`ResourceMenu`",
-      "logic_anchor": "Press Enter to view (TODO) · Esc to go back"
+      "logic_anchor": "../../services/mcp/McpClientManager.js"
     },
     {
       "suggested_name": "`ResourceMenu`",
-      "logic_anchor": "../../services/mcp/McpClientManager.js"
+      "logic_anchor": "Press Enter to view · Esc to go back"
     },
     {
       "suggested_name": "`ResourceMenu`",
@@ -5101,7 +5124,7 @@
     },
     {
       "suggested_name": "`ResourceMenu`",
-      "logic_anchor": "Loading resources..."
+      "logic_anchor": "Failed to read resource:"
     },
     {
       "suggested_name": "`SettingsMenu`",
@@ -5629,19 +5652,19 @@
     },
     {
       "suggested_name": "`PRODUCT_NAME`",
+      "logic_anchor": "https://platform.claude.com/buy_credits?returnUrl=/oauth/code/success%3Fapp%3Dclaude-code"
+    },
+    {
+      "suggested_name": "`PRODUCT_NAME`",
+      "logic_anchor": "https://platform.claude.com/oauth/code/success?app=claude-code"
+    },
+    {
+      "suggested_name": "`PRODUCT_NAME`",
       "logic_anchor": "You are a Claude agent, built on Anthropic's Claude Agent SDK."
     },
     {
       "suggested_name": "`PRODUCT_NAME`",
       "logic_anchor": "https://api.anthropic.com/api/oauth/claude_cli/create_api_key"
-    },
-    {
-      "suggested_name": "`PRODUCT_NAME`",
-      "logic_anchor": "You are Claude Code, Anthropic's official CLI for Claude."
-    },
-    {
-      "suggested_name": "`PRODUCT_NAME`",
-      "logic_anchor": "https://api.anthropic.com/api/oauth/claude_cli/roles"
     },
     {
       "suggested_name": "`THEME`",
@@ -5901,23 +5924,23 @@
     },
     {
       "suggested_name": "`createCodeVerifier`",
-      "logic_anchor": "https://claude.ai/login_successful"
+      "logic_anchor": "Failed to acquire lock for token refresh after multiple attempts."
+    },
+    {
+      "suggested_name": "`createCodeVerifier`",
+      "logic_anchor": "../../utils/shared/runtimeAndEnv.js"
+    },
+    {
+      "suggested_name": "`createCodeVerifier`",
+      "logic_anchor": "../../utils/process/ProcessLock.js"
+    },
+    {
+      "suggested_name": "`createCodeVerifier`",
+      "logic_anchor": "../config/RemoteSettingsService.js"
     },
     {
       "suggested_name": "`createCodeVerifier`",
       "logic_anchor": "../../utils/http/RetryStrategy.js"
-    },
-    {
-      "suggested_name": "`createCodeVerifier`",
-      "logic_anchor": "../../utils/shared/product.js"
-    },
-    {
-      "suggested_name": "`createCodeVerifier`",
-      "logic_anchor": "../../constants/product.js"
-    },
-    {
-      "suggested_name": "`createCodeVerifier`",
-      "logic_anchor": "Failed to fetch profile:"
     },
     {
       "suggested_name": "`AccessToken`",
@@ -6357,6 +6380,10 @@
     },
     {
       "suggested_name": "`LspServerConfig`",
+      "logic_anchor": "[LspServerManager] Shutting down idle server:"
+    },
+    {
+      "suggested_name": "`LspServerConfig`",
       "logic_anchor": "[LspServerManager] Initialization failed:"
     },
     {
@@ -6366,10 +6393,6 @@
     {
       "suggested_name": "`LspServerConfig`",
       "logic_anchor": "../mcp/McpServerManager.js"
-    },
-    {
-      "suggested_name": "`LspServerConfig`",
-      "logic_anchor": "typescript-language-server"
     },
     {
       "suggested_name": "`ProjectType`",
@@ -6392,24 +6415,24 @@
       "logic_anchor": "Java Project (Maven)"
     },
     {
-      "suggested_name": "`MarketplaceLoader`",
+      "suggested_name": "`LoadedMarketplace`",
       "logic_anchor": "[MarketplaceLoader] Official marketplace not found, auto-installing..."
     },
     {
-      "suggested_name": "`MarketplaceLoader`",
+      "suggested_name": "`LoadedMarketplace`",
+      "logic_anchor": "[MarketplaceLoader] Background update of official marketplace failed:"
+    },
+    {
+      "suggested_name": "`LoadedMarketplace`",
       "logic_anchor": "[MarketplaceLoader] Failed to locate installed marketplace plugin."
     },
     {
-      "suggested_name": "`MarketplaceLoader`",
+      "suggested_name": "`LoadedMarketplace`",
       "logic_anchor": "[MarketplaceLoader] Failed to auto-install official marketplace:"
     },
     {
-      "suggested_name": "`MarketplaceLoader`",
+      "suggested_name": "`LoadedMarketplace`",
       "logic_anchor": "[MarketplaceLoader] Failed to parse marketplace data:"
-    },
-    {
-      "suggested_name": "`MarketplaceLoader`",
-      "logic_anchor": "[MarketplaceLoader] Error in fetchPluginDirectory:"
     },
     {
       "suggested_name": "`MarketplaceServiceType`",
@@ -6453,23 +6476,23 @@
     },
     {
       "suggested_name": "`MarketplaceService`",
+      "logic_anchor": "[Marketplace] Skipping official marketplace auto-install: Git was previously unavailable."
+    },
+    {
+      "suggested_name": "`MarketplaceService`",
+      "logic_anchor": "[Marketplace] Successfully auto-installed official marketplace"
+    },
+    {
+      "suggested_name": "`MarketplaceService`",
+      "logic_anchor": "[Marketplace] Attempting to auto-install official marketplace"
+    },
+    {
+      "suggested_name": "`MarketplaceService`",
+      "logic_anchor": "[Marketplace] Failed to auto-install official marketplace:"
+    },
+    {
+      "suggested_name": "`MarketplaceService`",
       "logic_anchor": "[Marketplace] Official marketplace auto-install disabled."
-    },
-    {
-      "suggested_name": "`MarketplaceService`",
-      "logic_anchor": "[Marketplace] Failed to auto-install official plugins:"
-    },
-    {
-      "suggested_name": "`MarketplaceService`",
-      "logic_anchor": "[Marketplace] Installing official plugins..."
-    },
-    {
-      "suggested_name": "`MarketplaceService`",
-      "logic_anchor": "anthropics/claude-plugins-official"
-    },
-    {
-      "suggested_name": "`MarketplaceService`",
-      "logic_anchor": "plugin:claude-plugins-official"
     },
     {
       "suggested_name": "`expandEnvVars`",
@@ -6597,6 +6620,14 @@
     },
     {
       "suggested_name": "`ConfigScope`",
+      "logic_anchor": "[Plugins] Dependency installation check failed:"
+    },
+    {
+      "suggested_name": "`ConfigScope`",
+      "logic_anchor": "[Plugins] Failed to install dependencies for"
+    },
+    {
+      "suggested_name": "`ConfigScope`",
       "logic_anchor": "npm install --no-audit --no-fund --omit=dev"
     },
     {
@@ -6606,14 +6637,6 @@
     {
       "suggested_name": "`ConfigScope`",
       "logic_anchor": "[Plugins] Installing dependencies for"
-    },
-    {
-      "suggested_name": "`ConfigScope`",
-      "logic_anchor": "../../utils/shared/runtimeAndEnv.js"
-    },
-    {
-      "suggested_name": "`ConfigScope`",
-      "logic_anchor": "[Plugins] Auto-connect failed for"
     },
     {
       "suggested_name": "`ToolDetails`",
@@ -6769,15 +6792,15 @@
     },
     {
       "suggested_name": "`StatsigClient`",
+      "logic_anchor": "Statsig state cleared on logout."
+    },
+    {
+      "suggested_name": "`StatsigClient`",
       "logic_anchor": "Statsig updated successfully."
     },
     {
       "suggested_name": "`StatsigClient`",
       "logic_anchor": "Periodic refresh failed"
-    },
-    {
-      "suggested_name": "`StatsigClient`",
-      "logic_anchor": "./StatsigClientBase.js"
     },
     {
       "suggested_name": "`StatsigMetadata`",
@@ -6828,6 +6851,26 @@
       "logic_anchor": "cancelled"
     },
     {
+      "suggested_name": "`PersistentTaskStore`",
+      "logic_anchor": "../../utils/shared/runtimeAndEnv.js"
+    },
+    {
+      "suggested_name": "`PersistentTaskStore`",
+      "logic_anchor": "Failed to load tasks:"
+    },
+    {
+      "suggested_name": "`PersistentTaskStore`",
+      "logic_anchor": "Failed to save tasks:"
+    },
+    {
+      "suggested_name": "`PersistentTaskStore`",
+      "logic_anchor": "./TaskTypes.js"
+    },
+    {
+      "suggested_name": "`PersistentTaskStore`",
+      "logic_anchor": "tasks.json"
+    },
+    {
       "suggested_name": "`TaskManager`",
       "logic_anchor": "Cannot cancel task in terminal status:"
     },
@@ -6841,7 +6884,7 @@
     },
     {
       "suggested_name": "`TaskManager`",
-      "logic_anchor": "./InMemoryTaskStore.js"
+      "logic_anchor": "./PersistentTaskStore.js"
     },
     {
       "suggested_name": "`TaskManager`",
@@ -7509,7 +7552,7 @@
     },
     {
       "suggested_name": "`UpdateInfo`",
-      "logic_anchor": "[Updater] Signature verification failed:"
+      "logic_anchor": "[Updater] Integrity verification failed:"
     },
     {
       "suggested_name": "`UpdateInfo`",
@@ -7921,7 +7964,7 @@
     },
     {
       "suggested_name": "`WebFetchInput`",
-      "logic_anchor": "../services/sandbox/SandboxSettings.js"
+      "logic_anchor": "CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS"
     },
     {
       "suggested_name": "`WebSearchInput`",
@@ -8622,6 +8665,26 @@
     {
       "suggested_name": "`RequestAbortedError`",
       "logic_anchor": "Request aborted"
+    },
+    {
+      "suggested_name": "`BackupInfo`",
+      "logic_anchor": "[FileHistory] No active snapshot to attach modification to."
+    },
+    {
+      "suggested_name": "`BackupInfo`",
+      "logic_anchor": "[FileHistory] Failed to track modification for"
+    },
+    {
+      "suggested_name": "`BackupInfo`",
+      "logic_anchor": "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"
+    },
+    {
+      "suggested_name": "`BackupInfo`",
+      "logic_anchor": "CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING"
+    },
+    {
+      "suggested_name": "`BackupInfo`",
+      "logic_anchor": "[FileHistory] Backup file not found:"
     },
     {
       "suggested_name": "`determineFileType`",
@@ -9636,6 +9699,10 @@
     {
       "role": "AUTO_ERROR",
       "content": "Authentication required for claude.ai proxy. Please run /login."
+    },
+    {
+      "role": "AUTO_ERROR",
+      "content": "Failed to acquire lock for token refresh after multiple attempts."
     }
   ],
   "structural_anchors": [

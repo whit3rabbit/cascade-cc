@@ -1,7 +1,7 @@
 # structrecc
 
 Purpose: Proposed filesystem map for LLM-guided deobfuscation/refinement.
-Generated: 2026-02-04T02:31:39.363Z
+Generated: 2026-02-04T23:32:00.097Z
 
 src/
   AgentGeneratorTool.ts
@@ -239,6 +239,7 @@ src/
   tasks/
     InMemoryTaskMessageQueue.ts
     InMemoryTaskStore.ts
+    PersistentTaskStore.ts
     TaskManager.ts
     TaskTypes.ts
   teams/
