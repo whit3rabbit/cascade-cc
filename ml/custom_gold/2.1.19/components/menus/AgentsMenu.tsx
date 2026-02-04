@@ -10,10 +10,11 @@ import { AgentWizard } from '../wizard/AgentWizard.js';
 import { saveAgent, listAgents, AgentData } from '../../services/agents/AgentPersistence.js';
 
 interface AgentsMenuProps {
+    onSelect: (agent: string) => void;
     onExit: () => void;
 }
 
-export function AgentsMenu({ onExit }: AgentsMenuProps) {
+export function AgentsMenu({ onSelect, onExit }: AgentsMenuProps) {
     const [view, setView] = useState<'list' | 'create'>('list');
     const [userAgents, setUserAgents] = useState<any[]>([]);
 
@@ -43,8 +44,7 @@ export function AgentsMenu({ onExit }: AgentsMenuProps) {
         if (item.value === 'create_new') {
             setView('create');
         } else {
-            // In a real app, this would select the agent for the session
-            // For now we just exit, but you could add a callback prop to set the agent
+            onSelect(item.agentType || item.value);
             onExit();
         }
     };

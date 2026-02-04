@@ -68,6 +68,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
     const [vimModeEnabled, setVimModeEnabled] = useState(false);
     const [bugReportInitialDescription, setBugReportInitialDescription] = useState('');
     const [showAllInTranscript, setShowAllInTranscript] = useState(false);
+    const [selectedAgent, setSelectedAgent] = useState<string | undefined>(agent);
 
     // Permission & Modal States
     const [toolPermissions, setToolPermissions] = useState<any[]>([]);
@@ -136,7 +137,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                 cwd: process.cwd(),
                 verbose: appState.verbose,
                 model,
-                agent,
+                agent: selectedAgent || agent,
                 onPermissionRequest: handlePermissionRequest
             });
 
@@ -197,7 +198,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                 onEnterTranscript={() => setScreen('transcript')}
                 onExitTranscript={() => setScreen('prompt')}
                 todos={[]}
-                agentName={agent}
+                agentName={selectedAgent || agent}
             />
 
             <Box flexGrow={1} flexDirection="column" paddingX={2}>
@@ -218,14 +219,23 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                         {activeScreen === 'marketplace' && <MarketplaceMenu onExit={() => setCurrentMenu(null)} />}
                         {activeScreen === 'resources' && <ResourceMenu onExit={() => setCurrentMenu(null)} />}
                         {activeScreen === 'prompts' && <PromptMenu onExit={() => setCurrentMenu(null)} />}
-                        {activeScreen === 'agents' && <AgentsMenu onExit={() => setCurrentMenu(null)} />}
+                        {activeScreen === 'agents' && <AgentsMenu onSelect={setSelectedAgent} onExit={() => setCurrentMenu(null)} />}
                         {activeScreen === 'bug' && <BugReportCommand messages={messages} initialDescription={bugReportInitialDescription} onDone={() => setCurrentMenu(null)} />}
                         {activeScreen === 'doctor' && <DoctorCommand onDone={() => setCurrentMenu(null)} />}
                         {activeScreen === 'compact' && <CompactCommand messages={messages} setMessages={setMessages} setIsTyping={setIsTyping} onDone={() => setCurrentMenu(null)} />}
                         {activeScreen === 'memory' && <MemoryCommand cwd={process.cwd()} onDone={() => setCurrentMenu(null)} />}
                         {activeScreen === 'cost-menu' && <CostCommand onDone={() => setCurrentMenu(null)} />}
                         {activeScreen === 'model' && <ModelPicker initialModel={model || null} onSelect={() => setCurrentMenu(null)} onCancel={() => setCurrentMenu(null)} isStandalone={true} />}
-                        {activeScreen === 'search' && <UnifiedSearchMenu history={history} commands={[]} onSelect={(val) => { setCurrentMenu(null); handleSubmit(val); }} onExit={() => setCurrentMenu(null)} />}
+                        {activeScreen === 'search' && <UnifiedSearchMenu
+                            history={history}
+                            commands={commandRegistry.getAllCommands().map(c => ({
+                                label: c.name,
+                                value: c.name,
+                                description: c.description
+                            }))}
+                            onSelect={(val) => { setCurrentMenu(null); handleSubmit(val); }}
+                            onExit={() => setCurrentMenu(null)}
+                        />}
                     </Box>
                 )}
             </Box>
@@ -238,7 +248,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                     onExit={() => exit()}
                     history={history}
                     planMode={false}
-                    agentName={agent}
+                    agentName={selectedAgent || agent}
                 />
             </REPLInput>
 

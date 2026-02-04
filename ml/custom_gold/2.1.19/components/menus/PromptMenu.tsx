@@ -13,6 +13,7 @@ export function PromptMenu({ onExit }: PromptMenuProps) {
     const [prompts, setPrompts] = useState<any[]>([]);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [selectedPrompt, setSelectedPrompt] = useState<any | null>(null);
 
     useEffect(() => {
         loadPrompts();
@@ -32,11 +33,16 @@ export function PromptMenu({ onExit }: PromptMenuProps) {
 
     useInput((input, key) => {
         if (key.escape) {
+            if (selectedPrompt) {
+                setSelectedPrompt(null);
+                return;
+            }
             onExit();
             return;
         }
 
         if (loading) return;
+        if (selectedPrompt) return;
 
         if (key.upArrow) {
             setSelectedIndex(prev => Math.max(0, prev - 1));
@@ -46,7 +52,10 @@ export function PromptMenu({ onExit }: PromptMenuProps) {
         }
 
         if (key.return) {
-            // Placeholder for execution or view
+            const prompt = prompts[selectedIndex];
+            if (prompt) {
+                setSelectedPrompt(prompt);
+            }
         }
     });
 
@@ -67,6 +76,33 @@ export function PromptMenu({ onExit }: PromptMenuProps) {
                 <Text dimColor>Press Esc to go back</Text>
             </Box>
         );
+    }
+
+    if (selectedPrompt) {
+        return (
+            <Box flexDirection="column" borderStyle="round" borderColor="cyan" padding={1} width={80}>
+                <Text bold>Prompt: {selectedPrompt.name}</Text>
+                <Text dimColor>Server: {selectedPrompt.serverId}</Text>
+                <Box marginY={1}>
+                    <Text>{selectedPrompt.description || 'No description provided.'}</Text>
+                </Box>
+                {selectedPrompt.arguments && selectedPrompt.arguments.length > 0 && (
+                    <Box flexDirection="column" marginTop={1}>
+                        <Text underline>Arguments:</Text>
+                        {selectedPrompt.arguments.map((arg: any) => (
+                            <Box key={arg.name} marginLeft={2}>
+                                <Text bold>{arg.name}</Text>
+                                <Text>: {arg.description || '(no description)'} {arg.required ? '(required)' : ''}</Text>
+                            </Box>
+                        ))}
+                    </Box>
+                )}
+                <Box marginTop={1}>
+                    <Text dimColor>To use: Not yet implemented in TUI. Use prompt name in conversation.</Text>
+                </Box>
+                <Text dimColor>Press Esc to back</Text>
+            </Box>
+        )
     }
 
     if (prompts.length === 0) {
@@ -101,7 +137,7 @@ export function PromptMenu({ onExit }: PromptMenuProps) {
                 })}
             </Box>
             <Box marginTop={1}>
-                <Text dimColor>Press Enter to use (TODO) · Esc to go back</Text>
+                <Text dimColor>Press Enter to view details · Esc to go back</Text>
             </Box>
         </Box>
     );

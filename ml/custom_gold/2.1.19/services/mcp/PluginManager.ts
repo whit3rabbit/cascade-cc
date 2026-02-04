@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { getSettings, updateSettings } from '../config/SettingsService.js';
 import { gitClone, gitPull } from '../../utils/shared/git.js';
 import { getBaseConfigDir } from '../../utils/shared/runtimeAndEnv.js';
+import semver from 'semver';
 import { McpServerConfig } from './McpServerManager.js';
 
 /**
@@ -108,6 +109,15 @@ export class PluginManager {
         }
 
         try {
+            // Read current version
+            const packageJsonPath = path.join(installPath, 'package.json');
+            let oldVersion = '0.0.0';
+            if (fs.existsSync(packageJsonPath)) {
+                try {
+                    oldVersion = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).version || '0.0.0';
+                } catch { }
+            }
+
             // Perform pull and capture output
             const { execSync } = await import('child_process');
             const pullOutput = execSync('git pull', {
@@ -119,24 +129,58 @@ export class PluginManager {
             const alreadyUpToDate = pullOutput.includes('Already up to date');
             console.log(`[Plugins] Git pull output: ${pullOutput.trim()}`);
 
-            // Re-install dependencies after pull
-            const packageJsonPath = path.join(installPath, 'package.json');
+            let newVersion = oldVersion;
             if (fs.existsSync(packageJsonPath)) {
-                const { execSync } = await import('child_process');
-                execSync('npm install --no-audit --no-fund --omit=dev', {
-                    cwd: installPath,
-                    stdio: 'inherit'
-                });
+                try {
+                    newVersion = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).version || '0.0.0';
+                } catch { }
             }
 
-            // Verify if restart is needed? For now we just pull.
+            const versionChanged = semver.gt(newVersion, oldVersion);
+
+            // Re-install dependencies if version changed or requested
+            if (versionChanged || !alreadyUpToDate) {
+                if (fs.existsSync(packageJsonPath)) {
+                    console.log(`[Plugins] Installing dependencies for ${pluginId}...`);
+                    try {
+                        const { execSync } = await import('child_process');
+                        // Check if npm is available
+                        let npmAvailable = false;
+                        try {
+                            execSync('npm --version', { stdio: 'ignore' });
+                            npmAvailable = true;
+                        } catch (npmCheckErr) {
+                            console.error(`[Plugins] npm is not available: ${(npmCheckErr as Error).message}`);
+                        }
+
+                        if (npmAvailable) {
+                            try {
+                                // Use stdio: 'pipe' to capture output for logging on failure
+                                execSync('npm install --no-audit --no-fund --omit=dev', {
+                                    cwd: installPath,
+                                    encoding: 'utf8',
+                                    stdio: ['ignore', 'pipe', 'pipe']
+                                });
+                            } catch (installErr: any) {
+                                const stderr = installErr.stderr?.toString() || '';
+                                const message = `[Plugins] npm install failed for ${pluginId}: ${installErr.message}\n${stderr}`;
+                                console.error(message);
+                                // We don't throw here to allow partial success, but we log it
+                            }
+                        }
+                    } catch (err) {
+                        console.error(`[Plugins] Dependency installation check failed: ${(err as Error).message}`);
+                    }
+                }
+            }
+
             return {
                 success: true,
-                message: alreadyUpToDate ? `Plugin ${pluginId} is already up to date` : `Updated plugin ${pluginId} to latest version`,
+                message: alreadyUpToDate ? `Plugin ${pluginId} is already up to date` : `Updated plugin ${pluginId} to ${newVersion}`,
                 alreadyUpToDate,
-                // In a real implementation we would check git status/log for versions
-                oldVersion: "unknown",
-                newVersion: "latest"
+                oldVersion,
+                newVersion,
+                versionChanged
             };
         } catch (e) {
             return { success: false, message: `Failed to update plugin: ${(e as Error).message}` };
@@ -179,15 +223,33 @@ export class PluginManager {
             if (fs.existsSync(packageJsonPath)) {
                 try {
                     console.log(`[Plugins] Installing dependencies for ${plugin.name || pluginId}...`);
-                    // Use --no-audit --no-fund --omit=dev for a cleaner, production-like install
                     const { execSync } = await import('child_process');
-                    execSync('npm install --no-audit --no-fund --omit=dev', {
-                        cwd: installPath,
-                        stdio: 'inherit' // Show output to user
-                    });
+
+                    // Check if npm is available
+                    let npmAvailable = false;
+                    try {
+                        execSync('npm --version', { stdio: 'ignore' });
+                        npmAvailable = true;
+                    } catch (npmCheckErr) {
+                        console.error(`[Plugins] npm is not available: ${(npmCheckErr as Error).message}`);
+                    }
+
+                    if (npmAvailable) {
+                        try {
+                            execSync('npm install --no-audit --no-fund --omit=dev', {
+                                cwd: installPath,
+                                encoding: 'utf8',
+                                stdio: ['ignore', 'pipe', 'pipe']
+                            });
+                        } catch (installErr: any) {
+                            const stderr = installErr.stderr?.toString() || '';
+                            console.error(`[Plugins] Failed to install dependencies for ${pluginId}: ${installErr.message}\n${stderr}`);
+                            // We continue even if npm fails, as the plugin might work without new dependencies 
+                            // or user can fix it manually.
+                        }
+                    }
                 } catch (e) {
                     console.error(`[Plugins] Failed to install dependencies: ${(e as Error).message}`);
-                    return { success: false, message: `Failed to install dependencies: ${(e as Error).message}` };
                 }
             }
 

@@ -13,6 +13,7 @@ import { getSettings, updateSettings } from '../../services/config/SettingsServi
 import { themeService } from '../../services/terminal/ThemeService.js';
 import { getAuthDetails } from '../../services/auth/AuthService.js';
 import { costService } from '../../services/terminal/CostService.js';
+import { BUILD_INFO } from '../../constants/build.js';
 import os from 'os';
 
 interface SettingsMenuProps {
@@ -34,9 +35,9 @@ export function SettingsMenu({ onExit, initialTab = 'Status' }: SettingsMenuProp
             const auth = await getAuthDetails();
             const clients = mcpClientManager.getActiveClients();
             setStatusInfo({
-                version: '2.1.27', // Matching user request
+                version: BUILD_INFO.VERSION,
                 sessionName: '/rename to add a name', // Placeholder
-                sessionId: 'cddd10df-23a5-4a75-aad6-6af8f7dba417', // Placeholder or generate real uuid
+                sessionId: EnvService.get('CLAUDE_SESSION_ID') || 'unknown',
                 cwd: process.cwd(),
                 loginMethod: (auth as any).email ? `Claude API Account (${(auth as any).email})` : 'Claude API Account',
                 model: 'Default Sonnet 4.5 · Best for everyday tasks',

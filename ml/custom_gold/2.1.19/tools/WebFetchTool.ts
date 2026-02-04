@@ -7,6 +7,7 @@ import axios from 'axios';
 import TurndownService from 'turndown';
 import { isUrlAllowed } from '../services/sandbox/SandboxSettings.js';
 import { terminalLog } from '../utils/shared/runtime.js';
+import { EnvService } from '../services/config/EnvService.js';
 
 export interface WebFetchInput {
     url: string;
@@ -51,8 +52,9 @@ export const WebFetchTool = {
             const turndownService = new TurndownService();
             const markdown = turndownService.turndown(html);
 
-            // Limited truncation for now
-            const maxChars = 50000;
+            // Limited truncation based on config
+            const maxTokens = Number(EnvService.get('CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS')) || 32000;
+            const maxChars = maxTokens * 4;
             let content = markdown;
             if (content.length > maxChars) {
                 content = content.slice(0, maxChars) + "\n\n... [Content truncated due to length] ...";

@@ -31,6 +31,7 @@ export interface TaskStore {
     listTasks(cursor?: string, sessionId?: string): Promise<{ tasks: Task[], nextCursor?: string }>;
     updateTaskStatus(taskId: string, status: TaskStatus, message?: string, sessionId?: string): Promise<void>;
     getTaskResult(taskId: string, sessionId?: string): Promise<any>;
+    addTask(task: Task): Promise<void>;
 }
 
 export interface TaskMessage {

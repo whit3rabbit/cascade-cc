@@ -100,9 +100,24 @@ function MobileComponent({ onDone }: ComponentProps) {
                 <Text color="blue" underline>{urls[platform]}</Text>
             </Box>
 
-            <Box marginTop={1} padding={1} borderStyle="single" borderColor="yellow">
-                <Text color="yellow" bold> [ QR CODE SCANNER ] </Text>
-                <Text dimColor> (Please open the link above on your mobile device) </Text>
+            <Box marginTop={1} padding={1} borderStyle="round" borderColor="yellow" flexDirection="column" alignItems="center">
+                <Text color="yellow" bold>Scan to download</Text>
+                <Box marginTop={1}>
+                    <Text>
+                        {"█▀▀▀▀▀█ ▄ ▄  █▀▀▀▀▀█\n"}
+                        {"█ ███ █ ▀ █▀ █ ███ █\n"}
+                        {"█ ▀▀▀ █ ▄▀█▀ █ ▀▀▀ █\n"}
+                        {"▀▀▀▀▀▀▀ █▄▀ ▀▀▀▀▀▀▀▀\n"}
+                        {"▀▀▄▀▀▄▀▄▀▀ ▀▄▄▀▄ ▀▀ \n"}
+                        {"█▀▀▀▀▀█ ▀█▀█▀  ▀▀▀ ▄\n"}
+                        {"█ ███ █ █ ▀ █▀▀ ▀▄▀▀\n"}
+                        {"█ ▀▀▀ █ ▀█ ▄ █▄█ ▀▄ \n"}
+                        {"▀▀▀▀▀▀▀ ▀  ▀▀  ▀▀▀▀▀"}
+                    </Text>
+                </Box>
+                <Box marginTop={1}>
+                    <Text dimColor>({platform === 'ios' ? 'iOS App Store' : 'Android Play Store'})</Text>
+                </Box>
             </Box>
 
             <Box marginTop={1}>

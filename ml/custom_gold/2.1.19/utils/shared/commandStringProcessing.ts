@@ -6,6 +6,10 @@
 import { randomBytes } from 'node:crypto';
 import { parse as parseShellQuote, quote as quoteShellWord } from 'shell-quote';
 
+const HEREDOC_OPERATOR_REGEX = /(?<!<)<<(?!<)(-)?(['"])?\\?(\w+)\2?/;
+const HEREDOC_PREFIX = "__HEREDOC_";
+const HEREDOC_SUFFIX = "__";
+
 // --- Types ---
 export interface QuotePlaceholders {
     SINGLE_QUOTE: string;
@@ -26,6 +30,15 @@ export interface CommandParseResult {
     commandWithoutRedirections: string;
     redirections: string[];
     hasDangerousRedirection: boolean;
+}
+
+interface HeredocInfo {
+    fullText: string;
+    delimiter: string;
+    operatorStartIndex: number;
+    operatorEndIndex: number;
+    contentStartIndex: number;
+    contentEndIndex: number;
 }
 
 // --- Constants ---
@@ -91,56 +104,284 @@ export function parseShellString(command: string, env?: Record<string, string> |
 }
 
 /**
- * Tokenizes a command string into individual commands based on shell operators.
+ * Tokenizes a command string into individual commands based on shell operators,
+ * correctly handling heredocs.
  */
 export function tokenizeCommand(commandString: string): string[] {
-    const result = parseShellString(commandString);
+    const placeholders = getQuotePlaceholders();
+    const { processedCommand, heredocs } = extractHeredocs(commandString);
+
+    // Normalize backslash-newlines and apply placeholders for special characters
+    const normalizedCommand = processedCommand.replace(/\\+\n/g, match => {
+        const backslashes = match.length - 1;
+        return backslashes % 2 === 1 ? "\\".repeat(backslashes - 1) : match;
+    });
+
+    const quoteProcessedCommand = normalizedCommand
+        .replaceAll('"', `"${placeholders.DOUBLE_QUOTE}`)
+        .replaceAll("'", `'${placeholders.SINGLE_QUOTE}`)
+        .replaceAll("\n", `\n${placeholders.NEW_LINE}\n`)
+        .replaceAll("\\(", placeholders.ESCAPED_OPEN_PAREN)
+        .replaceAll("\\)", placeholders.ESCAPED_CLOSE_PAREN);
+
+    const result = parseShellString(quoteProcessedCommand, v => `$${v}`);
     if (!result.success) return [commandString];
 
-    const commands: string[] = [];
+    const tokens = result.tokens;
+    if (tokens.length === 0) return [];
+
+    const commands: ShellToken[][] = [];
     let current: ShellToken[] = [];
 
-    for (const token of result.tokens) {
-        if (typeof token === 'object' && 'op' in token && ['&&', '||', ';', '|'].includes(token.op)) {
-            if (current.length > 0) {
-                commands.push(reconstructCommand(current, commandString));
-                current = [];
+    for (const token of tokens) {
+        if (typeof token === "string") {
+            if (token === placeholders.NEW_LINE) {
+                if (current.length > 0) {
+                    commands.push(current);
+                    current = [];
+                }
+                continue;
             }
-        } else {
-            current.push(token);
+        } else if (typeof token === "object" && "op" in token) {
+            if (["&&", "||", ";", "|"].includes(token.op)) {
+                if (current.length > 0) {
+                    commands.push(current);
+                    current = [];
+                }
+                commands.push([token]);
+                continue;
+            }
+        }
+        current.push(token);
+    }
+    if (current.length > 0) commands.push(current);
+
+    // Filter and reconstruct
+    const commandStrings = commands.map(cmdTokens => {
+        // Restore placeholders in each token
+        const restoredTokens = cmdTokens.map(token => {
+            if (typeof token === "string") {
+                return token
+                    .replaceAll(placeholders.SINGLE_QUOTE, "'")
+                    .replaceAll(placeholders.DOUBLE_QUOTE, '"')
+                    .replaceAll(placeholders.NEW_LINE, "\n")
+                    .replaceAll(placeholders.ESCAPED_OPEN_PAREN, "\\(")
+                    .replaceAll(placeholders.ESCAPED_CLOSE_PAREN, "\\)");
+            }
+            if (typeof token === "object" && "op" in token && token.op === "glob" && "pattern" in token) {
+                return {
+                    ...token,
+                    pattern: (token as any).pattern
+                        .replaceAll(placeholders.SINGLE_QUOTE, "'")
+                        .replaceAll(placeholders.DOUBLE_QUOTE, '"')
+                        .replaceAll(placeholders.NEW_LINE, "\n")
+                        .replaceAll(placeholders.ESCAPED_OPEN_PAREN, "\\(")
+                        .replaceAll(placeholders.ESCAPED_CLOSE_PAREN, "\\)")
+                };
+            }
+            return token;
+        });
+
+        return reconstructCommand(restoredTokens, commandString);
+    });
+
+    // Final restoration of heredocs
+    return commandStrings.filter(s => s.trim().length > 0).map(cmd => restoreHeredocs(cmd, heredocs));
+}
+
+
+/**
+ * Checks if the current character at index is inside quotes.
+ * Equivalent to `lB2` in chunk1458.
+ */
+function isInsideQuotes(command: string, index: number): boolean {
+    let singleQuoted = false;
+    let doubleQuoted = false;
+    for (let i = 0; i < index; i++) {
+        const char = command[i];
+        let backslashes = 0;
+        for (let j = i - 1; j >= 0 && command[j] === '\\'; j--) {
+            backslashes++;
+        }
+        if (backslashes % 2 === 1) continue;
+
+        if (char === "'" && !doubleQuoted) {
+            singleQuoted = !singleQuoted;
+        } else if (char === '"' && !singleQuoted) {
+            doubleQuoted = !doubleQuoted;
         }
     }
+    return singleQuoted || doubleQuoted;
+}
 
-    if (current.length > 0) {
-        commands.push(reconstructCommand(current, commandString));
+/**
+ * Checks if the character at the given index is inside a shell comment.
+ * Equivalent to `iB2` in chunk1458.
+ */
+function isInsideComment(str: string, index: number): boolean {
+    const lineStart = str.lastIndexOf("\n", index - 1) + 1;
+    let singleQuoted = false;
+    let doubleQuoted = false;
+    for (let i = lineStart; i < index; i++) {
+        const char = str[i];
+        let backslashes = 0;
+        for (let j = i - 1; j >= lineStart && str[j] === "\\"; j--) {
+            backslashes++;
+        }
+        if (backslashes % 2 === 1) continue;
+
+        if (char === "'" && !doubleQuoted) {
+            singleQuoted = !singleQuoted;
+        } else if (char === '"' && !singleQuoted) {
+            doubleQuoted = !doubleQuoted;
+        } else if (char === "#" && !singleQuoted && !doubleQuoted) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Safely appends a string to another with a space if needed.
+ * Equivalent to `nt` or `clearConversation_26`.
+ */
+function appendWithSpace(current: string, next: string, noSpace: boolean = false): string {
+    if (!current || noSpace) return current + next;
+    return current + " " + next;
+}
+
+/**
+ * Checks if a token is a specific operator.
+ * Equivalent to `WX`.
+ */
+function isOperator(token: ShellToken | undefined, op: string): boolean {
+    if (typeof token === 'string') return token === op;
+    if (token && typeof token === 'object' && 'op' in token) return token.op === op;
+    return false;
+}
+
+/**
+ * Checks if a string needs quoting.
+ * Equivalent to `Ku2`.
+ */
+export function needsQuoting(s: string): boolean {
+    if (typeof s !== "string") return false;
+    return /[ \t\n'"\\$;]/.test(s);
+}
+
+/**
+ * Checks if the current parenthesis is the start of a subcommand.
+ * Equivalent to `hDK`.
+ */
+function isSubcommandStart(prev: ShellToken | undefined): boolean {
+    if (prev === '$') return true;
+    if (isOperator(prev, '<(')) return true;
+    return false;
+}
+
+/**
+ * Extracts heredocs from a command string and replaces them with placeholders.
+ */
+export function extractHeredocs(command: string): { processedCommand: string, heredocs: Map<string, HeredocInfo> } {
+    const heredocs = new Map<string, HeredocInfo>();
+    if (!command.includes("<<")) {
+        return { processedCommand: command, heredocs };
     }
 
-    return commands;
-}
+    const regex = new RegExp(HEREDOC_OPERATOR_REGEX.source, "g");
+    const matches: HeredocInfo[] = [];
+    let match;
 
-/**
- * Checks if a string needs quoting for safe shell usage.
- */
-export function needsQuoting(str: any): boolean {
-    if (typeof str !== "string") return false;
-    return str.includes(" ") || str.includes("\t") || str.includes("\n") || /[|&;()<>$!*?{}[\]]/.test(str);
-}
+    while ((match = regex.exec(command)) !== null) {
+        const index = match.index;
+        if (isInsideQuotes(command, index) || isInsideComment(command, index)) {
+            continue;
+        }
 
-/**
- * Checks if a token represents the start of a subshell or variable expansion.
- */
-function isSubshellOrVariableExpansion(token: any): boolean {
-    return typeof token === "object" && token && "op" in token && (token.op === "(" || token.op === "$(");
-}
+        const fullMatch = match[0];
+        const delimiter = match[3];
+        const opEndIndex = index + fullMatch.length;
 
-/**
- * Concatenates two strings with a space in between, unless already separated.
- */
-function concatenateWithSpace(a: string, b: string, forceConcat = false): string {
-    if (!a || forceConcat) {
-        return a + b;
+        const nextNewline = command.indexOf("\n", opEndIndex);
+        if (nextNewline === -1) continue;
+
+        const afterNewline = command.slice(nextNewline + 1);
+        const lines = afterNewline.split("\n");
+        let delimiterLineIndex = -1;
+
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].trim() === delimiter) {
+                delimiterLineIndex = i;
+                break;
+            }
+        }
+
+        if (delimiterLineIndex === -1) continue;
+
+        const contentLines = lines.slice(0, delimiterLineIndex + 1);
+        const contentText = contentLines.join("\n");
+        const contentEndIndex = nextNewline + 1 + contentText.length;
+
+        matches.push({
+            fullText: command.slice(index, opEndIndex) + command.slice(nextNewline, contentEndIndex),
+            delimiter,
+            operatorStartIndex: index,
+            operatorEndIndex: opEndIndex,
+            contentStartIndex: nextNewline,
+            contentEndIndex: contentEndIndex
+        });
     }
-    return a + " " + b;
+
+    if (matches.length === 0) {
+        return { processedCommand: command, heredocs };
+    }
+
+    // Filter out nested heredocs
+    const validMatches = matches.filter((m, i, all) => {
+        for (const other of all) {
+            if (m === other) continue;
+            if (m.operatorStartIndex > other.contentStartIndex && m.operatorStartIndex < other.contentEndIndex) {
+                return false;
+            }
+        }
+        return true;
+    });
+
+    if (validMatches.length === 0) {
+        return { processedCommand: command, heredocs };
+    }
+
+    // Check for duplicate content start indices (indicates parsing issues)
+    if (new Set(validMatches.map(m => m.contentStartIndex)).size < validMatches.length) {
+        return { processedCommand: command, heredocs };
+    }
+
+    // Sort by end index descending to avoid displacement during slicing
+    validMatches.sort((a, b) => b.contentEndIndex - a.contentEndIndex);
+
+    const nonce = randomBytes(8).toString("hex");
+    let processed = command;
+
+    validMatches.forEach((m, i) => {
+        const placeholder = `${HEREDOC_PREFIX}${validMatches.length - 1 - i}_${nonce}${HEREDOC_SUFFIX}`;
+        heredocs.set(placeholder, m);
+        processed = processed.slice(0, m.operatorStartIndex) + placeholder + processed.slice(m.operatorEndIndex, m.contentStartIndex) + processed.slice(m.contentEndIndex);
+    });
+
+    return { processedCommand: processed, heredocs };
+}
+
+
+/**
+ * Restores heredocs from placeholders in a command string.
+ * Equivalent to `nB2` in chunk1458.
+ */
+export function restoreHeredocs(command: string, heredocs: Map<string, HeredocInfo>): string {
+    let result = command;
+    for (const [placeholder, info] of heredocs) {
+        result = result.replaceAll(placeholder, info.fullText);
+    }
+    return result;
 }
 
 /**
@@ -152,92 +393,104 @@ export function reconstructCommand(tokens: ShellToken[], originalCommand: string
     }
 
     let reconstructed = "";
-    let inParenthesis = 0;
-    let z = false; // Flag for process substitution "<("
+    let parenDepth = 0;
+    let insideProcessSubstitution = false;
 
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
-        const previousToken = tokens[i - 1];
-        const nextToken = tokens[i + 1];
+        const prev = tokens[i - 1];
+        const next = tokens[i + 1];
 
-        if (typeof token === "string") {
-            const escapedToken = /[|&;]/.test(token) ? `"${token}"` : needsQuoting(token) ? quoteShellWord([token]) : token;
-            const alreadyInsideParens = reconstructed.endsWith("(") || previousToken === "$" || (typeof previousToken === "object" && previousToken && "op" in previousToken && previousToken.op === ")");
+        if (typeof token === 'string') {
+            // Check if it needs quoting
+            let quoted = /[|&;]/.test(token) ? `"${token}"` : needsQuoting(token) ? quoteShellWord([token]) : token;
+
+            // Handle process substitution or special join rules
+            // W = reconstructed ends with "(" OR prev is "$" OR prev is ")" operator
+            const noSpaceBefore = reconstructed.endsWith("(") || prev === "$" || isOperator(prev, ")");
 
             if (reconstructed.endsWith("<(")) {
-                reconstructed += " " + escapedToken;
+                reconstructed += " " + quoted;
             } else {
-                reconstructed = concatenateWithSpace(reconstructed, escapedToken, alreadyInsideParens);
+                reconstructed = appendWithSpace(reconstructed, quoted, noSpaceBefore);
             }
             continue;
         }
 
-        if (typeof token !== "object" || !token || !("op" in token)) {
+        if (typeof token !== 'object' || !token || !('op' in token)) {
             continue;
         }
 
-        const { op: operator } = token;
+        const op = token.op;
 
-        if (operator === "glob" && "pattern" in token) {
-            reconstructed = concatenateWithSpace(reconstructed, (token as any).pattern);
+        if (op === 'glob' && 'pattern' in token) {
+            reconstructed = appendWithSpace(reconstructed, (token as any).pattern);
             continue;
         }
 
-
-        if (operator === ">&" && typeof previousToken === "string" && /^\d+$/.test(previousToken) && typeof nextToken === "string" && /^\d+$/.test(nextToken)) {
-            const lastIndex = reconstructed.lastIndexOf(previousToken);
-            reconstructed = reconstructed.slice(0, lastIndex) + previousToken + operator + nextToken;
+        // Handle numeric redirects like 2>&1
+        if (op === ">&" && typeof prev === "string" && /^\d+$/.test(prev) && typeof next === "string" && /^\d+$/.test(next)) {
+            const lastIndex = reconstructed.lastIndexOf(prev);
+            reconstructed = reconstructed.slice(0, lastIndex) + prev + op + next;
             i++;
             continue;
         }
 
-        if (operator === "<" && typeof nextToken === 'object' && nextToken && 'op' in nextToken && nextToken.op === "<") {
-            // Heredoc sequence
-            // This is a simplified reconstruction for heredocs
-            const nextNextToken = tokens[i + 2];
-            if (nextNextToken && typeof nextNextToken === "string") {
-                reconstructed = concatenateWithSpace(reconstructed, "<< " + nextNextToken);
+        // Handle heredocs
+        if (op === "<" && isOperator(next, "<")) {
+            const nextNext = tokens[i + 2];
+            if (nextNext && typeof nextNext === "string") {
+                reconstructed = appendWithSpace(reconstructed, nextNext);
                 i += 2;
                 continue;
             }
         }
 
-        if (operator === "(") {
-            if (isSubshellOrVariableExpansion(previousToken) || inParenthesis > 0) {
-                inParenthesis++;
-                if (reconstructed.endsWith(" ")) reconstructed = reconstructed.slice(0, -1);
+        if (op === "<<<") {
+            reconstructed = appendWithSpace(reconstructed, op);
+            continue;
+        }
+
+        if (op === "(") {
+            if (isSubcommandStart(prev) || parenDepth > 0) {
+                parenDepth++;
+                if (reconstructed.endsWith(" ")) {
+                    reconstructed = reconstructed.slice(0, -1);
+                }
                 reconstructed += "(";
             } else {
                 if (reconstructed.endsWith("$")) {
-                    inParenthesis++;
+                    parenDepth++;
                     reconstructed += "(";
                 } else {
-                    const lastWasLessThanParen = reconstructed.endsWith("<(") || reconstructed.endsWith("(");
-                    reconstructed = concatenateWithSpace(reconstructed, "(", lastWasLessThanParen);
+                    const noSpace = reconstructed.endsWith("<(") || reconstructed.endsWith("(");
+                    reconstructed = appendWithSpace(reconstructed, "(", noSpace);
                 }
             }
             continue;
         }
 
-        if (operator === ")") {
-            if (z) {
-                z = false;
+        if (op === ")") {
+            if (insideProcessSubstitution) {
+                insideProcessSubstitution = false;
                 reconstructed += ")";
                 continue;
             }
-            if (inParenthesis > 0) inParenthesis--;
+            if (parenDepth > 0) {
+                parenDepth--;
+            }
             reconstructed += ")";
             continue;
         }
 
-        if (operator === "<(") {
-            z = true;
-            reconstructed = concatenateWithSpace(reconstructed, operator);
+        if (op === "<(") {
+            insideProcessSubstitution = true;
+            reconstructed = appendWithSpace(reconstructed, op);
             continue;
         }
 
-        if (["&&", "||", "|", ";", ">", ">>", "<", "<<<"].includes(operator)) {
-            reconstructed = concatenateWithSpace(reconstructed, operator);
+        if (["&&", "||", "|", ";", ">", ">>", "<"].includes(op)) {
+            reconstructed = appendWithSpace(reconstructed, op);
         }
     }
 

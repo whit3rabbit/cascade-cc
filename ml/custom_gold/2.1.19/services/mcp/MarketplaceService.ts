@@ -1,14 +1,32 @@
 
-import { getSettings } from '../config/SettingsService.js';
+import { getSettings, updateSettings } from '../config/SettingsService.js';
 import { PluginManager } from './PluginManager.js';
 
 export class MarketplaceService {
     static async checkAndInstallOfficialPlugins(): Promise<void> {
         const settings = getSettings();
-        // Check if explicitly disabled
+
+        // Skip if explicitly disabled
         if (settings.officialMarketplaceAutoInstall === false) {
             console.log("[Marketplace] Official marketplace auto-install disabled.");
             return;
+        }
+
+        // Skip if already attempted and successful, or if we should skip due to a previous failure
+        if (settings.officialMarketplaceAutoInstallAttempted && settings.officialMarketplaceAutoInstalled) {
+            return;
+        }
+
+        // Researching 2.1.19 reveals they track fail reasons like "git_unavailable"
+        // and have a retry policy. For now, let's implement basic status tracking.
+        if (settings.officialMarketplaceAutoInstallAttempted && settings.officialMarketplaceAutoInstallFailReason === "git_unavailable") {
+            // Check if we should retry (e.g., if more than 24h passed)
+            const lastAttempt = settings.officialMarketplaceAutoInstallLastAttemptTime || 0;
+            const now = Date.now();
+            if (now - lastAttempt < 24 * 60 * 60 * 1000) {
+                console.log("[Marketplace] Skipping official marketplace auto-install: Git was previously unavailable.");
+                return;
+            }
         }
 
         const officialRepo = {
@@ -18,34 +36,38 @@ export class MarketplaceService {
             description: "Official Claude Code plugins"
         };
 
-        // We use PluginManager to handle installation.
-        // It will clone if missing, or update if present (although current updatePlugin logic is separate)
-        // installPlugin in our implementation handles "already installed" by returning success false but that's fine.
-        // But better: checks installed plugins first.
-
         try {
-            const installed = await PluginManager.getInstalledPlugins();
-            const officialPlugin = installed.find(p =>
-                p.id === 'plugin:claude-plugins-official' ||
-                (p.name === 'claude-plugins-official' && p.scope === 'user')
-                // Or check repository if we stored it? We stored repo in McpServerManager registry but maybe not in simple list?
-                // Our PluginManager stores it in config. 
-            );
+            console.log("[Marketplace] Attempting to auto-install official marketplace");
 
-            if (officialPlugin) {
-                // Already installed. Maybe update?
-                // chunk1627 implies it runs on startup, so maybe it updates?
-                // "Attempting to auto-install official marketplace"
-                // If it's just install, PluginManager.installPlugin handles existence check.
-                // But we might want to ensure it's updated.
-                // For now, let's just try to install.
-                await PluginManager.installPlugin(officialRepo, 'user');
+            // Check for git availability if needed by PluginManager/git.ts
+            // PluginManager.installPlugin will throw if git is missing.
+
+            const result = await PluginManager.installPlugin(officialRepo, 'user');
+
+            updateSettings((current) => ({
+                ...current,
+                officialMarketplaceAutoInstallAttempted: true,
+                officialMarketplaceAutoInstalled: result.success,
+                officialMarketplaceAutoInstallFailReason: result.success ? undefined : "unknown",
+                officialMarketplaceAutoInstallLastAttemptTime: Date.now()
+            }));
+
+            if (result.success) {
+                console.log("[Marketplace] Successfully auto-installed official marketplace");
             } else {
-                console.log("[Marketplace] Installing official plugins...");
-                await PluginManager.installPlugin(officialRepo, 'user');
+                console.warn(`[Marketplace] Official marketplace auto-install skipped: ${result.message}`);
             }
-        } catch (e) {
-            console.warn("[Marketplace] Failed to auto-install official plugins:", e);
+        } catch (e: any) {
+            const reason = e.message?.includes('git') ? "git_unavailable" : "unknown";
+            console.error(`[Marketplace] Failed to auto-install official marketplace: ${e.message}`);
+
+            updateSettings((current) => ({
+                ...current,
+                officialMarketplaceAutoInstallAttempted: true,
+                officialMarketplaceAutoInstalled: false,
+                officialMarketplaceAutoInstallFailReason: reason,
+                officialMarketplaceAutoInstallLastAttemptTime: Date.now()
+            }));
         }
     }
 }

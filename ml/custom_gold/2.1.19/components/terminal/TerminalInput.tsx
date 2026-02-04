@@ -84,16 +84,16 @@ export const TerminalInput: React.FC<TerminalInputProps> = (props) => {
     };
 
     const getCursorStyle = () => {
-        if (!vimModeEnabled) return { backgroundColor: 'white', color: 'black' };
+        if (!vimModeEnabled) return { backgroundColor: '#ffffff', color: '#000000' };
 
         switch (currentVimMode) {
             case 'NORMAL':
-                return { backgroundColor: 'green', color: 'black' }; // Block cursor
+                return { backgroundColor: '#48BB78', color: '#000000' }; // Chakra green.500
             case 'VISUAL':
-                return { backgroundColor: 'yellow', color: 'black' };
+                return { backgroundColor: '#ECC94B', color: '#000000' }; // Chakra yellow.400
             case 'INSERT':
             default:
-                return { backgroundColor: 'white', color: 'black' }; // Bar/Block
+                return { backgroundColor: '#ffffff', color: '#000000' };
         }
     };
 

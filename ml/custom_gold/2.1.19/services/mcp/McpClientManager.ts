@@ -318,6 +318,24 @@ export class McpClientManager {
         }
         return allPrompts;
     }
+
+    /**
+     * Reads a resource from a specific MCP server.
+     */
+    async readResource(serverId: string, uri: string): Promise<any> {
+        const client = this.getClient(serverId);
+        if (!client) throw new Error(`Server ${serverId} not found`);
+        return await client.readResource({ uri });
+    }
+
+    /**
+     * Retrieves a prompt from a specific MCP server.
+     */
+    async getPrompt(serverId: string, name: string, args?: Record<string, string>): Promise<any> {
+        const client = this.getClient(serverId);
+        if (!client) throw new Error(`Server ${serverId} not found`);
+        return await client.getPrompt({ name, arguments: args });
+    }
 }
 
 /**

@@ -71,11 +71,15 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
 
     const vendorSet = new Set();
     graphData.chunks.forEach(node => {
+        const forceNonVendor = node.forceNonVendor === true;
         const kbAnchorType = node.kb_info?.anchor_type;
-        if (node.category === 'vendor' || kbAnchorType === 'vendor') {
+        if (!forceNonVendor && (node.category === 'vendor' || kbAnchorType === 'vendor')) {
             node.category = 'vendor';
             vendorSet.add(node.name);
             return;
+        }
+        if (forceNonVendor && node.category === 'vendor') {
+            node.category = 'unknown';
         }
         if (node.category === 'priority' || node.category === 'kb_priority') {
             node.category = 'unknown';
@@ -94,7 +98,8 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
 
         const highConfidenceThreshold = parseFloat(process.env.HIGH_CONFIDENCE_LIB_THRESHOLD) || 0.98;
         const isHighConfidenceLib = similarity >= highConfidenceThreshold || node.isGoldenMatch;
-        const isProvenLibrary = isHighConfidenceLib || (similarity >= libThreshold && !looksLikeFirstParty);
+        const isProvenLibrary = !forceNonVendor && (isHighConfidenceLib || (similarity >= libThreshold && !looksLikeFirstParty));
+        const isForcedLibrary = !forceNonVendor && node.matchIsLibrary;
 
         // EVIDENCE FOR FOUNDER: 
         // a) Explicit signals (Tengu, Generators, Entry Points)
@@ -113,7 +118,7 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
                 node.proposedPath = matchMeta.ref.proposedPath;
             }
             familySet.add(node.name);
-        } else if (isProvenLibrary || node.matchIsLibrary) {
+        } else if (isProvenLibrary || isForcedLibrary) {
             node.category = 'vendor';
             vendorSet.add(node.name);
         } else if (hasHardSignal || isImportantOrphan) {
@@ -140,6 +145,7 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         const startVendorSize = vendorSet.size;
         graphData.chunks.forEach(node => {
             if (vendorSet.has(node.name)) return;
+            if (node.forceNonVendor) return;
             const neighbors = node.outbound || [];
             const vendorNeighbors = neighbors.filter(n => vendorSet.has(n));
             if (neighbors.length === 0) return;
@@ -180,6 +186,7 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
 
             windowChunks.forEach(node => {
                 if (vendorSet.has(node.name)) return;
+                if (node.forceNonVendor) return;
                 if (node.category === 'founder') return;
                 vendorSet.add(node.name);
                 familySet.delete(node.name);
@@ -205,6 +212,7 @@ async function classifyLogic(targetVersion, baseDir = './cascade_graph_analysis'
         for (let i = 1; i < orderedChunks.length - 1; i++) {
             const current = orderedChunks[i].node;
             if (vendorSet.has(current.name)) continue;
+            if (current.forceNonVendor) continue;
             if (current.category === 'founder') continue;
             const prev = orderedChunks[i - 1].node;
             const next = orderedChunks[i + 1].node;

@@ -7,6 +7,8 @@ import { StatsigClientBase, StatsigUser, StatsigClientOptions } from "./StatsigC
 import { Log, Diagnostics } from "./StatsigService.js";
 
 export class StatsigClient extends StatsigClientBase {
+    private _values: any = null;
+
     constructor(sdkKey: string, user: StatsigUser, options: StatsigClientOptions = {}) {
         super(sdkKey, user, options);
     }
@@ -31,22 +33,34 @@ export class StatsigClient extends StatsigClientBase {
         this._setStatus("Loading", null);
 
         try {
-            // In a real implementation, this would perform a network request to fetch latest gates
-            // For this deobfuscated version, we simulate the network request and process
             Diagnostics.markInitNetworkReqStart(this._sdkKey, { url: "/initialize" });
 
-            // Mock delay
+            // In a real implementation, this would be a network fetch.
+            // For now, we simulate a successful fetch with mock evaluations.
             await new Promise(resolve => setTimeout(resolve, 500));
+
+            this._values = {
+                feature_gates: {
+                    "tengu_tool_pear": { value: true, rule_id: "default" },
+                    "tengu_lsp_enabled": { value: true, rule_id: "default" }
+                },
+                dynamic_configs: {},
+                layer_configs: {},
+                experiments: {
+                    "tool_use_examples": {
+                        value: { enabled: true },
+                        rule_id: "exp_rule_1"
+                    }
+                }
+            };
 
             Diagnostics.markInitNetworkReqEnd(this._sdkKey, { success: true });
             Diagnostics.markInitProcessStart(this._sdkKey);
 
-            // Mock values updated
-            const mockValues = { source: "Network" };
-            this._setStatus("Ready", mockValues);
+            this._setStatus("Ready", this._values);
 
             Diagnostics.markInitProcessEnd(this._sdkKey, true);
-            Diagnostics.markInitOverallEnd(this._sdkKey, true, { source: "Network" });
+            Diagnostics.markInitOverallEnd(this._sdkKey, true, this._values);
 
             Log.info("Statsig updated successfully.");
             return true;
@@ -59,19 +73,26 @@ export class StatsigClient extends StatsigClientBase {
     }
 
     checkGate(gateName: string): boolean {
-        if (this.loadingStatus !== "Ready") return false;
+        if (this.loadingStatus !== "Ready" || !this._values) return false;
 
         return this._memoize("gate", (name) => {
-            // Mock logic: allow all gates for now as in original deobfuscation
-            return true;
+            const gate = this._values.feature_gates[name];
+            return gate ? gate.value === true : false;
         })(gateName);
     }
 
     getExperiment(experimentName: string) {
         return {
             get: (key: string, defaultValue: any) => {
-                if (this.loadingStatus !== "Ready") return defaultValue;
-                return defaultValue;
+                if (this.loadingStatus !== "Ready" || !this._values) return defaultValue;
+
+                return this._memoize("experiment", (name) => {
+                    const exp = this._values.experiments[name];
+                    if (exp && exp.value && key in exp.value) {
+                        return exp.value[key];
+                    }
+                    return defaultValue;
+                })(experimentName);
             }
         };
     }
@@ -112,4 +133,9 @@ export function getExperimentValue(experimentName: string, key: string, defaultV
     if (!clientInstance) return defaultValue;
     const experiment = clientInstance.getExperiment(experimentName);
     return experiment?.get(key, defaultValue) ?? defaultValue;
+}
+export function logout() {
+    clientInstance = null;
+    initializationPromise = null;
+    Log.info("Statsig state cleared on logout.");
 }

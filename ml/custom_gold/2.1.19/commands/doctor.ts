@@ -40,6 +40,12 @@ export const doctorCommandDefinition: CommandDefinition = createCommandHelper(
                 report += `└ ${statusIcon} ${ev.name}: ${ev.message}\n`;
             }
 
+            if (info.sessionMetrics && info.sessionMetrics.totalCostUSD > 0) {
+                report += `\n### Session Metrics\n`;
+                report += `└ Total Cost: $${info.sessionMetrics.totalCostUSD.toFixed(4)}\n`;
+                report += `└ Tokens: ${info.sessionMetrics.inputTokens} (in) / ${info.sessionMetrics.outputTokens} (out)\n`;
+            }
+
             onDone(report);
         }
     }

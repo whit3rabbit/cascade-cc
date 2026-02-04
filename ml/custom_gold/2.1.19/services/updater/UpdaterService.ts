@@ -64,22 +64,20 @@ export class UpdaterService {
     }
 
     /**
-     * Verifies the GPG signature of a file.
-     * Requires 'gpg' to be available in the system PATH.
+     * Verifies binary integrity.
+     * Note: Current version (2.1.19) uses SHA256 checksums from the manifest.json
+     * for verification during download, rather than GPG signatures.
      */
-    static async verifySignature(filePath: string, signaturePath: string): Promise<boolean> {
+    static async verifyIntegrity(filePath: string, expectedChecksum: string): Promise<boolean> {
         try {
-            const { execFile } = await import('child_process');
-            const { promisify } = await import('util');
-            const execFileAsync = promisify(execFile);
-
-            // TODO: Ideally we should bundle the public key or fetch it from a trusted source.
-            // For now, this assumes the user has the relevant public key in their keyring.
-            await execFileAsync('gpg', ['--verify', signaturePath, filePath]);
-            return true;
+            const { readFile } = await import('fs/promises');
+            const { createHash } = await import('crypto');
+            const buffer = await readFile(filePath);
+            const actualChecksum = createHash('sha256').update(buffer).digest('hex');
+            return actualChecksum === expectedChecksum;
         } catch (error) {
             if (EnvService.isTruthy("DEBUG_UPDATER")) {
-                console.error('[Updater] Signature verification failed:', error);
+                console.error('[Updater] Integrity verification failed:', error);
             }
             return false;
         }

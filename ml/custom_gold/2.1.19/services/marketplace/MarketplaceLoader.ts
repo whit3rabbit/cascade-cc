@@ -32,7 +32,7 @@ export class MarketplaceLoader {
             let plugins = await PluginManager.getInstalledPlugins();
             let marketplacePlugin = plugins.find((p: PluginInstallation) => p.id === OFFICIAL_MARKETPLACE_ID);
 
-            // 2. If not installed, auto-install it
+            // 2. If not installed, auto-install it. If installed, update it occasionally.
             if (!marketplacePlugin) {
                 console.log("[MarketplaceLoader] Official marketplace not found, auto-installing...");
                 const result = await PluginManager.installPlugin({
@@ -51,6 +51,14 @@ export class MarketplaceLoader {
                 // Refresh list to get the install path
                 plugins = await PluginManager.getInstalledPlugins();
                 marketplacePlugin = plugins.find((p: PluginInstallation) => p.id === OFFICIAL_MARKETPLACE_ID);
+            } else {
+                // Occasional update check (e.g. once per session or every 24h)
+                // For now, let's just trigger a background update
+                if (process.env.CLAUDE_MARKETPLACE_AUTO_UPDATE !== 'false') {
+                    PluginManager.updatePlugin(OFFICIAL_MARKETPLACE_ID, 'user').catch(err => {
+                        console.warn("[MarketplaceLoader] Background update of official marketplace failed:", err.message);
+                    });
+                }
             }
 
             if (!marketplacePlugin || !marketplacePlugin.installPath) {
@@ -59,18 +67,47 @@ export class MarketplaceLoader {
             }
 
             // 3. Read marketplace.json or plugins.json
-            const possiblePaths = [
-                path.join(marketplacePlugin.installPath, 'marketplace.json'),
-                path.join(marketplacePlugin.installPath, 'plugins.json'),
-                path.join(marketplacePlugin.installPath, '.claude/marketplace.json')
+            const searchPaths = [
+                marketplacePlugin.installPath,
+                path.join(marketplacePlugin.installPath, '.claude'),
+                path.join(marketplacePlugin.installPath, 'dist')
             ];
 
+            const fileNames = ['marketplace.json', 'plugins.json'];
             let marketplaceJsonPath: string | null = null;
-            for (const p of possiblePaths) {
-                if (fs.existsSync(p)) {
-                    marketplaceJsonPath = p;
-                    break;
+
+            for (const dir of searchPaths) {
+                if (!fs.existsSync(dir)) continue;
+                for (const name of fileNames) {
+                    const p = path.join(dir, name);
+                    if (fs.existsSync(p)) {
+                        marketplaceJsonPath = p;
+                        break;
+                    }
                 }
+                if (marketplaceJsonPath) break;
+            }
+
+            // Still not found? Try recursive search (limited depth)
+            if (!marketplaceJsonPath) {
+                const findManifest = (dir: string, depth = 0): string | null => {
+                    if (depth > 2) return null;
+                    const files = fs.readdirSync(dir);
+                    for (const file of files) {
+                        const fullPath = path.join(dir, file);
+                        const stat = fs.statSync(fullPath);
+                        if (stat.isDirectory()) {
+                            const found = findManifest(fullPath, depth + 1);
+                            if (found) return found;
+                        } else if (fileNames.includes(file)) {
+                            return fullPath;
+                        }
+                    }
+                    return null;
+                };
+                try {
+                    marketplaceJsonPath = findManifest(marketplacePlugin.installPath);
+                } catch { }
             }
 
             if (marketplaceJsonPath) {

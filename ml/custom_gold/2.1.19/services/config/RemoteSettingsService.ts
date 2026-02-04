@@ -4,7 +4,7 @@
  */
 
 import { join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import axios from 'axios';
 import { getBaseConfigDir } from '../../utils/shared/runtimeAndEnv.js';
 import { getAuthHeaders } from '../auth/AuthService.js';
@@ -70,5 +70,19 @@ export function getCachedRemoteSettings(): RemoteSettings {
         return JSON.parse(data);
     } catch (err) {
         return {};
+    }
+}
+
+/**
+ * Clears the local remote settings cache.
+ */
+export function clearRemoteSettingsCache(): void {
+    const cachePath = join(getBaseConfigDir(), REMOTE_SETTINGS_FILE);
+    try {
+        if (existsSync(cachePath)) {
+            unlinkSync(cachePath);
+        }
+    } catch (err) {
+        // Ignore cache delete errors
     }
 }

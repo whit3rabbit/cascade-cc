@@ -31,6 +31,11 @@ export interface DiagnosticInfo {
     };
     envVars: Array<{ name: string; message: string; status: 'ok' | 'capped' | 'error' }>;
     packageManager?: string;
+    sessionMetrics?: {
+        totalCostUSD: number;
+        inputTokens: number;
+        outputTokens: number;
+    };
 }
 
 /**
@@ -121,6 +126,15 @@ export class DoctorService {
             envVars.push({ name: "ANTHROPIC_API_KEY", message: "Configured (masked)", status: "ok" });
         }
 
+        // Session metrics
+        const { costService } = await import('./CostService.js');
+        const usage = costService.getUsage();
+        const sessionMetrics = {
+            totalCostUSD: costService.calculateCost(),
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens
+        };
+
         return {
             installationType,
             version,
@@ -134,7 +148,8 @@ export class DoctorService {
             ripgrepStatus: rgStatus,
             ghStatus,
             gitStatus,
-            envVars
+            envVars,
+            sessionMetrics
         };
     }
 }

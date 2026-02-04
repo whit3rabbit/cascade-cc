@@ -899,7 +899,11 @@ class CascadeGraph {
             let kbInfo = null;
             let errorSignature = null;
             const hints = [];
-            const hasTengu = chunkCode.toLowerCase().includes('tengu_');
+            const chunkCodeLower = chunkCode.toLowerCase();
+            const hasTengu = chunkCodeLower.includes('tengu_');
+            const hasClaudeCodeMention =
+                chunkCodeLower.includes('claude code') ||
+                chunkCodeLower.includes('claude_code');
 
             const entrySignals = [
                 'process.argv',
@@ -913,7 +917,7 @@ class CascadeGraph {
             // --- NEW: ENHANCED KB METADATA ---
             if (KB && !IS_BOOTSTRAP) {
                 // 1. Check Vendor Anchors (negative signal)
-                if (KB.vendor_anchors || KB.known_packages) {
+                if ((KB.vendor_anchors || KB.known_packages) && !hasClaudeCodeMention) {
                     const vendorAnchors = Array.isArray(KB.vendor_anchors) ? KB.vendor_anchors : [];
                     const knownPackages = Array.isArray(KB.known_packages) ? KB.known_packages : [];
                     const combinedAnchors = vendorAnchors.concat(knownPackages.map(name => ({
@@ -1087,6 +1091,7 @@ class CascadeGraph {
                 hasFS: chunkCode.toLowerCase().includes('fs.') || chunkCode.toLowerCase().includes('path.') || chunkCode.toLowerCase().includes('filename'),
                 hasCrypto: chunkCode.toLowerCase().includes('crypto') || chunkCode.toLowerCase().includes('hash'),
                 isUI: chunkCode.toLowerCase().includes('react') || chunkCode.toLowerCase().includes('ink') || chunkCode.toLowerCase().includes('box'),
+                forceNonVendor: hasClaudeCodeMention,
                 moduleId: currentModuleId, // Track the hard module envelope ID
                 startsWithImport: currentChunkNodes.some(node => {
                     const nodeCode = code.slice(node.start, node.end);
@@ -1493,6 +1498,7 @@ class CascadeGraph {
                 proposedPath: node.proposedPath || (oldEntry ? oldEntry.proposedPath : null),
                 suggestedFilename: node.suggestedFilename || (oldEntry ? oldEntry.suggestedFilename : null),
                 isGoldenMatch: node.isGoldenMatch || (oldEntry ? oldEntry.isGoldenMatch : false),
+                forceNonVendor: node.forceNonVendor || (oldEntry ? oldEntry.forceNonVendor : false),
 
                 hasTengu: node.hasTengu || false,
                 hasGenerator: node.hasGenerator || false,

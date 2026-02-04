@@ -98,14 +98,24 @@ All operations require:
             }
 
             const formatted = formatLspResult(operation, result, cwd);
-            const count = Array.isArray(result) ? result.length : (result ? 1 : 0);
+            let resultCount = 0;
+            let fileCount = 0;
+
+            if (Array.isArray(result)) {
+                resultCount = result.length;
+                const uniqueUris = new Set(result.map((r: any) => r.uri || r.location?.uri).filter(Boolean));
+                fileCount = uniqueUris.size;
+            } else if (result) {
+                resultCount = 1;
+                fileCount = 1;
+            }
 
             return {
                 operation,
                 result: formatted,
                 filePath: absolutePath,
-                resultCount: count,
-                fileCount: 1 // Simplified
+                resultCount,
+                fileCount
             };
         } catch (error: any) {
             return {

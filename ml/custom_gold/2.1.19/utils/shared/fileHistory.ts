@@ -139,10 +139,19 @@ export function createSnapshot(state: HistoryState, messageId: string): Snapshot
     const fileBackups: Record<string, BackupInfo> = {};
     const lastSnapshot = state.snapshots.at(-1);
 
+    // Inherit backups from the previous snapshot for all currently tracked files
     for (const fileKey of state.trackedFiles) {
-        // In a real implementation, we'd map fileKey back to absolute path.
-        // For now we assume state or context provides this.
-        // This is a simplified reconstruction.
+        if (lastSnapshot && lastSnapshot.trackedFileBackups[fileKey]) {
+            fileBackups[fileKey] = lastSnapshot.trackedFileBackups[fileKey];
+        } else {
+            // If it's a new file tracked in this turn but not yet in a snapshot,
+            // (though trackFileModification usually handles this)
+            // we'd need its absolute path to create a backup.
+            const absolutePath = state.trackedFilePaths[fileKey];
+            if (absolutePath && existsSync(absolutePath)) {
+                fileBackups[fileKey] = createBackupFileInfo(absolutePath, 1);
+            }
+        }
     }
 
     return {

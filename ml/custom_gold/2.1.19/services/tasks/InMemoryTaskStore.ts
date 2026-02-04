@@ -34,7 +34,7 @@ export class InMemoryTaskStore implements TaskStore {
     }
 
     // Additional method for internal use
-    addTask(task: Task): void {
+    async addTask(task: Task): Promise<void> {
         this.tasks.set(task.id, task);
     }
 }

@@ -11,6 +11,8 @@ import {
     ROLES_URL,
     CLAUDE_AI_AUTHORIZE_URL,
     CONSOLE_AUTHORIZE_URL,
+    CONSOLE_SUCCESS_URL,
+    CLAUDEAI_SUCCESS_URL,
     MANUAL_REDIRECT_URL,
     OAUTH_BETA_HEADER,
     PROFILE_URL
@@ -89,20 +91,20 @@ export const OAuthService = {
     /**
      * Gets a valid OAuth token, refreshing if necessary.
      */
-    async getValidToken(): Promise<string | null> {
-        if (currentSession?.accessToken && currentSession.expiresAt > Date.now() + 60000) {
+    async getValidToken(forceRefresh: boolean = false): Promise<string | null> {
+        if (!forceRefresh && currentSession?.accessToken && currentSession.expiresAt > Date.now() + 60000) {
             return currentSession.accessToken;
         }
 
         const persisted = await this.loadSession();
         if (persisted) {
             currentSession = persisted;
-            if (currentSession.expiresAt > Date.now() + 60000) {
+            if (!forceRefresh && currentSession.expiresAt > Date.now() + 60000) {
                 return currentSession.accessToken;
             }
             // Try refresh
             try {
-                const refreshed = await this.refreshToken(currentSession.refreshToken, currentSession.scopes);
+                const refreshed = await this.refreshTokenLocked(currentSession.refreshToken, currentSession.scopes);
                 await this.saveSession(refreshed);
                 return refreshed.accessToken;
             } catch (e) {
@@ -114,32 +116,39 @@ export const OAuthService = {
     },
 
     /**
-     * Builds the authorization URL (chunk809: KK6 logic).
+     * Builds the OAuth authorization URL (chunk406: clearConversation_3 logic).
      */
     buildAuthUrl(options: {
-        codeChallenge: string;
-        state: string;
-        port: number;
-        isManual?: boolean;
-        loginWithClaudeAi?: boolean;
-        inferenceOnly?: boolean;
-        orgUUID?: string;
+        codeChallenge: string,
+        state: string,
+        port: number,
+        isManual?: boolean,
+        loginWithClaudeAi?: boolean,
+        inferenceOnly?: boolean,
+        orgUUID?: string
     }): string {
         const baseUrl = options.loginWithClaudeAi ? CLAUDE_AI_AUTHORIZE_URL : CONSOLE_AUTHORIZE_URL;
         const url = new URL(baseUrl);
-        url.searchParams.append("response_type", "code");
+
+        url.searchParams.append("code", "true");
         url.searchParams.append("client_id", CLIENT_ID);
+        url.searchParams.append("response_type", "code");
         url.searchParams.append("redirect_uri", options.isManual ? MANUAL_REDIRECT_URL : `http://localhost:${options.port}/callback`);
+
+        // Scope selection (chunk406: clearConversation_3 logic)
+        // o58 = ["org:create_api_key", "user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers"]
+        // (Simplified here for actual usage)
+        const scopes = options.inferenceOnly ? ["user:inference"] : ["user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers"];
+        url.searchParams.append("scope", scopes.join(" "));
+
         url.searchParams.append("code_challenge", options.codeChallenge);
         url.searchParams.append("code_challenge_method", "S256");
         url.searchParams.append("state", options.state);
 
-        const scopes = options.inferenceOnly ? [SCOPES_INFERENCE] : SCOPES_DEFAULT;
-        url.searchParams.append("scope", scopes.join(" "));
-
         if (options.orgUUID) {
-            url.searchParams.append("org_uuid", options.orgUUID);
+            url.searchParams.append("orgUUID", options.orgUUID);
         }
+
         return url.toString();
     },
 
@@ -191,6 +200,53 @@ export const OAuthService = {
 
     /**
      * Refreshes access token.
+     */
+    /**
+     * Refreshes access token with cross-process locking (aligned with chunk1471: clearConversation_17).
+     */
+    async refreshTokenLocked(refreshToken: string, scopes: string[], retryCount: number = 0): Promise<AuthSession> {
+        const { getClaudePaths } = await import("../../utils/shared/runtimeAndEnv.js");
+        const { tryAcquireLock } = await import("../../utils/process/ProcessLock.js");
+        const { mkdirSync } = await import("node:fs");
+
+        const lockDir = getClaudePaths().locks;
+        try {
+            mkdirSync(lockDir, { recursive: true });
+        } catch { }
+
+        const release = await tryAcquireLock("oauth_refresh", lockDir);
+        if (!release) {
+            if (retryCount < 5) {
+                // Wait 1-2 seconds and retry (chunk1471 logic)
+                await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+
+                // Re-check session before retrying (chunk1471: FK.cache.clear followed by FK())
+                const persisted = await this.loadSession();
+                if (persisted && persisted.refreshToken !== refreshToken) {
+                    // Someone else refreshed it!
+                    return persisted;
+                }
+
+                return this.refreshTokenLocked(refreshToken, scopes, retryCount + 1);
+            }
+            throw new Error("Failed to acquire lock for token refresh after multiple attempts.");
+        }
+
+        try {
+            // Re-check after acquiring lock (chunk1471 logic)
+            const persisted = await this.loadSession();
+            if (persisted && persisted.refreshToken !== refreshToken && persisted.expiresAt > Date.now() + 60000) {
+                return persisted;
+            }
+
+            return await this.refreshToken(refreshToken, scopes);
+        } finally {
+            release();
+        }
+    },
+
+    /**
+     * Refreshes access token (internal).
      */
     async refreshToken(refreshToken: string, scopes: string[]): Promise<AuthSession> {
         const body = {
@@ -272,13 +328,30 @@ export const OAuthService = {
     /**
      * Logs out (chunk808: yN6 cleanup).
      */
-    async logout(): Promise<void> {
+    async logout(options: { clearOnboarding?: boolean } = { clearOnboarding: true }): Promise<void> {
         currentSession = null;
         if (KeychainService.isAvailable()) {
             const serviceName = getProductName("-credentials");
             KeychainService.deleteToken(serviceName);
         }
-        // Additional cleanup like clearing remote-settings cache would go here
+        // Additional cleanup: clearing remote-settings cache and resetting user state (aligned with chunk808: yN6)
+        const { clearRemoteSettingsCache } = await import("../config/RemoteSettingsService.js");
+        const { updateSettings } = await import("../config/SettingsService.js");
+        const AuthService = await import("./AuthService.js");
+        const StatsigManager = await import("../statsig/StatsigManager.js");
+        const { setStatsigStorage } = await import("./MsalAuthService.js");
+
+        clearRemoteSettingsCache();
+        if (options.clearOnboarding) {
+            updateSettings({
+                onboardingComplete: false,
+                subscriptionNoticeCount: 0,
+                hasAvailableSubscription: false
+            });
+        }
+        AuthService.logout();
+        StatsigManager.logout();
+        setStatsigStorage({ oauthAccount: null, accessToken: null });
     },
 
     /**
@@ -287,7 +360,8 @@ export const OAuthService = {
     async login(options: {
         onUrl: (url: string) => Promise<void>,
         orgUUID?: string,
-        loginWithClaudeAi?: boolean
+        loginWithClaudeAi?: boolean,
+        expiresIn?: number
     }): Promise<AuthSession> {
         const server = new LocalAuthServer();
         const port = await server.start();
@@ -305,8 +379,15 @@ export const OAuthService = {
 
         try {
             const code = await server.waitForCode(state, () => options.onUrl(url));
+            const automatic = server.hasPendingResponse();
 
-            const tokenResponse = await this.exchangeToken(code, state, verifier, port);
+            // Telemetry: tengu_oauth_auth_code_received (automatic: automatic)
+            // (Telemetry would be handled here in real implementation)
+
+            const tokenResponse = await this.exchangeToken(code, state, verifier, port, !automatic, options.expiresIn);
+
+            // Pre-login cleanup (chunk809: yN6({ clearOnboarding: false }))
+            await this.logout({ clearOnboarding: false });
 
             // Fetch profile and roles (chunk809: YK6 and zK6 logic)
             const profile = await this.fetchProfile(tokenResponse.access_token);
@@ -335,8 +416,17 @@ export const OAuthService = {
                 }
             };
 
+            if (automatic) {
+                server.handleSuccessRedirect(session.scopes);
+            }
+
             await this.saveSession(session);
             return session;
+        } catch (e) {
+            if (server.hasPendingResponse()) {
+                server.handleErrorRedirect();
+            }
+            throw e;
         } finally {
             server.close();
         }
@@ -382,6 +472,7 @@ export class LocalAuthServer {
     private server: http.Server;
     private port: number = 0;
     private expectedState: string | null = null;
+    private pendingResponse: http.ServerResponse | null = null;
     private resolve: ((code: string) => void) | null = null;
     private reject: ((err: Error) => void) | null = null;
 
@@ -400,48 +491,90 @@ export class LocalAuthServer {
         });
     }
 
+    hasPendingResponse(): boolean {
+        return this.pendingResponse !== null;
+    }
+
     async waitForCode(state: string, onStart: () => void): Promise<string> {
         this.expectedState = state;
         return new Promise((resolve, reject) => {
             this.resolve = resolve;
             this.reject = reject;
-            this.server.on("request", (req, res) => {
-                const url = new URL(req.url || "", `http://localhost:${this.port}`);
-                if (url.pathname !== "/callback") {
-                    res.writeHead(404);
-                    res.end();
-                    return;
-                }
-
-                const code = url.searchParams.get("code");
-                const returnedState = url.searchParams.get("state");
-
-                if (!code) {
-                    res.writeHead(400);
-                    res.end("Missing code");
-                    reject(new Error("No code received"));
-                    return;
-                }
-
-                if (returnedState !== this.expectedState) {
-                    res.writeHead(400);
-                    res.end("Invalid state");
-                    reject(new Error("State mismatch"));
-                    return;
-                }
-
-                // Chunk754 style success redirect
-                res.writeHead(302, { Location: "https://claude.ai/login_successful" });
-                res.end();
-
-                resolve(code);
-                this.close();
-            });
+            this.server.on("request", this.handleRequest.bind(this));
             onStart();
         });
     }
 
+    private handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
+        const url = new URL(req.url || "", `http://localhost:${this.port}`);
+        if (url.pathname !== "/callback") {
+            res.writeHead(404);
+            res.end();
+            return;
+        }
+
+        const code = url.searchParams.get("code");
+        const returnedState = url.searchParams.get("state");
+
+        if (!code) {
+            res.writeHead(400);
+            res.end("Missing code");
+            this.doReject(new Error("No code received"));
+            return;
+        }
+
+        if (returnedState !== this.expectedState) {
+            res.writeHead(400);
+            res.end("Invalid state");
+            this.doReject(new Error("State mismatch"));
+            return;
+        }
+
+        this.pendingResponse = res;
+        this.doResolve(code);
+    }
+
+    handleSuccessRedirect(scopes: string[]) {
+        if (!this.pendingResponse) return;
+
+        // chunk754: oF(A) check (checks for inference scope)
+        const isClaudeAi = scopes.includes("user:inference");
+        const redirectUrl = isClaudeAi ? CLAUDEAI_SUCCESS_URL : CONSOLE_SUCCESS_URL;
+
+        this.pendingResponse.writeHead(302, { Location: redirectUrl });
+        this.pendingResponse.end();
+        this.pendingResponse = null;
+    }
+
+    handleErrorRedirect() {
+        if (!this.pendingResponse) return;
+
+        this.pendingResponse.writeHead(302, { Location: CLAUDEAI_SUCCESS_URL });
+        this.pendingResponse.end();
+        this.pendingResponse = null;
+    }
+
+    private doResolve(code: string) {
+        if (this.resolve) {
+            this.resolve(code);
+            this.resolve = null;
+            this.reject = null;
+        }
+    }
+
+    private doReject(err: Error) {
+        if (this.reject) {
+            this.reject(err);
+            this.resolve = null;
+            this.reject = null;
+        }
+    }
+
     close() {
+        if (this.pendingResponse) {
+            this.handleErrorRedirect();
+        }
+        this.server.removeAllListeners();
         this.server.close();
         this.server.unref();
     }

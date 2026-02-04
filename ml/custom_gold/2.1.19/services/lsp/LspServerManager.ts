@@ -4,7 +4,7 @@
  */
 
 import * as path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, accessSync, constants } from 'node:fs';
 import { LspClient } from './LspClient.js';
 import { detectProjectType } from './ProjectDetection.js';
 import { getSettings } from '../config/SettingsService.js';
@@ -24,6 +24,9 @@ export class LspServerManager {
     private extensionToServers: Map<string, string[]> = new Map();
     private openFiles: Map<string, string> = new Map(); // uri -> serverName
     private isInitialized = false;
+    private lastRequestTime: Map<string, number> = new Map();
+    private idleCheckInterval: NodeJS.Timeout | null = null;
+    private readonly IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
     private static instance: LspServerManager;
 
     constructor() {
@@ -47,6 +50,9 @@ export class LspServerManager {
 
         // Register cleanup
         onCleanup(() => this.shutdown());
+
+        // Start idle checker
+        this.startIdleChecker();
 
         try {
             // In a real implementation, we would load configs from settings, 
@@ -85,10 +91,33 @@ export class LspServerManager {
         }
     }
 
+    private hasExecutable(name: string): boolean {
+        const pathEnv = process.env.PATH || '';
+        const paths = pathEnv.split(path.delimiter);
+        const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
+
+        for (const p of paths) {
+            for (const ext of exts) {
+                try {
+                    const fullPath = path.join(p, name + ext);
+                    if (existsSync(fullPath)) {
+                        try {
+                            accessSync(fullPath, constants.X_OK);
+                            return true;
+                        } catch {
+                            // Not executable
+                        }
+                    }
+                } catch {
+                    // Ignore path errors
+                }
+            }
+        }
+        return false;
+    }
+
     private async getAllLspConfigs(): Promise<Record<string, LspServerConfig>> {
-        // Simplified config loading logic.
-        // In 2.1.19 this merges settings, enterprise, project, and plugins.
-        return {
+        const configs: Record<string, LspServerConfig> = {
             "typescript-language-server": {
                 name: "typescript-language-server",
                 command: "typescript-language-server",
@@ -109,15 +138,69 @@ export class LspServerManager {
                 }
             }
         };
+
+        if (this.hasExecutable('gopls')) {
+            configs['gopls'] = {
+                name: 'gopls',
+                command: 'gopls',
+                args: [],
+                extensionToLanguage: { '.go': 'go' }
+            };
+        }
+
+        if (this.hasExecutable('rust-analyzer')) {
+            configs['rust-analyzer'] = {
+                name: 'rust-analyzer',
+                command: 'rust-analyzer',
+                args: [],
+                extensionToLanguage: { '.rs': 'rust' }
+            };
+        }
+
+        if (this.hasExecutable('clangd')) {
+            configs['clangd'] = {
+                name: 'clangd',
+                command: 'clangd',
+                args: [],
+                extensionToLanguage: { '.c': 'c', '.cpp': 'cpp', '.h': 'c', '.hpp': 'cpp' }
+            };
+        }
+
+        return configs;
     }
 
     async shutdown(): Promise<void> {
+        if (this.idleCheckInterval) {
+            clearInterval(this.idleCheckInterval);
+            this.idleCheckInterval = null;
+        }
         const stopPromises = Array.from(this.servers.values()).map(client => client.stop());
         await Promise.allSettled(stopPromises);
         this.servers.clear();
         this.extensionToServers.clear();
         this.openFiles.clear();
+        this.lastRequestTime.clear();
         this.isInitialized = false;
+    }
+
+    private startIdleChecker() {
+        if (this.idleCheckInterval) return;
+        this.idleCheckInterval = setInterval(() => {
+            const now = Date.now();
+            for (const [name, client] of this.servers.entries()) {
+                if (client.state === "running") {
+                    const lastTime = this.lastRequestTime.get(name) || 0;
+                    if (now - lastTime > this.IDLE_TIMEOUT_MS) {
+                        console.log(`[LspServerManager] Shutting down idle server: ${name}`);
+                        client.stop().catch(() => { });
+                    }
+                }
+            }
+        }, 60000); // Check every minute
+    }
+
+    private updateLastRequestTime(serverName: string) {
+        this.lastRequestTime.set(serverName, Date.now());
     }
 
     getServerForFile(filePath: string): LspClient | undefined {
@@ -142,12 +225,14 @@ export class LspServerManager {
     async sendRequest(filePath: string, method: string, params: any): Promise<any> {
         const client = await this.ensureServerStarted(filePath);
         if (!client) throw new Error(`No LSP server for ${filePath}`);
+        this.updateLastRequestTime(client.name);
         return client.sendRequest(method, params);
     }
 
     async openFile(filePath: string, content: string): Promise<void> {
         const client = await this.ensureServerStarted(filePath);
         if (!client) return;
+        this.updateLastRequestTime(client.name);
 
         const uri = `file://${path.resolve(filePath)}`;
         if (this.openFiles.get(uri) === client.name) return;
@@ -171,6 +256,7 @@ export class LspServerManager {
         if (!client || client.state !== "running") {
             return this.openFile(filePath, content);
         }
+        this.updateLastRequestTime(client.name);
 
         const uri = `file://${path.resolve(filePath)}`;
         if (this.openFiles.get(uri) !== client.name) {
@@ -189,6 +275,7 @@ export class LspServerManager {
     async saveFile(filePath: string): Promise<void> {
         const client = this.getServerForFile(filePath);
         if (!client || client.state !== "running") return;
+        this.updateLastRequestTime(client.name);
 
         await client.sendNotification("textDocument/didSave", {
             textDocument: {
@@ -200,6 +287,7 @@ export class LspServerManager {
     async closeFile(filePath: string): Promise<void> {
         const client = this.getServerForFile(filePath);
         if (!client || client.state !== "running") return;
+        this.updateLastRequestTime(client.name);
 
         const uri = `file://${path.resolve(filePath)}`;
         await client.sendNotification("textDocument/didClose", {

@@ -3,7 +3,7 @@
  */
 
 import { Task, TaskStatus, TaskStore, TaskMessageQueue, TaskType, TaskResult } from './TaskTypes.js';
-import { InMemoryTaskStore } from './InMemoryTaskStore.js';
+import { PersistentTaskStore } from './PersistentTaskStore.js';
 import { InMemoryTaskMessageQueue } from './InMemoryTaskMessageQueue.js';
 import { randomUUID } from 'node:crypto';
 
@@ -12,7 +12,7 @@ export class TaskManager {
     private messageQueue: TaskMessageQueue;
 
     constructor(store?: TaskStore, messageQueue?: TaskMessageQueue) {
-        this.store = store || new InMemoryTaskStore();
+        this.store = store || new PersistentTaskStore();
         this.messageQueue = messageQueue || new InMemoryTaskMessageQueue();
     }
 
@@ -27,12 +27,8 @@ export class TaskManager {
             startTime: Date.now()
         };
 
-        if (this.store instanceof InMemoryTaskStore) {
-            this.store.addTask(task);
-        } else {
-            // This would normally be handled by the store itself if it had an add method
-            // or we'd use a different interface. For simplicity, we assume InMemory for now.
-        }
+        await this.store.addTask(task);
+
 
         return task;
     }

@@ -82,12 +82,7 @@ export const WebSearchTool = {
 
         for await (const event of loop) {
             if (event.type === 'stream_event') {
-                const chunk = event.event;
-                // Handle progress updates if necessary (matching gold reference structure)
-                if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'input_json_delta') {
-                    // Extracting query updates from partial JSON if we were to match exactly, 
-                    // but for now we'll focus on results.
-                }
+                // Skip progress updates if they are noise or handled externally
             } else if (event.type === 'assistant') {
                 const assistantMessage = event.message;
                 for (const content of assistantMessage.content) {
@@ -101,6 +96,10 @@ export const WebSearchTool = {
                     }
                 }
             }
+        }
+
+        if (results.length === 0) {
+            results.push("No search results found.");
         }
 
         const durationSeconds = (performance.now() - startTime) / 1000;

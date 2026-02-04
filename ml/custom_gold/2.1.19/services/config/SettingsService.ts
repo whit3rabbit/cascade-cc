@@ -57,6 +57,8 @@ export interface Settings {
     githubActionSetupCount?: number;
     slackAppInstallCount?: number;
     hasVisitedPasses?: boolean;
+    subscriptionNoticeCount?: number;
+    hasAvailableSubscription?: boolean;
     plansDirectory?: string;
     toolSettings?: {
         [layer: string]: ToolPermissionSettings;

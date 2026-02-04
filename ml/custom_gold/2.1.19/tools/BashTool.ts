@@ -112,8 +112,8 @@ export const BashTool = {
                 cwdTempFile = path.join(tmpDir, `claude-cwd-${randomId}`);
 
                 // Append command to write CWD to temp file
-                // Use >| to force overwrite if noclobber is set, consistent with 2.1.19
-                commandToExecute = `${command} && pwd -P >| "${cwdTempFile}"`;
+                // Use { ...; } ; pwd to ensure pwd runs even if command fails
+                commandToExecute = `{ ${command}; } ; pwd -P >| "${cwdTempFile}"`;
             }
 
             if (shellPrefix) {

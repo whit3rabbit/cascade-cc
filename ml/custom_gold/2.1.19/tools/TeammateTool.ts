@@ -662,16 +662,30 @@ export const TeammateTool = {
                     throw new Error(`Failed to create tmux pane: ${err.message}`);
                 }
 
-                // Construct Command
+                // Construct Command with current settings
+                const { getSettings } = await import('../services/config/SettingsService.js');
+                const settings = getSettings();
                 const isTsFile = process.argv[1].endsWith('.ts') || process.argv[1].endsWith('.tsx');
                 const isDevEnv = EnvService.get("NODE_ENV") === 'development' || EnvService.isTruthy("CLAUDE_DEV");
                 const requestId = createRequestId("join", resolved);
 
-                let command;
+                let baseCommand;
                 if (isTsFile || (isDevEnv && !process.argv[1].includes('bin/claude'))) {
-                    command = `npm run dev -- --agent ${uniqueName} --auto-join ${requestId}`;
+                    baseCommand = `npm run dev --`;
                 } else {
-                    command = `claude --agent ${uniqueName} --auto-join ${requestId}`;
+                    baseCommand = `claude`;
+                }
+
+                let command = `${baseCommand} --agent ${uniqueName} --auto-join ${requestId}`;
+
+                // Propagate current model if set
+                if (settings.model) {
+                    command += ` --model ${settings.model}`;
+                }
+
+                // Propagate other relevant flags
+                if (EnvService.isTruthy("CLAUDE_CODE_DANGEROUSLY_SKIP_PERMISSIONS")) {
+                    command += ` --dangerously-skip-permissions`;
                 }
 
                 await tmux.sendCommandToPane(paneInfo.paneId, command);

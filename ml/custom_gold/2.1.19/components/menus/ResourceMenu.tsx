@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { mcpClientManager } from '../../services/mcp/McpClientManager.js';
@@ -13,6 +12,8 @@ export function ResourceMenu({ onExit }: ResourceMenuProps) {
     const [resources, setResources] = useState<any[]>([]);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [content, setContent] = useState<string | null>(null);
+    const [viewingResource, setViewingResource] = useState<string | null>(null);
 
     useEffect(() => {
         loadResources();
@@ -30,26 +31,51 @@ export function ResourceMenu({ onExit }: ResourceMenuProps) {
         }
     };
 
-    useInput((input, key) => {
+    const flatList = resources;
+
+    useInput(async (input, key) => {
         if (key.escape) {
+            if (content) {
+                setContent(null);
+                setViewingResource(null);
+                return;
+            }
             onExit();
             return;
         }
 
         if (loading) return;
 
+        if (content) {
+            return;
+        }
+
         if (key.upArrow) {
             setSelectedIndex(prev => Math.max(0, prev - 1));
         }
         if (key.downArrow) {
-            setSelectedIndex(prev => Math.min(resources.length - 1, prev + 1));
+            setSelectedIndex(prev => Math.min(flatList.length - 1, prev + 1));
         }
 
         if (key.return) {
-            // TODO: Ideally we would read the resource here or show details
-            // For now, maybe just copy the URI to clipboard or Log it?
-            // Or render a detail view.
-            // Let's just log it to console or show a message for now.
+            const resource = flatList[selectedIndex];
+            if (resource) {
+                setLoading(true);
+                try {
+                    const res = await mcpClientManager.readResource(resource.serverId, resource.uri);
+                    const actualContent = res.contents?.[0];
+                    let textToShow = "No content";
+                    if (actualContent) {
+                        textToShow = actualContent.text || (actualContent.blob ? "[Binary Data]" : "Empty");
+                    }
+                    setContent(textToShow);
+                    setViewingResource(resource.name);
+                } catch (e) {
+                    setError(`Failed to read resource: ${(e as Error).message}`);
+                } finally {
+                    setLoading(false);
+                }
+            }
         }
     });
 
@@ -57,7 +83,7 @@ export function ResourceMenu({ onExit }: ResourceMenuProps) {
         return (
             <Box flexDirection="column" padding={1}>
                 <Text>
-                    <Spinner type="dots" /> Loading resources...
+                    <Spinner type="dots" /> {content ? 'Reading resource...' : 'Loading resources...'}
                 </Text>
             </Box>
         );
@@ -72,6 +98,18 @@ export function ResourceMenu({ onExit }: ResourceMenuProps) {
         );
     }
 
+    if (content) {
+        return (
+            <Box flexDirection="column" borderStyle="round" borderColor="cyan" padding={1} width={80}>
+                <Text bold>Resource: {viewingResource}</Text>
+                <Box marginY={1} borderStyle="single" borderColor="gray" padding={1}>
+                    <Text>{content.slice(0, 2000) + (content.length > 2000 ? '\n... (truncated)' : '')}</Text>
+                </Box>
+                <Text dimColor>Press Esc to back</Text>
+            </Box>
+        );
+    }
+
     if (resources.length === 0) {
         return (
             <Box flexDirection="column" padding={1}>
@@ -80,45 +118,6 @@ export function ResourceMenu({ onExit }: ResourceMenuProps) {
             </Box>
         );
     }
-
-    // Group by server
-    const grouped: Record<string, any[]> = {};
-    resources.forEach(r => {
-        const server = r.serverId || 'unknown';
-        if (!grouped[server]) grouped[server] = [];
-        grouped[server].push(r);
-    });
-
-    // Flatten for selection
-    const flatItems: any[] = [];
-    Object.keys(grouped).forEach(server => {
-        flatItems.push({ type: 'header', label: server });
-        grouped[server].forEach(r => {
-            flatItems.push({ type: 'item', ...r, serverId: server });
-        });
-    });
-
-    // Adjust selection if it lands on a header (simple skip logic)
-    // Actually, let's just make headers non-selectable in rendering or logic
-    // For simplicity, we just list flattened items and skip headers in navigation logic if possible
-    // But hooks are hard to sync. Let's just render a flat list for now.
-
-    const renderList = () => {
-        let currentIndex = 0;
-        return Object.keys(grouped).map(server => (
-            <Box key={server} flexDirection="column" marginTop={1}>
-                <Text dimColor>Server: {server}</Text>
-                {grouped[server].map((r, i) => {
-                    const globalIndex = currentIndex++; // This logic is flawed if we want global navigation across groups
-                    // A better way is to use a single flat list for index calculation
-                    return null;
-                })}
-            </Box>
-        ));
-    };
-
-    // Re-do flattening for correct index
-    const flatList = resources;
 
     return (
         <Box flexDirection="column" borderStyle="round" borderColor="white" paddingX={1} width={80}>
@@ -129,7 +128,7 @@ export function ResourceMenu({ onExit }: ResourceMenuProps) {
                 {flatList.map((r, i) => {
                     const isSelected = i === selectedIndex;
                     return (
-                        <Box key={r.uri} flexDirection="row">
+                        <Box key={r.uri + i} flexDirection="row">
                             <Text color={isSelected ? 'cyan' : 'white'}>
                                 {isSelected ? '❯ ' : '  '}
                             </Text>
@@ -141,7 +140,7 @@ export function ResourceMenu({ onExit }: ResourceMenuProps) {
                 })}
             </Box>
             <Box marginTop={1}>
-                <Text dimColor>Press Enter to view (TODO) · Esc to go back</Text>
+                <Text dimColor>Press Enter to view · Esc to go back</Text>
             </Box>
         </Box>
     );

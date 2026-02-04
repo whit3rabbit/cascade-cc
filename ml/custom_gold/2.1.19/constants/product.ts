@@ -40,6 +40,8 @@ export const CLAUDE_CLI_PROFILE_URL = "https://api.anthropic.com/api/claude_cli_
 export const API_KEY_URL = "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
 export const CLAUDE_AI_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
 export const CONSOLE_AUTHORIZE_URL = "https://platform.claude.com/oauth/authorize";
+export const CONSOLE_SUCCESS_URL = "https://platform.claude.com/buy_credits?returnUrl=/oauth/code/success%3Fapp%3Dclaude-code";
+export const CLAUDEAI_SUCCESS_URL = "https://platform.claude.com/oauth/code/success?app=claude-code";
 export const MANUAL_REDIRECT_URL = "https://platform.claude.com/oauth/code/callback";
 export const OAUTH_BETA_HEADER = "oauth-2025-04-20";
 
