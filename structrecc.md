@@ -1,7 +1,7 @@
 # structrecc
 
 Purpose: Proposed filesystem map for LLM-guided deobfuscation/refinement.
-Generated: 2026-02-02T22:11:40.317Z
+Generated: 2026-02-04T02:31:39.363Z
 
 src/
   AgentGeneratorTool.ts
@@ -18,12 +18,16 @@ src/
   Fuse.ts
   GlobTool.ts
   GrepTool.ts
+  LspTool.ts
   MCPSearchTool.ts
   MemoryCommand.tsx
-  MessageHistory.tsx
+  MemoryReadTool.ts
+  MemoryWriteTool.ts
   NotebookCellIdentificationTool.ts
   NotebookEditTool.ts
+  SendMessageTool.ts
   SlashCommandDispatcher.ts
+  StructuredDiff.tsx
   TaskList.tsx
   TaskStopTool.ts
   TeammateTool.ts
@@ -33,9 +37,11 @@ src/
   WebSearchTool.ts
   ambient.d.ts
   browser.ts
+  bug.ts
   build.ts
   cleanup.ts
   cli.tsx
+  doctor.ts
   fileCleanup.ts
   help.tsx
   helpers.ts
@@ -52,10 +58,20 @@ src/
   releaseUtils.ts
   style.ts
   theme.ts
+  useAppState.tsx
+  useArrowKeyHistory.ts
   useAutocomplete.tsx
+  useDoubleAction.ts
   useHistory.tsx
+  useKillRing.ts
+  useMacros.ts
   usePermissionContext.ts
+  useStash.ts
+  useSuggestions.ts
+  useTermSize.ts
   useTerminalInput.ts
+  useUndoRedo.ts
+  useVimMode.ts
   ModelPicker/
     ModelPicker.tsx
   common/
@@ -68,6 +84,8 @@ src/
     StatusDisplay.tsx
   mcp/
     MCPServerDialog.tsx
+    MarketplaceLoader.ts
+    MarketplaceService.ts
     McpBundleLoader.ts
     McpClientManager.ts
     McpConfigManager.ts
@@ -81,8 +99,11 @@ src/
   menus/
     AgentsMenu.tsx
     ConfigMenu.tsx
+    MarketplaceMenu.tsx
     McpDiscoverView.tsx
     McpMenu.tsx
+    PromptMenu.tsx
+    ResourceMenu.tsx
     SettingsMenu.tsx
     TaskMenu.tsx
     UnifiedSearchMenu.tsx
@@ -113,23 +134,31 @@ src/
     FileIndexService.ts
     HistoryService.ts
     Logo.tsx
+    MessageRenderer.tsx
     NotificationService.tsx
     PermissionService.ts
     REPL.tsx
+    REPLHeader.tsx
+    REPLInput.tsx
+    REPLKeybindings.tsx
     ShellSnapshotService.ts
     StatusLine.tsx
     Suggestions.ts
     SwarmBackendRegistry.ts
     SwarmConstants.ts
     TaskManager.ts
+    TasksDialog.tsx
+    TerminalInput.tsx
     ThemeService.ts
     TmuxBackend.ts
+    Transcript.tsx
     TranscriptToggle.tsx
     WebSocketTransport.ts
     iterm2Setup.ts
     schemas.ts
     shellQuote.ts
     shellSnapshot.ts
+    terminalDetection.ts
     terminalSupport.ts
     tmuxUtils.ts
   wizard/
@@ -154,13 +183,19 @@ src/
     msalConfig.ts
   bugreport/
     BugReportService.ts
+  compaction/
+    CompactionService.ts
+    MicrocompactService.ts
   config/
+    ConfigManager.ts
     ConfigStatusService.ts
     EnvService.ts
+    ProjectConfigHandler.ts
     RemoteSettingsService.ts
     SettingsService.ts
     apiConfig.ts
   conversation/
+    CategoryRuleCache.ts
     ConversationService.ts
     ModelResolver.ts
     PromptManager.ts
@@ -179,6 +214,9 @@ src/
   logging/
     LogManager.ts
   lsp/
+    LspClient.ts
+    LspFormatting.ts
+    LspServerManager.ts
     ProjectDetection.ts
   marketplace/
     MarketplaceLoader.ts
@@ -198,6 +236,11 @@ src/
     StatsigManager.ts
     StatsigMetadataProvider.ts
     StatsigService.ts
+  tasks/
+    InMemoryTaskMessageQueue.ts
+    InMemoryTaskStore.ts
+    TaskManager.ts
+    TaskTypes.ts
   teams/
     MailboxPollingService.ts
     TeamIdentity.ts
