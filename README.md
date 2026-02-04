@@ -1,8 +1,7 @@
 # Cascade-CC
 
-Example output code download (see what the final output looks like): https://github.com/whit3rabbit/cascade-cc/releases/download/2.1.14/2.1.14.zip (release: https://github.com/whit3rabbit/cascade-cc/releases/tag/2.1.14)
-
 A high-performance deobfuscation engine for Claude Code bundles using **Hybrid Differential Deobfuscation**.
+
 This project is very loosely based on the Cascade JS Deobfuscator.
 
 The system combines **Graph Theory** (Markov Centrality), **Neural Fingerprinting** (Siamese Transformer Networks), and **LLM Semantic Inference** to reconstruct minified code into its original, human-readable source structure.
@@ -58,7 +57,8 @@ Notes:
 ## TL;DR
 
 ```bash
-npm run full -- <version> [reference_version]
+npm run full # Will grab latest version and run through everything
+npm run full -- <version> [reference_version] # Specific version
 ```
 
 ## Full Analysis Workflow
