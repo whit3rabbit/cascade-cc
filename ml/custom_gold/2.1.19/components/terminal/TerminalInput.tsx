@@ -93,6 +93,8 @@ export const TerminalInput: React.FC<TerminalInputProps> = (props) => {
                 return { backgroundColor: '#ECC94B', color: '#000000' }; // Chakra yellow.400
             case 'INSERT':
             default:
+                // For INSERT mode, use a white block if cursor is on a character, 
+                // or a slightly different style to indicate beam-like behavior
                 return { backgroundColor: '#ffffff', color: '#000000' };
         }
     };
@@ -123,6 +125,13 @@ export const TerminalInput: React.FC<TerminalInputProps> = (props) => {
                     </Box>
                 )}
             </Box>
+
+            {/* Vim Mode Indicator */}
+            {vimModeEnabled && currentVimMode !== 'NORMAL' && (
+                <Box marginTop={0}>
+                    <Text dimColor>-- {currentVimMode} --</Text>
+                </Box>
+            )}
 
             {suggestions.length > 0 && (
                 <Box flexDirection="column" marginLeft={2} marginTop={1} borderStyle="round" borderColor="gray">

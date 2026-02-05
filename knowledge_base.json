@@ -185,6 +185,7 @@
           "WebSocketTransport.ts",
           "schemas.ts",
           "Suggestions.ts",
+          "cursorStyle.ts",
           "iterm2Setup.ts",
           "shellQuote.ts",
           "shellSnapshot.ts",
@@ -316,6 +317,12 @@
           "MarketplaceLoader.ts",
           "MarketplaceService.ts",
           "SourceParser.ts"
+        ]
+      },
+      "mobile": {
+        "description": "Auto-generated from custom_gold",
+        "files": [
+          "QRCodeService.ts"
         ]
       },
       "plugin": {
@@ -515,9 +522,9 @@
         "compacted.",
         "history",
         "compact",
-        "claude-3-5-sonnet-20241022",
         "conversation",
         "Conversation",
+        "claude-3-5-sonnet-20241022",
         "system"
       ]
     },
@@ -617,11 +624,11 @@
       "description": "Auto-generated anchor for commands/help.tsx",
       "trigger_keywords": [
         "//play.google.com/store/apps/details",
+        "../services/mobile/QRCodeService.js",
         "../constants/build.js",
         "helpCommandDefinition",
         "com.anthropic.claude",
         "local-jsx",
-        "../services/terminal/CommandRegistry.js",
         "../constants/product.js",
         "android"
       ]
@@ -986,8 +993,8 @@
       "description": "Auto-generated anchor for components/menus/UnifiedSearchMenu.tsx",
       "trigger_keywords": [
         "UnifiedSearchMenu",
-        "ink-text-input",
         "history",
+        "ink-text-input",
         "results",
         "../../services/terminal/ThemeService.js",
         "close",
@@ -1121,10 +1128,10 @@
       "trigger_keywords": [
         "SandboxPermissionDialogProps",
         "SandboxPermissionDialog",
-        "domain",
         "attempting",
         "restricts",
         "access.",
+        "domain",
         "./PermissionOption.js",
         "action"
       ]
@@ -1297,9 +1304,9 @@
         "dimColor",
         "48BB78",
         "ECC94B",
-        "ffffff",
         "../../hooks/useTerminalInput.js",
-        "TerminalInputProps"
+        "TerminalInputProps",
+        "stashed"
       ]
     },
     {
@@ -1597,12 +1604,14 @@
       "suggested_name": "`VimMode`",
       "description": "Auto-generated anchor for hooks/useVimMode.ts",
       "trigger_keywords": [
+        "../utils/terminal/cursorStyle.js",
         "useVimMode",
         "VimMode",
+        "beam",
         "VISUAL",
         "NORMAL",
-        "INSERT",
-        "react"
+        "block",
+        "INSERT"
       ]
     },
     {
@@ -1610,14 +1619,14 @@
       "suggested_name": "`AgentDesign`",
       "description": "Auto-generated anchor for services/agents/AgentDesigner.ts",
       "trigger_keywords": [
-        "../conversation/ConversationService.js",
         "configuration.",
         "AgentDesigner",
         "AgentDesign",
         "identifiers",
         "incomplete.",
         "IMPORTANT",
-        "design"
+        "design",
+        "text."
       ]
     },
     {
@@ -1627,8 +1636,8 @@
       "trigger_keywords": [
         "AgentPersistence",
         "AgentData",
-        "gray-matter",
         "../../types/AgentTypes.js",
+        "gray-matter",
         "builtin",
         "color",
         "agents",
@@ -1820,7 +1829,7 @@
         "CompactionService",
         "CompactionResult",
         "DISABLE_COMPACT",
-        "Compaction"
+        "compacted"
       ]
     },
     {
@@ -1890,7 +1899,7 @@
         ".claude.json",
         "ENOENT",
         "change",
-        "Config"
+        "fs/promises"
       ]
     },
     {
@@ -1973,14 +1982,14 @@
       "suggested_name": "`TokenBreakdown`",
       "description": "Auto-generated anchor for services/conversation/PromptManager.ts",
       "trigger_keywords": [
+        "../compaction/CompactionService.js",
         "./CategoryRuleCache.js",
         "TokenBreakdown",
         "PromptManager",
         "promptBorder",
-        "Compacting",
-        "history...",
-        "Summarize",
-        "estimate"
+        "estimate",
+        "manually",
+        "purple"
       ]
     },
     {
@@ -2016,14 +2025,14 @@
       "suggested_name": "`HookService`",
       "description": "Auto-generated anchor for services/hooks/HookService.ts",
       "trigger_keywords": [
+        "../conversation/PromptManager.js",
+        "ANTHROPIC_MODEL",
         "./HookTypes.js",
         "HookService",
-        "AbortError",
-        "exited",
-        "schema",
-        "Stderr",
-        "executing",
-        "timed"
+        "Condition",
+        "Hook...",
+        "../conversation/ConversationService.js",
+        "claude-3-haiku-20240307"
       ]
     },
     {
@@ -2031,14 +2040,14 @@
       "suggested_name": "`HookEventSchema`",
       "description": "Auto-generated anchor for services/hooks/HookTypes.ts",
       "trigger_keywords": [
-        "PermissionRequest",
         "UserPromptSubmit",
         "HookEventSchema",
         "HookTypes",
-        "PostToolUseFailure",
+        "PermissionRequest",
+        "SubagentStart",
+        "SubagentStop",
         "Explanation",
-        "PostToolUse",
-        "PreCompact"
+        "SessionEnd"
       ]
     },
     {
@@ -2166,14 +2175,14 @@
       "suggested_name": "`MarketplaceServiceType`",
       "description": "Auto-generated anchor for services/marketplace/MarketplaceService.ts",
       "trigger_keywords": [
+        "//raw.githubusercontent.com/",
         "./MarketplaceLoader.js",
+        "/main/marketplace.json",
         "MarketplaceServiceType",
+        "policy_blocked",
         "configured.",
         "refreshed",
-        "plugins.",
-        "MarketplaceService",
-        "refreshing",
-        "Refreshing"
+        "plugins."
       ]
     },
     {
@@ -2196,14 +2205,14 @@
       "suggested_name": "`MarketplaceService`",
       "description": "Auto-generated anchor for services/mcp/MarketplaceService.ts",
       "trigger_keywords": [
-        "git_unavailable",
         "auto-installed",
         "previously",
         "disabled.",
         "MarketplaceService",
+        "git_unavailable",
         "Attempting",
-        "anthropics/claude-plugins-official",
-        "claude-plugins-official"
+        "./PluginManager.js",
+        "unavailable."
       ]
     },
     {
@@ -2247,8 +2256,8 @@
         "USE_MCP_CLI_DIR",
         "save",
         ".json",
-        "config",
-        "fs/promises"
+        "fs/promises",
+        "config"
       ]
     },
     {
@@ -2315,14 +2324,14 @@
       "suggested_name": "`ConfigScope`",
       "description": "Auto-generated anchor for services/mcp/PluginManager.ts",
       "trigger_keywords": [
+        "../terminal/CommandRegistry.js",
+        "../lsp/LspServerManager.js",
         "../../utils/shared/git.js",
+        ".claude-plugin",
         "//github.com/",
         "PluginManager",
         "Uninstalling",
-        "ConfigScope",
-        "--no-audit",
-        "Dependency",
-        "--no-fund"
+        "ConfigScope"
       ]
     },
     {
@@ -2337,6 +2346,21 @@
       ]
     },
     {
+      "suggested_path": "`src/services/mobile/QRCodeService.ts`",
+      "suggested_name": "`generateQRCode`",
+      "description": "Auto-generated anchor for services/mobile/QRCodeService.ts",
+      "trigger_keywords": [
+        "generateQRCode",
+        "QRCodeService",
+        "qrcode",
+        "generating",
+        "FFFFFF",
+        "code.",
+        "generate",
+        "code"
+      ]
+    },
+    {
       "suggested_path": "`src/services/plugin/AgentLoader.ts`",
       "suggested_name": "`AgentDefinition`",
       "description": "Auto-generated anchor for services/plugin/AgentLoader.ts",
@@ -2346,8 +2370,8 @@
         "scan",
         "plugin",
         "load",
-        "agent",
         "utf-8",
+        "agent",
         "path"
       ]
     },
@@ -2390,8 +2414,8 @@
         "SkillCommand",
         "local_skill",
         "SkillLoader",
-        "skills",
         "../mcp/McpClientManager.js",
+        "skills",
         ".claude"
       ]
     },
@@ -2547,8 +2571,8 @@
         "TaskManager",
         "Client",
         "./TaskTypes.js",
-        "notification",
-        "killed"
+        "killed",
+        "notification"
       ]
     },
     {
@@ -2563,7 +2587,7 @@
         "remote_agent",
         "local_agent",
         "local_bash",
-        "notification"
+        "killed"
       ]
     },
     {
@@ -2750,7 +2774,7 @@
         "Tracing",
         "OpenTelemetry",
         "value",
-        "../../utils/shared/runtime.js"
+        "Context"
       ]
     },
     {
@@ -2788,9 +2812,9 @@
       "suggested_name": "`initializeApp`",
       "description": "Auto-generated anchor for services/terminal/AppInitializer.ts",
       "trigger_keywords": [
+        "../marketplace/MarketplaceService.js",
         "../teams/MailboxPollingService.js",
         "../../utils/shared/treeSitter.js",
-        "../mcp/MarketplaceService.js",
         "../../utils/fileCleanup.js",
         "./ShellSnapshotService.js",
         "../telemetry/OtelInit.js",
@@ -2863,9 +2887,9 @@
       "suggested_name": "`Usage`",
       "description": "Auto-generated anchor for services/terminal/CostService.ts",
       "trigger_keywords": [
-        "claude-3-haiku-20240307",
         "claude-3-opas-20240229",
         "CostService",
+        "claude-3-haiku-20240307",
         "Usage",
         "claude-3-5-sonnet-20241022"
       ]
@@ -2952,12 +2976,12 @@
       "trigger_keywords": [
         "permissionPromptTool",
         "PermissionResponse",
+        "view_content_chunk",
         "Container/Sandbox",
         "PermissionService",
         "subcommandResults",
-        "user_interaction",
-        "sandboxOverride",
-        "passthrough"
+        "view_file_outline",
+        "user_interaction"
       ]
     },
     {
@@ -3208,9 +3232,9 @@
         "GlobTool",
         "pattern.",
         "matching",
-        "micromatch",
         "matches",
         "node_modules",
+        "micromatch",
         ".git"
       ]
     },
@@ -3372,11 +3396,11 @@
         ".claude/todos.json",
         "TaskCreateTool",
         "task/todo.",
-        "TaskCreate",
-        "TaskUpdate",
         "TodoTools",
         "tasks.",
-        "task."
+        "task.",
+        "TaskCreate",
+        "TaskUpdate"
       ]
     },
     {
@@ -3385,13 +3409,13 @@
       "description": "Auto-generated anchor for tools/ToolGroups.ts",
       "trigger_keywords": [
         "send_command_input",
-        "read_url_content",
-        "run_command",
         "ToolGroups",
         "ToolGroup",
         "multi_replace_file_content",
+        "read_url_content",
         "write_to_file",
-        "find_by_name"
+        "find_by_name",
+        "grep_search"
       ]
     },
     {
@@ -3477,9 +3501,9 @@
         "ambient.d",
         "isMatch",
         "cli-highlight",
+        "marked",
         "gray-matter",
-        "micromatch",
-        "marked"
+        "micromatch"
       ]
     },
     {
@@ -3498,14 +3522,14 @@
       "suggested_name": "`handleCliErrorAndExit`",
       "description": "Auto-generated anchor for utils/browser.ts",
       "trigger_keywords": [
-        "../services/mcp/PluginManager.js",
         "../services/ide/ideDetection.js",
         "tengu_plugin_uninstalled_cli",
         "./shared/screenshotUtils.js",
         "tengu_plugin_installed_cli",
         "./shared/fileTypeUtils.js",
         "tengu_plugin_disabled_cli",
-        "tengu_plugin_enabled_cli"
+        "tengu_plugin_enabled_cli",
+        "tengu_plugin_updated_cli"
       ]
     },
     {
@@ -3600,8 +3624,8 @@
         ".scss",
         ".css",
         "codespan",
-        "gray-matter",
-        "micromatch"
+        "marked",
+        ".yaml"
       ]
     },
     {
@@ -3819,9 +3843,9 @@
         "www.github.com",
         "SourceParser",
         "github.com",
-        "manifest",
         "exist",
         "does",
+        "manifest",
         "Unsupported"
       ]
     },
@@ -4122,11 +4146,11 @@
       "description": "Auto-generated anchor for utils/shared/fileHistory.ts",
       "trigger_keywords": [
         "file-history",
-        "modification",
         "BackupInfo",
         "attach",
         "CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING",
         "./runtimeAndEnv.js",
+        "modification",
         "fileHistory",
         "FileHistory"
       ]
@@ -4259,9 +4283,9 @@
         "new_directory",
         "Registered",
         "new_file",
-        "skill",
         "messageUtils",
-        "MessageUtils"
+        "MessageUtils",
+        "attachment"
       ]
     },
     {
@@ -4319,7 +4343,7 @@
         "CLAUDE_CODE_DEMO",
         "standard",
         "aborted",
-        "valid"
+        "Expected"
       ]
     },
     {
@@ -4486,6 +4510,18 @@
       ]
     },
     {
+      "suggested_path": "`src/utils/terminal/cursorStyle.ts`",
+      "suggested_name": "`CursorStyle`",
+      "description": "Auto-generated anchor for utils/terminal/cursorStyle.ts",
+      "trigger_keywords": [
+        "underline",
+        "cursorStyle",
+        "CursorStyle",
+        "beam",
+        "block"
+      ]
+    },
+    {
       "suggested_path": "`src/utils/terminal/iterm2Setup.ts`",
       "suggested_name": "`findPythonPackageManager`",
       "description": "Auto-generated anchor for utils/terminal/iterm2Setup.ts",
@@ -4566,7 +4602,7 @@
         "../shared/bashUtils.js",
         "tmux",
         "create",
-        "Unknown"
+        "session"
       ]
     },
     {
@@ -4804,7 +4840,7 @@
     },
     {
       "suggested_name": "`helpCommandDefinition`",
-      "logic_anchor": "Show available commands and help"
+      "logic_anchor": "../services/mobile/QRCodeService.js"
     },
     {
       "suggested_name": "`CommandContext`",
@@ -5751,6 +5787,10 @@
       "logic_anchor": "Macro recording stopped"
     },
     {
+      "suggested_name": "`VimMode`",
+      "logic_anchor": "../utils/terminal/cursorStyle.js"
+    },
+    {
       "suggested_name": "`AgentDesign`",
       "logic_anchor": "IMPORTANT: The following identifiers already exist and must NOT be used:"
     },
@@ -6192,10 +6232,6 @@
     },
     {
       "suggested_name": "`TokenBreakdown`",
-      "logic_anchor": "Summarize the following conversation history:"
-    },
-    {
-      "suggested_name": "`TokenBreakdown`",
       "logic_anchor": "Failed to count tokens, using estimate:"
     },
     {
@@ -6204,11 +6240,15 @@
     },
     {
       "suggested_name": "`TokenBreakdown`",
-      "logic_anchor": "Compacting conversation history..."
+      "logic_anchor": "../compaction/CompactionService.js"
     },
     {
       "suggested_name": "`TokenBreakdown`",
-      "logic_anchor": "SUMMARY OF PREVIOUS CONVERSATION:"
+      "logic_anchor": "User manually requested compaction"
+    },
+    {
+      "suggested_name": "`TokenBreakdown`",
+      "logic_anchor": "../anthropic/AnthropicClient.js"
     },
     {
       "suggested_name": "`DocumentationService`",
@@ -6240,6 +6280,10 @@
     },
     {
       "suggested_name": "`HookService`",
+      "logic_anchor": "Agent hook did not return valid JSON decision"
+    },
+    {
+      "suggested_name": "`HookService`",
       "logic_anchor": "No command specified in hook configuration"
     },
     {
@@ -6253,10 +6297,6 @@
     {
       "suggested_name": "`HookService`",
       "logic_anchor": "[HookService] Error executing hook for"
-    },
-    {
-      "suggested_name": "`HookService`",
-      "logic_anchor": "[HookService] Invalid input for event"
     },
     {
       "suggested_name": "`HookEventSchema`",
@@ -6440,19 +6480,19 @@
     },
     {
       "suggested_name": "`MarketplaceServiceType`",
+      "logic_anchor": "Failed to auto-install official marketplace:"
+    },
+    {
+      "suggested_name": "`MarketplaceServiceType`",
       "logic_anchor": "' configuration missing or invalid URL"
     },
     {
       "suggested_name": "`MarketplaceServiceType`",
-      "logic_anchor": "../config/SettingsService.js"
+      "logic_anchor": "anthropics/claude-plugins-official"
     },
     {
       "suggested_name": "`MarketplaceServiceType`",
-      "logic_anchor": "No marketplaces configured."
-    },
-    {
-      "suggested_name": "`MarketplaceServiceType`",
-      "logic_anchor": "./MarketplaceLoader.js"
+      "logic_anchor": "https://raw.githubusercontent.com/"
     },
     {
       "suggested_name": "`MarketplaceLoader`",
@@ -6641,6 +6681,14 @@
     {
       "suggested_name": "`ToolDetails`",
       "logic_anchor": "file_write"
+    },
+    {
+      "suggested_name": "`generateQRCode`",
+      "logic_anchor": "Failed to generate QR code:"
+    },
+    {
+      "suggested_name": "`generateQRCode`",
+      "logic_anchor": "Error generating QR code."
     },
     {
       "suggested_name": "`AgentDefinition`",
@@ -7164,11 +7212,11 @@
     },
     {
       "suggested_name": "`initializeApp`",
-      "logic_anchor": "../teams/MailboxPollingService.js"
+      "logic_anchor": "../marketplace/MarketplaceService.js"
     },
     {
       "suggested_name": "`initializeApp`",
-      "logic_anchor": "Failed to initialize MCP servers:"
+      "logic_anchor": "../teams/MailboxPollingService.js"
     },
     {
       "suggested_name": "`TerminalSetupState`",
@@ -7352,6 +7400,10 @@
     },
     {
       "suggested_name": "`PermissionResponse`",
+      "logic_anchor": "Modification tools are disabled in Plan mode."
+    },
+    {
+      "suggested_name": "`PermissionResponse`",
       "logic_anchor": "../../services/config/SettingsService.js"
     },
     {
@@ -7365,10 +7417,6 @@
     {
       "suggested_name": "`PermissionResponse`",
       "logic_anchor": "Allowed based on subcommand results"
-    },
-    {
-      "suggested_name": "`PermissionResponse`",
-      "logic_anchor": "../../utils/shared/runtime.js"
     },
     {
       "suggested_name": "`createShellSnapshot`",
@@ -9043,6 +9091,10 @@
       "logic_anchor": "(arguments:"
     },
     {
+      "suggested_name": "`CursorStyle`",
+      "logic_anchor": "underline"
+    },
+    {
       "suggested_name": "`findPythonPackageManager`",
       "logic_anchor": "iTerm2 → Settings → General → Magic → Enable Python API"
     },
@@ -9703,6 +9755,14 @@
     {
       "role": "AUTO_ERROR",
       "content": "Failed to acquire lock for token refresh after multiple attempts."
+    },
+    {
+      "role": "AUTO_ERROR",
+      "content": "No prompt specified for prompt hook"
+    },
+    {
+      "role": "AUTO_ERROR",
+      "content": "No prompt specified for agent hook"
     }
   ],
   "structural_anchors": [

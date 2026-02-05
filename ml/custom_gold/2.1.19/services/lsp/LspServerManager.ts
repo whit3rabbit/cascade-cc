@@ -17,11 +17,17 @@ export interface LspServerConfig {
     args: string[];
     env?: Record<string, string>;
     extensionToLanguage: Record<string, string>;
+    transport?: "stdio" | "socket"; // Defaults to stdio
+    initializationOptions?: any;
+    settings?: any;
+    workspaceFolder?: string;
+    timeout?: number;
 }
 
 export class LspServerManager {
     private servers: Map<string, LspClient> = new Map();
     private extensionToServers: Map<string, string[]> = new Map();
+    private serverConfigs: Map<string, LspServerConfig> = new Map();
     private openFiles: Map<string, string> = new Map(); // uri -> serverName
     private isInitialized = false;
     private lastRequestTime: Map<string, number> = new Map();
@@ -45,6 +51,24 @@ export class LspServerManager {
         return this.servers;
     }
 
+    registerServerConfig(config: LspServerConfig) {
+        this.serverConfigs.set(config.name, config);
+        // Also update extension map if immediate effect is needed, 
+        // but typically this is called before initialize or we need to re-init.
+        // For now, let's allow dynamic addition.
+        const extensions = Object.keys(config.extensionToLanguage);
+        for (const ext of extensions) {
+            const normalizedExt = ext.toLowerCase();
+            if (!this.extensionToServers.has(normalizedExt)) {
+                this.extensionToServers.set(normalizedExt, []);
+            }
+            const list = this.extensionToServers.get(normalizedExt)!;
+            if (!list.includes(config.name)) {
+                list.push(config.name);
+            }
+        }
+    }
+
     async initialize(): Promise<void> {
         if (this.isInitialized) return;
 
@@ -58,9 +82,19 @@ export class LspServerManager {
             // In a real implementation, we would load configs from settings, 
             // project .lsp.json, and plugins. For now, we use a basic set 
             // or rely on dynamic discovery.
-            const allConfigs = await this.getAllLspConfigs();
+            // Load default configs
+            const defaultConfigs = await this.getDefaultLspConfigs();
+            for (const config of Object.values(defaultConfigs)) {
+                if (!this.serverConfigs.has(config.name)) {
+                    this.registerServerConfig(config);
+                }
+            }
 
-            for (const [name, config] of Object.entries(allConfigs)) {
+            // In a real implementation, we would load configs from settings, 
+            // project .lsp.json, and plugins. 
+            // PluginManager should have registered plugin configs by now if initialized before.
+
+            for (const [name, config] of this.serverConfigs.entries()) {
                 const extensions = Object.keys(config.extensionToLanguage);
                 for (const ext of extensions) {
                     const normalizedExt = ext.toLowerCase();
@@ -116,7 +150,7 @@ export class LspServerManager {
         return false;
     }
 
-    private async getAllLspConfigs(): Promise<Record<string, LspServerConfig>> {
+    private async getDefaultLspConfigs(): Promise<Record<string, LspServerConfig>> {
         const configs: Record<string, LspServerConfig> = {
             "typescript-language-server": {
                 name: "typescript-language-server",

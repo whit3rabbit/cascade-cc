@@ -10,9 +10,16 @@ import matter from 'gray-matter';
 import { AgentMetadata } from '../../types/AgentTypes.js';
 
 export interface AgentData extends AgentMetadata {
-    scope?: 'user' | 'project' | 'builtin';
+    scope?: 'user' | 'project' | 'builtin' | 'plugin';
     systemPrompt: string; // Ensure systemPrompt is present (as per original AgentData)
     [key: string]: any;
+}
+
+// In-memory storage for agents loaded from plugins (non-persistent)
+const dynamicAgents = new Map<string, AgentData>();
+
+export function registerAgent(agent: AgentData) {
+    dynamicAgents.set(agent.name, { ...agent, scope: 'plugin' });
 }
 
 /**
@@ -102,6 +109,11 @@ export function listAgents(): AgentData[] {
         }
     }
 
+    // Dynamic Agents (Plugins)
+    for (const agent of dynamicAgents.values()) {
+        agents.push(agent);
+    }
+
     return agents;
 }
 
@@ -119,6 +131,11 @@ export function findAgent(agentType: string): AgentData | null {
     const userFilePath = join(getBaseConfigDir(), 'agents', `${agentType}.md`);
     const userAgent = loadAgent(userFilePath, 'user');
     if (userAgent) return userAgent;
+
+    // 3. Check Dynamic scope (Plugins)
+    if (dynamicAgents.has(agentType)) {
+        return dynamicAgents.get(agentType) || null;
+    }
 
     return null;
 }

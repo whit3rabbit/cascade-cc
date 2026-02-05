@@ -163,58 +163,62 @@ ${inlineDef.prompt || ""}
     /**
      * Compacts message history by summarizing older turns.
      */
+    /**
+     * Compacts message history by summarizing older turns.
+     */
     static async compactMessages(messages: AgentMessage[], options: any): Promise<AgentMessage[]> {
-        if (messages.length < 10) return messages; // Don't compact small history
-
-        const { Anthropic } = await import('../anthropic/AnthropicClient.js');
-        const client = new Anthropic();
-
-        const messagesToSummarize = messages.slice(0, -4); // Keep last 4 messages intact
-        const recentMessages = messages.slice(-4);
+        const { compactionService } = await import('../compaction/CompactionService.js');
 
         try {
-            terminalLog("Compacting conversation history...", "info");
-            const response = await client.messages.create({
-                model: options.model || "claude-3-5-sonnet-20241022",
-                max_tokens: 1500,
-                system: `You are a helpful assistant specialized in summarizing technical conversations for an agent's memory.
-Provide a concise but comprehensive summary including:
-1. KEY FINDINGS: Facts discovered about the codebase (paths, variable values, logic).
-2. ACTIONS TAKEN: Tools run and their outcomes.
-3. CURRENT STATE: Active goals, pending tasks, and next steps.
-4. CRITICAL MEMORY: Specific strings, IDs, or patterns that MUST be preserved for future tool calls.
+            // Note: CompactionService handles splitting recent messages vs summary context internally or via logic.
+            // Actually CompactionService.compact takes ALL messages and summarizes them.
+            // Wait, chunk1074 passes ALL messages (A).
+            // But we might want to keep recent messages?
+            // "chunk1074: let J = A.slice(H).filter(G => !AL(G));" where H is split point.
+            // CompactionService.compact in 'src' seems to summarize everything passed to it.
+            // If we want to keep recent messages, we should handle it here or in CompactionService.
+            // However, CompactionService.compact implementation I read earlier (lines 44+) calls invokeSummarization on ALL messages passed.
+            // And returns [User(Summary)] + [Boundary].
+            // It seems it replaces EVERYTHING with summary.
+            // If we want to keep recent messages (as typical RAG/compaction does), we should slice before passing?
+            // "src/services/compaction/CompactionService.ts" logic:
+            // "compactedMessages = [{ role: 'user', content: summary ... }]".
+            // It does not append recent messages.
+            // So I should pass ONLY the messages I want summarized?
+            // BUT CompactionService calculates tokens on the messages passed.
 
-The user will use this summary as context for future turns. DO NOT include meta-talk or filler sentences.`,
-                messages: [
-                    {
-                        role: "user",
-                        content: "Summarize the following conversation history:\n\n" +
-                            messagesToSummarize.map(m => `${m.role?.toUpperCase() || 'USER'}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`).join("\n\n")
-                    }
-                ]
-            });
+            // Chunk1074 logic:
+            // H = clearConversation_51(A, w) (Calculates split point based on tokens).
+            // J = A.slice(H) (Keep messages from H onwards).
+            // X = Summary of A[0..H-1].
+            // Result = [Summary, ...J].
 
-            const summary = response.data.content[0].text;
+            // My CompactionService.compact does NOT do the splitting. It assumes input IS the history to compact.
+            // So PromptManager should split.
 
-            return [
-                {
-                    type: "system",
-                    role: "system",
-                    content: `SUMMARY OF PREVIOUS CONVERSATION:\n${summary}`,
-                    subtype: "compact_boundary",
-                    isMeta: false,
-                    timestamp: new Date().toISOString(),
-                    level: "info",
-                    compactMetadata: {
-                        trigger: "auto",
-                        preTokens: messagesToSummarize.length // Placeholder, ideally actual token count
-                    }
-                } as AgentMessage,
-                ...recentMessages
-            ];
+            // Standard behavior: Keep last few turns.
+            // In 2.1.19 `clearConversation_51` does smart splitting (min tokens, blocks, etc).
+            // For now, I'll stick to a simple strategy: Keep last 4.
+
+            if (messages.length < 10) return messages;
+
+            const messagesToSummarize = messages.slice(0, -4);
+            const recentMessages = messages.slice(-4);
+
+            const result = await compactionService.compact(messagesToSummarize, "User manually requested compaction"); // Pass messagesToSummarize
+
+            if (result.wasCompacted && result.compactedMessages) {
+                const summaryMessages = [...result.compactedMessages];
+                if (result.boundaryMarker) {
+                    summaryMessages.unshift(result.boundaryMarker);
+                }
+                return [...summaryMessages, ...recentMessages] as AgentMessage[];
+            }
+
+            return messages;
         } catch (e) {
             terminalLog(`Failed to compact messages: ${e}`, "error");
-            return messages; // Fallback to original
+            return messages;
         }
     }
 

@@ -344,7 +344,7 @@ export class ConversationService {
 
         const canUseTool = async (name: string, input: any, context: any) => {
             if (providedCanUseTool) return providedCanUseTool(name, input, context);
-            return checkToolPermissions(name, input, { toolPermissionContext: { mode: "prompt" } });
+            return checkToolPermissions(name, input, { toolPermissionContext: { mode: "default" } });
         };
 
         const manager = new ToolExecutionManager(tools, canUseTool, { ...options }, executeToolFn);

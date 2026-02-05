@@ -77,6 +77,13 @@ export interface Settings {
     autoConnectIde?: boolean;
     chromeEnabled?: boolean;
     repoPaths?: Record<string, string[]>;
+    // Official Marketplace Auto-Install Tracking
+    officialMarketplaceAutoInstallAttempted?: boolean;
+    officialMarketplaceAutoInstalled?: boolean;
+    officialMarketplaceAutoInstallFailReason?: string;
+    officialMarketplaceAutoInstallRetryCount?: number;
+    officialMarketplaceAutoInstallLastAttemptTime?: number;
+    officialMarketplaceAutoInstallNextRetryTime?: number;
     [key: string]: any;
 }
 

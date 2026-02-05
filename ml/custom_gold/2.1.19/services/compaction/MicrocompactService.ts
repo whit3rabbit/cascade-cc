@@ -21,7 +21,8 @@ const TOOLS_TO_COMPACT = new Set([
     'Grep',
     'WebFetch',
     'WebSearch',
-    'Lsp'
+    'Lsp',
+    'Bash'
 ]);
 
 export class MicrocompactService {
@@ -46,7 +47,7 @@ export class MicrocompactService {
         return Math.ceil(text.length * TOKEN_ESTIMATION_MULTIPLIER);
     }
 
-    async fetchContextData(messages: any[]): Promise<{ messages: any[], boundaryMessage?: string }> {
+    async fetchContextData(messages: any[], trigger: 'auto' | 'manual' = 'auto'): Promise<{ messages: any[], boundaryMessage?: string }> {
         if (process.env.DISABLE_MICROCOMPACT) {
             return { messages };
         }
@@ -65,53 +66,66 @@ export class MicrocompactService {
                     if (!this.compactedToolUseIds.has(item.id)) {
                         toolIdsFound.push(item.id);
                     }
-                } else if (item.type === 'tool_result' && toolIdsFound.includes(item.tool_use_id)) {
+                } else if (item.type === 'tool_result' && toolIdsFound.includes(item.toolUseId || item.tool_use_id)) {
+                    // Normalize toolUseId
+                    const id = item.toolUseId || item.tool_use_id;
                     const tokens = this.estimateTokens(JSON.stringify(item.content));
-                    toolIdToTokens.set(item.tool_use_id, tokens);
-                    toolIdToResult.set(item.tool_use_id, item);
+                    toolIdToTokens.set(id, tokens);
+                    toolIdToResult.set(id, item);
                 }
             }
         }
 
-        // 2. Identify results to compact using sliding window
-        // Keep the last WINDOW_SIZE results untouched.
+        // 2. Identify results to compact (Gold Reference Logic)
         const slidingWindow = toolIdsFound.slice(-WINDOW_SIZE);
-        const totalUncompactedTokens = Array.from(toolIdToTokens.values()).reduce((a, b) => a + b, 0);
+        const totalEligibleTokens = Array.from(toolIdToTokens.values()).reduce((a, b) => a + b, 0);
 
         let tokensSaved = 0;
         const idsToCompact = new Set<string>();
 
-        // Logic from chunk1081: Compact if total savings > threshold OR (in auto mode) if above warning threshold
-        // Here we simplify to: compact if not in sliding window and we save tokens.
+        // Compact oldest first until remaining tokens <= AUTO_COMPACT_LIMIT
         for (const id of toolIdsFound) {
             if (slidingWindow.includes(id)) continue;
 
-            // In chunk1081, it checks if (X - O > z) where z is 40k.
-            // Simplified: If we found many tokens, compact old ones.
-            idsToCompact.add(id);
-            tokensSaved += toolIdToTokens.get(id) || 0;
+            if ((totalEligibleTokens - tokensSaved) > AUTO_COMPACT_LIMIT) {
+                idsToCompact.add(id);
+                tokensSaved += toolIdToTokens.get(id) || 0;
+            }
         }
 
-        // Only compact if it significantly reduces context or we are above warning threshold
-        if (idsToCompact.size === 0 || (totalUncompactedTokens < WARNING_THRESHOLD && idsToCompact.size < 5)) {
+        // 3. Safety Check: If auto-mode, ignore if savings are small or total conversation is small
+        if (trigger === 'auto') {
+            if (tokensSaved < WARNING_THRESHOLD) {
+                idsToCompact.clear();
+                tokensSaved = 0;
+            }
+        }
+
+        if (idsToCompact.size === 0) {
             return { messages };
         }
 
-        // 3. Apply compaction
+        // 4. Apply compaction
         let compactionOccurred = false;
         const newMessages = await Promise.all(messages.map(async (msg) => {
             const content = msg.message?.content || msg.content;
             if (!Array.isArray(content)) return msg;
 
-            const newContent = await Promise.all(content.map(async (item) => {
-                if (item.type === 'tool_result' && idsToCompact.has(item.tool_use_id)) {
-                    const alreadyCompacted = this.compactedToolUseIds.has(item.tool_use_id);
-                    if (alreadyCompacted) return item; // Safety, though idsToCompact excludes them
+            // Deep clone to avoid mutating original
+            const contentArr = [...content];
+            let changed = false;
+
+            const newContent = await Promise.all(contentArr.map(async (item) => {
+                const id = item.toolUseId || item.tool_use_id;
+                if (item.type === 'tool_result' && id && idsToCompact.has(id)) {
+                    const alreadyCompacted = this.compactedToolUseIds.has(id);
+                    if (alreadyCompacted) return item;
 
                     compactionOccurred = true;
-                    this.compactedToolUseIds.add(item.tool_use_id);
-                    const filepath = await this.saveToolResultToFile(JSON.stringify(item.content), item.tool_use_id);
+                    this.compactedToolUseIds.add(id);
+                    const filepath = await this.saveToolResultToFile(JSON.stringify(item.content), id);
 
+                    changed = true;
                     return {
                         ...item,
                         content: `${PREFIX}Tool result saved to: ${filepath}\n\nUse ${VIEW_TOOL} to view`
@@ -120,9 +134,11 @@ export class MicrocompactService {
                 return item;
             }));
 
+            if (!changed) return msg;
+
             const updatedMsg = { ...msg };
             if (updatedMsg.message) {
-                updatedMsg.message.content = newContent;
+                updatedMsg.message = { ...updatedMsg.message, content: newContent };
             } else {
                 updatedMsg.content = newContent;
             }
@@ -140,11 +156,11 @@ export class MicrocompactService {
                 uuid: Math.random().toString(36).substring(7),
                 level: "info",
                 microcompactMetadata: {
-                    trigger: "auto", // default for background microcompact
-                    preTokens: Array.from(toolIdToTokens.values()).reduce((a, b) => a + b, 0),
+                    trigger,
+                    preTokens: totalEligibleTokens,
                     tokensSaved,
                     compactedToolIds: Array.from(idsToCompact),
-                    clearedAttachmentUUIDs: [] // placeholder
+                    clearedAttachmentUUIDs: []
                 }
             };
 

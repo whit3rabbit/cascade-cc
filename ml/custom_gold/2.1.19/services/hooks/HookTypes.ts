@@ -9,8 +9,10 @@ export const HookEventSchema = z.enum([
     'Notification',
     'PermissionRequest',
     'PreCompact',
-    // 'Setup', // Noted in deobfuscated code but typically less common, including for completeness
-    // 'SubagentStart' // Ditto
+    'SessionEnd',
+    'SubagentStart',
+    'SubagentStop',
+    'Stop'
 ]);
 
 export type HookEvent = z.infer<typeof HookEventSchema>;
@@ -120,14 +122,26 @@ export const HookOutputSchema = z.object({
 export type HookOutput = z.infer<typeof HookOutputSchema>;
 
 // The configuration object in settings.json
-// hooks: { [eventName]: HookConfigEntry[] }
-export const HookConfigEntrySchema = z.object({
-    commands: z.union([z.string(), z.array(z.string())]).optional(),
+export const HookDefinitionSchema = z.object({
+    type: z.enum(['command', 'prompt', 'agent']).default('command'),
     command: z.string().optional(),
-    cwd: z.string().optional(),
+    prompt: z.string().optional(),
     timeout: z.number().optional(),
+    cwd: z.string().optional(),
 });
 
-export type HookConfigEntry = z.infer<typeof HookConfigEntrySchema>;
-// Mapping of event name to list of hooks
-export type HooksConfig = Partial<Record<HookEvent, HookConfigEntry[]>>;
+export type HookDefinition = z.infer<typeof HookDefinitionSchema>;
+
+export const HookTriggerSchema = z.object({
+    matcher: z.string().optional(),
+    hooks: z.array(HookDefinitionSchema),
+});
+
+export type HookTrigger = z.infer<typeof HookTriggerSchema>;
+
+// Mapping of event name to list of triggers
+// e.g. "PostToolUse": [{ matcher: "Bash", hooks: [...] }]
+export const HooksConfigSchema = z.record(HookEventSchema, z.array(HookTriggerSchema));
+export type HooksConfig = z.infer<typeof HooksConfigSchema>;
+export type HookConfigEntry = HookTrigger; // Alias for backward compatibility if needed, but really it's different now.
+

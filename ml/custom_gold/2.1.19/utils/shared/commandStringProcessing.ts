@@ -281,6 +281,7 @@ function isSubcommandStart(prev: ShellToken | undefined): boolean {
 
 /**
  * Extracts heredocs from a command string and replaces them with placeholders.
+ * Robust implementation that handles multiple heredocs on the same line and <<- support.
  */
 export function extractHeredocs(command: string): { processedCommand: string, heredocs: Map<string, HeredocInfo> } {
     const heredocs = new Map<string, HeredocInfo>();
@@ -298,19 +299,41 @@ export function extractHeredocs(command: string): { processedCommand: string, he
             continue;
         }
 
-        const fullMatch = match[0];
+        const fullOpMatch = match[0];
+        const isDash = match[1] === "-";
         const delimiter = match[3];
-        const opEndIndex = index + fullMatch.length;
+        const opEndIndex = index + fullOpMatch.length;
 
+        // Find the start of the next line AFTER the line containing the heredoc operator(s)
         const nextNewline = command.indexOf("\n", opEndIndex);
         if (nextNewline === -1) continue;
 
-        const afterNewline = command.slice(nextNewline + 1);
-        const lines = afterNewline.split("\n");
+        // Heredocs are processed line by line. Multiple heredocs on one line 
+        // are processed in the order they appear, stacked vertically.
+        const lineStart = command.lastIndexOf("\n", index) + 1;
+        const previousMatchesOnSameLine = matches.filter(m => m.operatorStartIndex >= lineStart && m.operatorStartIndex < index);
+
+        let contentStartIndex = nextNewline;
+        if (previousMatchesOnSameLine.length > 0) {
+            // Find the match that has the furthest contentEndIndex
+            const sorted = [...previousMatchesOnSameLine].sort((a, b) => b.contentEndIndex - a.contentEndIndex);
+            contentStartIndex = sorted[0].contentEndIndex;
+        }
+
+        const afterContentStart = command.slice(contentStartIndex);
+        // Important: we split by \n but need to keep the \n in the content eventually
+        const lines = afterContentStart.split("\n");
         let delimiterLineIndex = -1;
 
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].trim() === delimiter) {
+        // Skip the very first empty string if contentStartIndex was a newline
+        const searchOffset = afterContentStart.startsWith("\n") ? 1 : 0;
+        const searchableAfterContentStart = afterContentStart.slice(searchOffset);
+        const searchableLines = searchableAfterContentStart.split("\n");
+
+        for (let i = 0; i < searchableLines.length; i++) {
+            const line = searchableLines[i];
+            const trimmedLine = isDash ? line.trimStart() : line;
+            if (trimmedLine === delimiter) {
                 delimiterLineIndex = i;
                 break;
             }
@@ -318,17 +341,20 @@ export function extractHeredocs(command: string): { processedCommand: string, he
 
         if (delimiterLineIndex === -1) continue;
 
-        const contentLines = lines.slice(0, delimiterLineIndex + 1);
+        // Reconstruct content including all newlines
+        const contentLines = searchableLines.slice(0, delimiterLineIndex + 1);
         const contentText = contentLines.join("\n");
-        const contentEndIndex = nextNewline + 1 + contentText.length;
+        const actualContentStartIndex = contentStartIndex + searchOffset;
+        const contentEndIndex = actualContentStartIndex + contentText.length;
 
         matches.push({
-            fullText: command.slice(index, opEndIndex) + command.slice(nextNewline, contentEndIndex),
+            // fullText includes the operator and the content
+            fullText: fullOpMatch + "\n" + contentText,
             delimiter,
             operatorStartIndex: index,
             operatorEndIndex: opEndIndex,
-            contentStartIndex: nextNewline,
-            contentEndIndex: contentEndIndex
+            contentStartIndex: actualContentStartIndex - 1, // include the preceding newline
+            contentEndIndex
         });
     }
 
@@ -336,36 +362,19 @@ export function extractHeredocs(command: string): { processedCommand: string, he
         return { processedCommand: command, heredocs };
     }
 
-    // Filter out nested heredocs
-    const validMatches = matches.filter((m, i, all) => {
-        for (const other of all) {
-            if (m === other) continue;
-            if (m.operatorStartIndex > other.contentStartIndex && m.operatorStartIndex < other.contentEndIndex) {
-                return false;
-            }
-        }
-        return true;
-    });
-
-    if (validMatches.length === 0) {
-        return { processedCommand: command, heredocs };
-    }
-
-    // Check for duplicate content start indices (indicates parsing issues)
-    if (new Set(validMatches.map(m => m.contentStartIndex)).size < validMatches.length) {
-        return { processedCommand: command, heredocs };
-    }
-
-    // Sort by end index descending to avoid displacement during slicing
-    validMatches.sort((a, b) => b.contentEndIndex - a.contentEndIndex);
+    // Sort by contentEndIndex descending to avoid displacement during slicing
+    const sortedMatches = [...matches].sort((a, b) => b.contentEndIndex - a.contentEndIndex);
 
     const nonce = randomBytes(8).toString("hex");
     let processed = command;
 
-    validMatches.forEach((m, i) => {
-        const placeholder = `${HEREDOC_PREFIX}${validMatches.length - 1 - i}_${nonce}${HEREDOC_SUFFIX}`;
+    sortedMatches.forEach((m, i) => {
+        const placeholder = `${HEREDOC_PREFIX}${sortedMatches.length - 1 - i}_${nonce}${HEREDOC_SUFFIX}`;
         heredocs.set(placeholder, m);
-        processed = processed.slice(0, m.operatorStartIndex) + placeholder + processed.slice(m.operatorEndIndex, m.contentStartIndex) + processed.slice(m.contentEndIndex);
+        // Remove the content (including its preceding newline)
+        processed = processed.slice(0, m.contentStartIndex) + processed.slice(m.contentEndIndex);
+        // Then replace the operator with the placeholder
+        processed = processed.slice(0, m.operatorStartIndex) + placeholder + processed.slice(m.operatorEndIndex);
     });
 
     return { processedCommand: processed, heredocs };

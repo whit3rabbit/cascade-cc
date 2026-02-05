@@ -10,6 +10,7 @@ import { initializeApp } from "../services/terminal/AppInitializer.js";
 import { terminalLog } from "../utils/shared/runtime.js";
 import { commandRegistry } from "../services/terminal/CommandRegistry.js";
 import { configManager } from "../services/config/ConfigManager.js";
+import { PluginManager } from "../services/mcp/PluginManager.js";
 
 async function main() {
     const program = new Command();
@@ -65,6 +66,7 @@ async function main() {
 
             // 1. Initialize services
             configManager.initialize(process.cwd());
+            await PluginManager.initialize({ pluginDirs: options.pluginDir });
             const { isFirstRun } = await initializeApp();
 
             // 2. Handle auto-join if requested

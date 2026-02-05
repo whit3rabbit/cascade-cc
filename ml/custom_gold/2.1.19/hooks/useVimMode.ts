@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { setCursorStyle, resetCursorStyle } from '../utils/terminal/cursorStyle.js';
 
 export type VimMode = 'INSERT' | 'NORMAL' | 'VISUAL';
 
@@ -14,6 +15,29 @@ export interface UseVimModeProps {
 export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffset, setCursorOffset }: UseVimModeProps) {
     const [mode, setMode] = useState<VimMode>('INSERT');
     const commandRef = useRef<string>('');
+
+    // Update hardware cursor style
+    useEffect(() => {
+        if (!enabled) {
+            resetCursorStyle();
+            return;
+        }
+
+        switch (mode) {
+            case 'INSERT':
+                setCursorStyle('beam');
+                break;
+            case 'NORMAL':
+            case 'VISUAL':
+                setCursorStyle('block');
+                break;
+        }
+
+        // Cleanup on unmount or disable
+        return () => {
+            resetCursorStyle();
+        };
+    }, [enabled, mode]);
 
     const handleNormalModeInput = useCallback((key: any, input: string) => {
         // Basic Navigation

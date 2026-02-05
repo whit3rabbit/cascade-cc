@@ -51,6 +51,8 @@ function HelpComponent({ onDone }: ComponentProps) {
 
 
 import { createCommandHelper } from './helpers.js';
+import { generateQRCode } from '../services/mobile/QRCodeService.js';
+import { useEffect } from 'react';
 
 export const helpCommandDefinition = createCommandHelper("help", "Show available commands and help", {
     type: "local-jsx",
@@ -67,6 +69,7 @@ export const helpCommandDefinition = createCommandHelper("help", "Show available
  */
 function MobileComponent({ onDone }: ComponentProps) {
     const [platform, setPlatform] = useState<"ios" | "android">("ios");
+    const [qrCode, setQrCode] = useState<string>("");
 
     useInput((input, key) => {
         if (key.escape || input === 'q') {
@@ -81,6 +84,15 @@ function MobileComponent({ onDone }: ComponentProps) {
         ios: "https://apps.apple.com/app/claude-by-anthropic/id6473753684",
         android: "https://play.google.com/store/apps/details?id=com.anthropic.claude"
     };
+
+    useEffect(() => {
+        let mounted = true;
+        setQrCode(""); // Clear while loading
+        generateQRCode(urls[platform]).then(code => {
+            if (mounted) setQrCode(code);
+        });
+        return () => { mounted = false; };
+    }, [platform]);
 
     return (
         <Box flexDirection="column" paddingX={2} paddingY={1}>
@@ -103,17 +115,11 @@ function MobileComponent({ onDone }: ComponentProps) {
             <Box marginTop={1} padding={1} borderStyle="round" borderColor="yellow" flexDirection="column" alignItems="center">
                 <Text color="yellow" bold>Scan to download</Text>
                 <Box marginTop={1}>
-                    <Text>
-                        {"█▀▀▀▀▀█ ▄ ▄  █▀▀▀▀▀█\n"}
-                        {"█ ███ █ ▀ █▀ █ ███ █\n"}
-                        {"█ ▀▀▀ █ ▄▀█▀ █ ▀▀▀ █\n"}
-                        {"▀▀▀▀▀▀▀ █▄▀ ▀▀▀▀▀▀▀▀\n"}
-                        {"▀▀▄▀▀▄▀▄▀▀ ▀▄▄▀▄ ▀▀ \n"}
-                        {"█▀▀▀▀▀█ ▀█▀█▀  ▀▀▀ ▄\n"}
-                        {"█ ███ █ █ ▀ █▀▀ ▀▄▀▀\n"}
-                        {"█ ▀▀▀ █ ▀█ ▄ █▄█ ▀▄ \n"}
-                        {"▀▀▀▀▀▀▀ ▀  ▀▀  ▀▀▀▀▀"}
-                    </Text>
+                    {qrCode ? (
+                        <Text>{qrCode}</Text>
+                    ) : (
+                        <Text>Loading QR Code...</Text>
+                    )}
                 </Box>
                 <Box marginTop={1}>
                     <Text dimColor>({platform === 'ios' ? 'iOS App Store' : 'Android Play Store'})</Text>

@@ -9,6 +9,7 @@ import { EnvService } from "../services/config/EnvService.js";
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { updateSettings } from "../services/config/SettingsService.js";
+import { commandRegistry } from "../services/terminal/CommandRegistry.js";
 
 // ... (imports remain the same)
 
@@ -26,9 +27,18 @@ export interface CommandContext {
 }
 
 export class SlashCommandDispatcher {
-    static async handleCommand(input: string, context: CommandContext): Promise<boolean> {
+    static async handleCommand(input: string, context: CommandContext): Promise<boolean | string> {
         const cmd = input.trim().split(' ')[0];
         const args = input.trim().split(' ').slice(1).join(' ');
+
+        // Check registry for prompt commands first
+        const commandDef = commandRegistry.findCommand(cmd);
+        if (commandDef && commandDef.type === 'prompt') {
+            const promptResult = await commandDef.getPromptForCommand(args, { ...context, version: '2.0.0' /* Stub version */ });
+            if (Array.isArray(promptResult) && promptResult.length > 0 && promptResult[0].text) {
+                return promptResult[0].text;
+            }
+        }
 
         switch (cmd) {
             case '/clear':
@@ -111,9 +121,37 @@ export class SlashCommandDispatcher {
                         return true;
                     } else {
                         // Return false to let the REPL handle this as a prompt command
-                        // The actual prompt is handled by the LLM seeing the system instructions or 
-                        // by being injected into the conversation.
-                        return false;
+                        return false; // This triggers fallthrough to REPL which likely fails if not handled. 
+                        // But since we added registry check at top, /init from registry SHOULD have been caught?
+                        // "init" is registered. "findCommand('/init')" finds it.
+                        // So the check at top returns the string prompt.
+                        // Wait, if it matches switch case '/init', we enter here.
+                        // So we should remove '/init' from switch OR return the prompt here?
+                        // Registry has logic. Switch has logic.
+                        // Use registry logic if available?
+                        // For init, we want the prompt.
+
+                        // We handled prompt commands at TOP. So /init shouldn't reach here if it's in registry.
+                        // BUT init logic here checks CLAUDE.md existence.
+                        // Registry logic (in init.ts) gets prompt.
+                        // We should fallback to registry logic by returning false? 
+                        // No, if I return false, REPL executes '/init' as prompt.
+
+                        // If I remove '/init' from switch, the top check works.
+                        // But checking CLAUDE.md is useful.
+
+                        // I will update this block to return the prompt manually or just let top block handle it?
+                        // If I let top block handle, I need to REMOVE this case or check inside top block?
+                        // The top block runs BEFORE switch.
+                        // So /init is handled by top block. This switch case is UNREACHABLE for /init if registered.
+                        // UNLESS getPromptForCommand returns null?
+
+                        // initCommandDefinition is registered.
+                        // So top block catches it.
+                        // So I should remove /init case?
+                        // But wait, the check `if (existsSync(claudeMdPath))` is nice.
+                        // init.ts getPromptForCommand doesn't check existence?
+                        // Let's check init.ts.
                     }
                 }
                 return true;

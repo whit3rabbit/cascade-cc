@@ -6,6 +6,12 @@ import { gitClone, gitPull } from '../../utils/shared/git.js';
 import { getBaseConfigDir } from '../../utils/shared/runtimeAndEnv.js';
 import semver from 'semver';
 import { McpServerConfig } from './McpServerManager.js';
+import { LspServerManager, LspServerConfig } from '../lsp/LspServerManager.js';
+import { commandRegistry } from '../terminal/CommandRegistry.js';
+import { registerAgent, loadAgent } from '../agents/AgentPersistence.js';
+import { hookService } from '../hooks/HookService.js';
+import matter from 'gray-matter';
+import { terminalLog } from '../../utils/shared/runtime.js';
 
 /**
  * Scope for configuration.
@@ -29,6 +35,241 @@ export interface PluginInstallation {
  * Manages the installation and state of MCP plugins.
  */
 export class PluginManager {
+    /**
+     * Initializes the plugin system, loading installed plugins and those specified via CLI.
+     */
+    static async initialize(options: { pluginDirs?: string[] }) {
+        // 1. Load installed plugins
+        try {
+            const installedPlugins = await this.getInstalledPlugins();
+            for (const p of installedPlugins) {
+                if (p.enabled && p.installPath) {
+                    await this.loadPluginFromDirectory(p.installPath, p.id);
+                }
+            }
+        } catch (e) {
+            terminalLog(`Failed to load installed plugins: ${e}`, "warn");
+        }
+
+        // 2. Load ephemeral plugins from CLI
+        if (options.pluginDirs) {
+            for (const dir of options.pluginDirs) {
+                try {
+                    await this.loadPluginFromDirectory(path.resolve(process.cwd(), dir));
+                } catch (e) {
+                    terminalLog(`Failed to load plugin from ${dir}: ${e}`, "error");
+                }
+            }
+        }
+    }
+
+    /**
+     * Loads a plugin from a directory.
+     */
+    static async loadPluginFromDirectory(pluginPath: string, existingId?: string) {
+        if (!fs.existsSync(pluginPath)) {
+            terminalLog(`Plugin directory not found: ${pluginPath}`, "warn");
+            return;
+        }
+
+        // 1. Read Manifest
+        let manifest: any = {};
+        const manifestPath = path.join(pluginPath, '.claude-plugin', 'plugin.json');
+        if (fs.existsSync(manifestPath)) {
+            try {
+                manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            } catch (e) {
+                terminalLog(`Failed to parse plugin manifest at ${manifestPath}: ${e}`, "error");
+            }
+        }
+
+        const pluginName = manifest.name || existingId?.replace('plugin:', '') || path.basename(pluginPath);
+        const namespace = pluginName;
+
+        // 2. Load Components
+
+        await this.loadCommands(pluginPath, namespace);
+        await this.loadSkills(pluginPath, namespace);
+        await this.loadAgents(pluginPath, namespace);
+        await this.loadHooks(pluginPath, namespace);
+        await this.loadLspServers(pluginPath, namespace);
+    }
+
+    private static async loadCommands(pluginPath: string, namespace: string) {
+        const commandsDir = path.join(pluginPath, 'commands');
+        if (fs.existsSync(commandsDir)) {
+            const files = fs.readdirSync(commandsDir).filter(f => f.endsWith('.md'));
+            for (const file of files) {
+                const commandName = path.basename(file, '.md');
+                this.registerSkillCommand(path.join(commandsDir, file), namespace, commandName);
+            }
+        }
+    }
+
+    private static async loadSkills(pluginPath: string, namespace: string) {
+        const skillsDir = path.join(pluginPath, 'skills');
+        if (fs.existsSync(skillsDir)) {
+            try {
+                const items = fs.readdirSync(skillsDir);
+                for (const item of items) {
+                    const itemPath = path.join(skillsDir, item);
+                    if (fs.statSync(itemPath).isDirectory()) {
+                        const skillFile = path.join(itemPath, 'SKILL.md');
+                        if (fs.existsSync(skillFile)) {
+                            this.registerSkillCommand(skillFile, namespace, item);
+                        }
+                    }
+                }
+            } catch (e) {
+                // Ignore if skills dir is empty or fails
+            }
+        }
+    }
+
+    private static registerSkillCommand(filePath: string, namespace: string, commandName: string) {
+        try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            const parsed = matter(content);
+            const description = parsed.data.description || "";
+            const fullCommandName = `${namespace}:${commandName}`;
+
+            commandRegistry.register({
+                name: fullCommandName,
+                description,
+                type: 'prompt',
+                userFacingName: () => fullCommandName,
+                isEnabled: () => true,
+                isHidden: false,
+                progressMessage: "Running plugin command...",
+                source: "plugin",
+                getPromptForCommand: async (args) => {
+                    let prompt = parsed.content;
+                    if (args) {
+                        prompt = prompt.replace(/\$ARGUMENTS/g, args);
+                    }
+                    return [{ type: 'text', text: prompt }];
+                }
+            });
+        } catch (e) {
+            terminalLog(`Failed to register skill ${commandName}: ${e}`, "error");
+        }
+    }
+
+    private static async loadAgents(pluginPath: string, namespace: string) {
+        const agentsDir = path.join(pluginPath, 'agents');
+        if (fs.existsSync(agentsDir)) {
+            try {
+                const files = fs.readdirSync(agentsDir).filter(f => f.endsWith('.md'));
+                for (const file of files) {
+                    const agent = loadAgent(path.join(agentsDir, file), 'project');
+                    if (agent) {
+                        // Prefix agent name with namespace? Docs say "agents appear in /agents".
+                        // Usually agents are singular. Docs: "Plugin name is namespace... /plug:hello".
+                        // For agents, maybe they become available as `--agent plug:reviewer`?
+                        // AgentPersistence uses agentType (filename).
+                        // I should probably ensure uniqueness or just register as is?
+                        // Docs don't specify agent namespacing strictly, but it's good practice.
+                        registerAgent({ ...agent, scope: 'plugin' } as any);
+                    }
+                }
+            } catch (e) { }
+        }
+    }
+
+    private static async loadHooks(pluginPath: string, namespace: string) {
+        const hooksPath = path.join(pluginPath, 'hooks', 'hooks.json');
+        if (fs.existsSync(hooksPath)) {
+            try {
+                const hooksConfig = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+                if (hooksConfig.hooks) {
+                    for (const [event, hooks] of Object.entries(hooksConfig.hooks)) {
+                        if (Array.isArray(hooks)) {
+                            for (const hook of hooks) {
+                                hookService.registerHook(event as any, hook as any);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                terminalLog(`Failed to load hooks from ${hooksPath}: ${e}`, "error");
+            }
+        }
+    }
+
+    private static async loadLspServers(pluginPath: string, namespace: string) {
+        // 1. Check for .lsp.json
+        const lspConfigPath = path.join(pluginPath, '.lsp.json');
+        const lspConfigs: Record<string, LspServerConfig> = {};
+
+        if (fs.existsSync(lspConfigPath)) {
+            try {
+                const config = JSON.parse(fs.readFileSync(lspConfigPath, 'utf8'));
+                Object.assign(lspConfigs, config);
+            } catch (e) {
+                terminalLog(`Failed to load LSP config from ${lspConfigPath}: ${e}`, "error");
+            }
+        }
+
+        // 2. Check manifest for inline configs or file references
+        // We assume manifest is already parsed, but here we read it again or pass it down. 
+        // For simplicity, we re-read or rely on the previous method having access?
+        // loadPluginFromDirectory reads it. But we don't pass it.
+        // Let's re-read simply as it is small.
+        const manifestPath = path.join(pluginPath, '.claude-plugin', 'plugin.json');
+        if (fs.existsSync(manifestPath)) {
+            try {
+                const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+                if (manifest.lspServers) {
+                    // lspServers can be path string, array of paths/objects, or object map
+                    const entries = Array.isArray(manifest.lspServers) ? manifest.lspServers : [manifest.lspServers];
+
+                    for (const entry of entries) {
+                        if (typeof entry === 'string') {
+                            // Path to config file
+                            const configPath = path.resolve(pluginPath, entry);
+                            if (fs.existsSync(configPath)) {
+                                try {
+                                    const loaded = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                                    Object.assign(lspConfigs, loaded);
+                                } catch (e) {
+                                    terminalLog(`Failed to load referenced LSP config ${entry}: ${e}`, "warn");
+                                }
+                            }
+                        } else if (typeof entry === 'object') {
+                            // Can be inline map (name -> config) or just config object?
+                            // 2.1.19 chunk458 MOA is specific server config.
+                            // chunk909: 
+                            // if entry is object: iterate keys.
+                            for (const [name, config] of Object.entries(entry)) {
+                                // Simple validation
+                                if ((config as any).command) {
+                                    lspConfigs[name] = config as LspServerConfig;
+                                    // Ensure name is set
+                                    lspConfigs[name].name = name;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                // Ignore
+            }
+        }
+
+        // Register all found configs
+        const serverManager = LspServerManager.getInstance();
+        for (const [name, config] of Object.entries(lspConfigs)) {
+            // Apply plugin namespace if not global? 
+            // 2.1.19 doesn't seems to namespace LSP servers strictly, 
+            // but conflicts might happen.
+            // For now, register as is.
+            serverManager.registerServerConfig({
+                ...config,
+                name // Ensure name matches map key
+            });
+        }
+    }
+
     private static getPluginsDir(): string {
         const configDir = getBaseConfigDir();
         const pluginsDir = path.join(configDir, 'plugins');

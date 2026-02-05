@@ -7,6 +7,7 @@ export interface MarketplaceServiceType {
     refreshMarketplace: (name: string, onProgress?: (msg: string) => void) => Promise<void>;
     refreshAllMarketplaces: (onProgress?: (msg: string) => void) => Promise<void>;
     listMarketplaces: () => Promise<LoadedMarketplace[]>;
+    autoInstallOfficialMarketplace: () => Promise<void>;
 }
 
 import axios from 'axios';
@@ -126,5 +127,123 @@ export const MarketplaceService: MarketplaceServiceType = {
             config: config,
             status: config.plugins ? 'loaded' : 'failed'
         }));
+    },
+
+    /**
+     * Attempts to auto-install the official marketplace.
+     * Matches logic from chunk1627 (tengu_official_marketplace_auto_install).
+     */
+    async autoInstallOfficialMarketplace(): Promise<void> {
+        const OFFICIAL_MARKETPLACE_NAME = "claude-plugins-official";
+        const OFFICIAL_MARKETPLACE_REPO = "anthropics/claude-plugins-official";
+
+        // 1. Check if disabled via env var
+        if (process.env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL) {
+            updateSettings(current => ({
+                ...current,
+                officialMarketplaceAutoInstallAttempted: true,
+                officialMarketplaceAutoInstalled: false,
+                officialMarketplaceAutoInstallFailReason: "policy_blocked"
+            }));
+            return;
+        }
+
+        const settings = getSettings();
+
+        // 2. Check if already installed
+        if (settings.marketplaces?.[OFFICIAL_MARKETPLACE_NAME]) {
+            updateSettings(current => ({
+                ...current,
+                officialMarketplaceAutoInstallAttempted: true,
+                officialMarketplaceAutoInstalled: true
+            }));
+            return;
+        }
+
+        // 3. Retry Logic & State Check
+        if (settings.officialMarketplaceAutoInstallAttempted) {
+            if (settings.officialMarketplaceAutoInstalled) return;
+
+            const failReason = settings.officialMarketplaceAutoInstallFailReason;
+            const retryCount = settings.officialMarketplaceAutoInstallRetryCount || 0;
+            const nextRetry = settings.officialMarketplaceAutoInstallNextRetryTime;
+            const now = Date.now();
+            const MAX_ATTEMPTS = 5; // Hv1.MAX_ATTEMPTS from reference
+
+            if (retryCount >= MAX_ATTEMPTS) return;
+            if (failReason === 'policy_blocked') return;
+            if (nextRetry && now < nextRetry) return; // Not time yet
+            // If unknown or git_unavailable or undefined, we might retry
+        }
+
+        // 4. Check for Git availability (simplified check)
+        // In the reference, it calls U31() -> likely checking if git is in PATH
+        // We'll try to run `git --version`
+        const { exec } = await import('child_process');
+        const isGitAvailable = await new Promise<boolean>(resolve => {
+            exec('git --version', (err) => resolve(!err));
+        });
+
+        if (!isGitAvailable) {
+            const retryCount = (settings.officialMarketplaceAutoInstallRetryCount || 0) + 1;
+            // Backoff: 60s * 2^retryCount, capped at 1 hour? Reference uses Hv1 constants.
+            // Let's assume: INITIAL_DELAY 1min, MAX 1hr.
+            const delay = Math.min(60000 * Math.pow(2, retryCount), 3600000);
+
+            updateSettings(current => ({
+                ...current,
+                officialMarketplaceAutoInstallAttempted: true,
+                officialMarketplaceAutoInstalled: false,
+                officialMarketplaceAutoInstallFailReason: "git_unavailable",
+                officialMarketplaceAutoInstallRetryCount: retryCount,
+                officialMarketplaceAutoInstallLastAttemptTime: Date.now(),
+                officialMarketplaceAutoInstallNextRetryTime: Date.now() + delay
+            }));
+            return;
+        }
+
+        // 5. Attempt Installation
+        try {
+            // We use addMarketplace which expects a URL.
+            // The official marketplace in the reference (chunk1364) seems to point to a github repo.
+            // "anthropics/claude-plugins-official"
+            // Our addMarketplace implementation currently expects a URL (http/https). 
+            // If we support github shortnames, we should convert it or handle it.
+            // For now, let's assume raw github user content URL or similar if we strictly follow `addMarketplace(url)`.
+            // HOWEVER, looking at chunk1364: `repository: "anthropics/claude-plugins-official"`.
+            // And chunk1627 calls `My(dB6)` where dB6 is the config object.
+            // If our `addMarketplace` only takes a URL, we might need to adjust or pass the raw JSON URL.
+            // Let's use the raw githubusercontent URL for main branch as a safe bet for now.
+            const rawUrl = `https://raw.githubusercontent.com/${OFFICIAL_MARKETPLACE_REPO}/main/marketplace.json`;
+
+            await MarketplaceService.addMarketplace(OFFICIAL_MARKETPLACE_NAME, rawUrl);
+            // Verify it was added and refresh
+            await MarketplaceService.refreshMarketplace(OFFICIAL_MARKETPLACE_NAME);
+
+            updateSettings(current => ({
+                ...current,
+                officialMarketplaceAutoInstallAttempted: true,
+                officialMarketplaceAutoInstalled: true,
+                officialMarketplaceAutoInstallFailReason: undefined,
+                officialMarketplaceAutoInstallRetryCount: undefined,
+                officialMarketplaceAutoInstallLastAttemptTime: undefined,
+                officialMarketplaceAutoInstallNextRetryTime: undefined
+            }));
+
+        } catch (error: any) {
+            const retryCount = (settings.officialMarketplaceAutoInstallRetryCount || 0) + 1;
+            const delay = Math.min(60000 * Math.pow(2, retryCount), 3600000);
+
+            updateSettings(current => ({
+                ...current,
+                officialMarketplaceAutoInstallAttempted: true,
+                officialMarketplaceAutoInstalled: false,
+                officialMarketplaceAutoInstallFailReason: "unknown", // or error message if short
+                officialMarketplaceAutoInstallRetryCount: retryCount,
+                officialMarketplaceAutoInstallLastAttemptTime: Date.now(),
+                officialMarketplaceAutoInstallNextRetryTime: Date.now() + delay
+            }));
+            console.error("Failed to auto-install official marketplace:", error);
+        }
     }
 };

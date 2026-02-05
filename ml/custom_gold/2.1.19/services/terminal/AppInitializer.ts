@@ -21,13 +21,14 @@ import { MailboxPollingService } from '../teams/MailboxPollingService.js';
 import { getLeaderPaneId } from '../../utils/terminal/terminalDetection.js';
 
 
-import { MarketplaceService } from '../mcp/MarketplaceService.js';
+
+import { MarketplaceService } from '../marketplace/MarketplaceService.js';
 
 async function initializeMcpServers() {
     try {
         await mcpClientManager.initializeAllServers();
         // Fire and forget marketplace auto-install
-        MarketplaceService.checkAndInstallOfficialPlugins().catch(err =>
+        MarketplaceService.autoInstallOfficialMarketplace().catch(err =>
             console.error("Marketplace auto-install failed:", err)
         );
     } catch (err) {

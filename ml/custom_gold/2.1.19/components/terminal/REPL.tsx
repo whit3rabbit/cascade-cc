@@ -122,7 +122,14 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                 setBugReportInitialDescription,
                 messages
             });
-            if (handled) return;
+            if (handled === true) return;
+            if (typeof handled === 'string') {
+                // Execute the returned prompt instead of the original command
+                input = handled;
+                // Fallthrough to execution logic below
+            } else if (handled === false) {
+                // Explicit false means not handled, proceed with input (e.g. unknown command or no-op)
+            }
         }
 
         setIsTyping(true);
