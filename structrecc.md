@@ -1,7 +1,7 @@
 # structrecc
 
 Purpose: Proposed filesystem map for LLM-guided deobfuscation/refinement.
-Generated: 2026-02-05T02:08:07.604Z
+Generated: 2026-02-06T23:00:07.717Z
 
 src/
   AgentGeneratorTool.ts
@@ -10,7 +10,6 @@ src/
   BugReportCommand.tsx
   CompactCommand.tsx
   CostCommand.tsx
-  DoctorCommand.tsx
   EnterPlanModeTool.tsx
   FileEditTool.ts
   FileReadTool.ts
@@ -51,6 +50,7 @@ src/
   keys.ts
   nativeHostRunner.ts
   networkUtils.ts
+  oauth.ts
   pr_comments.ts
   product.ts
   registry.ts
@@ -96,13 +96,16 @@ src/
     PluginManager.ts
     ReconnectMcpServer.tsx
     ToolProcessor.ts
+    ToolSearchService.ts
   menus/
     AgentsMenu.tsx
     ConfigMenu.tsx
+    LoopMenu.tsx
     MarketplaceMenu.tsx
     McpDiscoverView.tsx
     McpMenu.tsx
     PromptMenu.tsx
+    RemoteEnvMenu.tsx
     ResourceMenu.tsx
     SettingsMenu.tsx
     TaskMenu.tsx
@@ -134,6 +137,8 @@ src/
     FileIndexService.ts
     HistoryService.ts
     Logo.tsx
+    MeasuredText.ts
+    MessageHeightCalculator.ts
     MessageRenderer.tsx
     NotificationService.tsx
     PermissionService.ts
@@ -154,7 +159,11 @@ src/
     Transcript.tsx
     TranscriptToggle.tsx
     WebSocketTransport.ts
+    ansi.ts
+    bashHistory.ts
+    contentTruncation.ts
     cursorStyle.ts
+    iterm2ProgressBar.ts
     iterm2Setup.ts
     schemas.ts
     shellQuote.ts
@@ -286,6 +295,8 @@ src/
   json/
     BalancedParser.ts
     rpc.ts
+  mac/
+    appleScript.ts
   platform/
     browserMocks.ts
     detector.ts
