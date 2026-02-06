@@ -1,10 +1,5 @@
-/**
- * File: src/utils/fs/paths.ts
- * Role: Common file system path utilities.
- */
-
-import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { join, resolve, dirname, parse } from "node:path";
 import { homedir } from "node:os";
 
 /**
@@ -77,10 +72,44 @@ export function hasGlob(p: string): boolean {
 }
 
 /**
+ * Finds the nearest git root by walking up the directory tree.
+ * @param startPath - Path to start searching from.
+ * @returns Path to the git root directory, or null if not found.
+ */
+export function findGitRoot(startPath: string): string | null {
+    let currentPath = resolve(startPath);
+    const root = parse(currentPath).root;
+
+    while (true) {
+        const gitPath = join(currentPath, ".git");
+        try {
+            const stats = statSync(gitPath);
+            if (stats.isDirectory() || stats.isFile()) {
+                // Determine if it's a file (worktree) or directory (repo)
+                // Both are considered root indicators in the original code.
+                return currentPath;
+            }
+        } catch {
+            // Ignore if .git doesn't exist or isn't accessible
+        }
+
+        if (currentPath === root || currentPath === dirname(currentPath)) {
+            break;
+        }
+        currentPath = dirname(currentPath);
+    }
+
+    return null;
+}
+
+/**
  * Gets the current project root.
- * Defaults to process.cwd() if not otherwise specified.
+ * Tries to find a git root starting from process.cwd().
+ * Defaults to process.cwd() if no git root is found.
  * @returns Project root path.
  */
 export function getProjectRoot(): string {
-    return process.cwd();
+    const cwd = process.cwd();
+    const gitRoot = findGitRoot(cwd);
+    return gitRoot || cwd;
 }

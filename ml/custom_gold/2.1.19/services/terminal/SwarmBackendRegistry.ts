@@ -16,10 +16,6 @@ let cachedBackend: SwarmBackendInfo | null = null;
 
 import { EnvService } from '../config/EnvService.js';
 
-function isInsideTmux(): boolean {
-    return Boolean(EnvService.get("TMUX"));
-}
-
 function isInsideIterm2(): boolean {
     return Boolean(EnvService.get("ITERM_SESSION_ID")) ||
         (EnvService.get("TERM_PROGRAM") || "").toLowerCase().includes("iterm");

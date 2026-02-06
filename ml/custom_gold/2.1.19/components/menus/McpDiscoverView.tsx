@@ -10,12 +10,24 @@ import { MarketplaceService } from '../../services/marketplace/MarketplaceServic
 import { MCPServerMultiselectDialog } from '../mcp/MCPServerDialog.js';
 import { installPlugin } from '../../services/mcp/PluginManager.js';
 
+type MarketplacePlugin = {
+    pluginId: string;
+    name?: string;
+    version?: string;
+    description?: string;
+    author?: string | { name?: string };
+    repository?: string;
+    marketplace?: string;
+    [key: string]: any;
+};
+
 export function McpDiscoverView() {
-    const [plugins, setPlugins] = useState<any[]>([]);
+    const [plugins, setPlugins] = useState<MarketplacePlugin[]>([]);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [focusedIndex, setFocusedIndex] = useState(0);
     const [installing, setInstalling] = useState(false);
     const [statusMessage, setStatusMessage] = useState<string | null>(null);
+    const [detailPlugin, setDetailPlugin] = useState<MarketplacePlugin | null>(null);
 
     useEffect(() => {
         const fetchMarketplaces = async () => {
@@ -23,7 +35,11 @@ export function McpDiscoverView() {
             const allPlugins: any[] = [];
             marketplaces.forEach(m => {
                 if (m.config.plugins) {
-                    allPlugins.push(...m.config.plugins.map((p: any) => ({ ...p, marketplace: m.name })));
+                    allPlugins.push(...m.config.plugins.map((p: any) => ({
+                        ...p,
+                        marketplace: m.name,
+                        pluginId: buildMarketplacePluginId(p, m.name)
+                    })));
                 }
             });
 
@@ -33,25 +49,29 @@ export function McpDiscoverView() {
                 const refreshed = await MarketplaceService.listMarketplaces();
                 refreshed.forEach(m => {
                     if (m.config.plugins) {
-                        allPlugins.push(...m.config.plugins.map((p: any) => ({ ...p, marketplace: m.name })));
+                        allPlugins.push(...m.config.plugins.map((p: any) => ({
+                            ...p,
+                            marketplace: m.name,
+                            pluginId: buildMarketplacePluginId(p, m.name)
+                        })));
                     }
                 });
             }
-            setPlugins(allPlugins);
+            setPlugins(dedupePlugins(allPlugins));
         };
         fetchMarketplaces();
     }, []);
 
-    useInput(async (input, key) => {
+    useInput(async (input, _key) => {
         if (installing) return;
         if (input === ' ') {
             const plugin = plugins[focusedIndex];
             if (plugin) {
                 const newSelection = new Set(selectedIds);
-                if (newSelection.has(plugin.id)) {
-                    newSelection.delete(plugin.id);
+                if (newSelection.has(plugin.pluginId)) {
+                    newSelection.delete(plugin.pluginId);
                 } else {
-                    newSelection.add(plugin.id);
+                    newSelection.add(plugin.pluginId);
                 }
                 setSelectedIds(newSelection);
             }
@@ -61,7 +81,7 @@ export function McpDiscoverView() {
             const idsToInstall = Array.from(selectedIds);
             for (let i = 0; i < idsToInstall.length; i++) {
                 const id = idsToInstall[i];
-                const plugin = plugins.find(p => p.id === id);
+                const plugin = plugins.find(p => p.pluginId === id);
                 if (plugin) {
                     setStatusMessage(`Installing ${plugin.name} (${i + 1}/${idsToInstall.length})...`);
                     await installPlugin(plugin, "user");
@@ -70,22 +90,28 @@ export function McpDiscoverView() {
             setStatusMessage("Installation complete!");
             setTimeout(() => setStatusMessage(null), 3000);
             setSelectedIds(new Set());
+            setDetailPlugin(null);
             setInstalling(false);
         }
     });
 
     const handleSelect = (item: any) => {
-        // Maybe show details on enter
+        const plugin = plugins.find(p => p.pluginId === item.value);
+        if (!plugin) return;
+        setDetailPlugin((current: MarketplacePlugin | null) => {
+            if (current?.pluginId === plugin.pluginId) return null;
+            return plugin;
+        });
     };
 
     const handleHighlight = (item: any) => {
-        const index = plugins.findIndex(p => p.id === item.value);
+        const index = plugins.findIndex(p => p.pluginId === item.value);
         if (index !== -1) setFocusedIndex(index);
     };
 
     const items = plugins.map(p => ({
-        label: `${selectedIds.has(p.id) ? '[X] ' : '[ ] '} ${p.name}`,
-        value: p.id
+        label: `${selectedIds.has(p.pluginId) ? '[X] ' : '[ ] '} ${p.name}`,
+        value: p.pluginId
     }));
 
     return (
@@ -108,10 +134,41 @@ export function McpDiscoverView() {
                         <Text dimColor>Installation in progress...</Text>
                     )}
                     <MCPServerMultiselectDialog hasSelection={selectedIds.size > 0} />
+                    {detailPlugin && (
+                        <Box marginTop={1} paddingX={1} borderStyle="round" borderColor="gray">
+                            <Box flexDirection="column">
+                                <Text bold>{detailPlugin.name}</Text>
+                                {detailPlugin.version && <Text dimColor>Version: {detailPlugin.version}</Text>}
+                                {detailPlugin.description && <Text>{detailPlugin.description}</Text>}
+                                {detailPlugin.author && (
+                                    <Text dimColor>By: {typeof detailPlugin.author === 'string' ? detailPlugin.author : detailPlugin.author.name}</Text>
+                                )}
+                                {detailPlugin.repository && <Text dimColor>Repo: {detailPlugin.repository}</Text>}
+                                {detailPlugin.marketplace && <Text dimColor>Marketplace: {detailPlugin.marketplace}</Text>}
+                            </Box>
+                        </Box>
+                    )}
                 </Box>
             ) : (
                 <Text dimColor>Loading marketplaces...</Text>
             )}
         </Box>
     );
+}
+
+function buildMarketplacePluginId(plugin: any, marketplaceName: string): string {
+    const name = plugin?.name || plugin?.repository || "unknown";
+    return `${name}@${marketplaceName}`;
+}
+
+function dedupePlugins(entries: any[]): any[] {
+    const seen = new Set<string>();
+    const output: any[] = [];
+    for (const entry of entries) {
+        const key = entry?.pluginId || entry?.id || entry?.repository || entry?.name;
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
+        output.push(entry);
+    }
+    return output;
 }

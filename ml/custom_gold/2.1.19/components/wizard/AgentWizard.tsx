@@ -7,7 +7,6 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
-import { Divider } from '../common/Divider.js';
 
 interface AgentWizardProps {
     onExit: () => void;

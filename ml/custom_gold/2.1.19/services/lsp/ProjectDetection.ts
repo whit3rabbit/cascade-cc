@@ -84,7 +84,7 @@ export async function getProjectSummary(rootPath: string): Promise<string> {
             const pkg = JSON.parse(readFileSync(join(rootPath, 'package.json'), 'utf-8'));
             if (pkg.name) summaryArr.push(pkg.name);
             if (pkg.version) summaryArr.push(`v${pkg.version}`);
-        } catch (e) { }
+        } catch { }
     }
 
     // Check git via command line for richer info (as done in chunk1271)

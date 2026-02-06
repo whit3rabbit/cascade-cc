@@ -42,7 +42,7 @@ export function formatUri(uri: string | undefined, workspaceRoot?: string): stri
             if (relativePath.length < path.length && !relativePath.startsWith("../../")) {
                 return relativePath;
             }
-        } catch (error) {
+        } catch {
             // If relative conversion fails, just return absolute path
         }
     }

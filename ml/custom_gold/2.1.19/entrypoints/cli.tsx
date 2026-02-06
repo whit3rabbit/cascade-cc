@@ -132,7 +132,7 @@ async function main() {
 
     program.command('install [target]')
         .description('Install Claude Code native build. Use [target] to specify version (stable, latest, or specific version)')
-        .action((target, options) => {
+        .action((target, _options) => {
             console.log(`Install command initialized with target: ${target}`);
         });
 
@@ -222,7 +222,7 @@ import { AppStateProvider } from "../hooks/useAppState.js";
 async function runInteractiveMode(options: any, isFirstRun: boolean = false) {
     terminalLog("Entering interactive mode...");
 
-    const { unmount } = render(
+    const { unmount: _unmount } = render(
         <AppStateProvider initialState={{ verbose: options.verbose }}>
             <REPL
                 initialPrompt={options.prompt}

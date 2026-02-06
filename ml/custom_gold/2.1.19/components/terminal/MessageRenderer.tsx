@@ -18,7 +18,7 @@ export interface MessageRendererProps {
 export const MessageRenderer: React.FC<MessageRendererProps> = ({
     message,
     verbose = false,
-    isTranscriptMode = true
+    isTranscriptMode: _isTranscriptMode = true
 }) => {
     const { role, content } = message;
 
@@ -105,7 +105,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
                                 contentToDisplay = `[Micro-compacted to ${savedPath}]\n\nPreview:\n${preview}${lines.length > 5 ? `\n... (${lines.length - 5} more lines)` : ''}`;
                                 isMicroCompacted = true;
                             }
-                        } catch (e) {
+                        } catch {
                             // Ignore read errors, show original message
                         }
                     }

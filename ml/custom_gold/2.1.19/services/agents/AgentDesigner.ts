@@ -101,7 +101,7 @@ export async function generateAgent(description: string, existingIdentifiers: st
         }
 
         return design as AgentDesign;
-    } catch (e) {
+    } catch {
         console.error("Failed to parse generated agent design:", resultText);
         throw new Error("Failed to generate a valid agent configuration.");
     }

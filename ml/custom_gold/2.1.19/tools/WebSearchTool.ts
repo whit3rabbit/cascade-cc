@@ -1,5 +1,4 @@
 import { ConversationService } from '../services/conversation/ConversationService.js';
-import { EnvService } from '../services/config/EnvService.js';
 
 export interface WebSearchInput {
     query: string;
@@ -78,8 +77,6 @@ export const WebSearchTool = {
         );
 
         let results: WebSearchOutput['results'] = [];
-        let queryCounter = 0;
-
         for await (const event of loop) {
             if (event.type === 'stream_event') {
                 // Skip progress updates if they are noise or handled externally

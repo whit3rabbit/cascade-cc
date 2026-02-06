@@ -16,7 +16,7 @@ export interface AccessToken {
 /**
  * Validation stub for scopes.
  */
-function validateScopes(scopes: string | string[], logger: any): void {
+function validateScopes(scopes: string | string[], _logger: any): void {
     // Logic from official Azure SDK would go here
     if (!scopes || (Array.isArray(scopes) && scopes.length === 0)) {
         throw new Error("Scopes are required");

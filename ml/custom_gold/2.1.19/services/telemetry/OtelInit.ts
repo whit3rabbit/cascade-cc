@@ -72,7 +72,7 @@ export function initializeOtel() {
     const logConfig = getOtlpHttpConfig('LOGS');
     if (logConfig.url) {
         const logExporter = new OTLPLogExporter(logConfig as any);
-        const loggerProvider = new logSdk.LoggerProvider({
+        const _loggerProvider = new logSdk.LoggerProvider({
             resource,
             processors: [new logSdk.SimpleLogRecordProcessor(logExporter)]
         });

@@ -63,7 +63,7 @@ export function formatWorkspaceSymbolResult(result: any[], cwd?: string): string
 
 export function formatDocumentSymbolResult(result: any[]): string {
     if (!result || result.length === 0) {
-        return "No symbols found in document.";
+        return "No symbols found in document. This may occur if the file is empty, not supported by the LSP server, or if the server has not fully indexed the file.";
     }
 
     // Handle DocumentSymbol[] (hierarchical) vs SymbolInformation[] (flat)
@@ -101,7 +101,7 @@ function formatCallHierarchyItem(item: any, cwd?: string): string {
 }
 
 export function formatIncomingCallsResult(result: any[], cwd?: string): string {
-    if (!result || result.length === 0) return "No incoming calls found.";
+    if (!result || result.length === 0) return "No incoming calls found (nothing calls this function)";
 
     // Group by file
     const byFile = new Map<string, any[]>();
@@ -131,7 +131,7 @@ export function formatIncomingCallsResult(result: any[], cwd?: string): string {
 }
 
 export function formatOutgoingCallsResult(result: any[], cwd?: string): string {
-    if (!result || result.length === 0) return "No outgoing calls found.";
+    if (!result || result.length === 0) return "No outgoing calls found (this function calls nothing)";
 
     const byFile = new Map<string, any[]>();
     for (const item of result) {

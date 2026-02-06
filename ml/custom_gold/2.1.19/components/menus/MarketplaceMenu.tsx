@@ -1,12 +1,92 @@
 
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { MarketplaceLoader } from '../../services/mcp/MarketplaceLoader.js';
-import { PluginManager } from '../../services/mcp/PluginManager.js';
+import { MarketplaceLoader } from '../../services/marketplace/MarketplaceLoader.js';
+import { PluginManager, PluginInstallation } from '../../services/mcp/PluginManager.js';
 import Spinner from 'ink-spinner';
 
 interface MarketplaceMenuProps {
     onExit: () => void;
+}
+
+function getDirectoryPluginPrimaryKey(plugin: any): string | null {
+    return plugin?.id || plugin?.pluginId || plugin?.repository || plugin?.name || null;
+}
+
+function getDirectoryPluginKeys(plugin: any): string[] {
+    const keys = new Set<string>();
+    if (plugin?.id) keys.add(plugin.id);
+    if (plugin?.pluginId) keys.add(plugin.pluginId);
+    if (plugin?.name) keys.add(plugin.name);
+    if (plugin?.repository) {
+        keys.add(plugin.repository);
+        const repoName = String(plugin.repository).split('/').pop();
+        if (repoName) keys.add(repoName);
+    }
+    return Array.from(keys);
+}
+
+function getInstalledPluginKeys(plugin: PluginInstallation): string[] {
+    const keys = new Set<string>();
+    if (plugin.id) {
+        keys.add(plugin.id);
+        if (plugin.id.startsWith('plugin:')) {
+            keys.add(plugin.id.replace('plugin:', ''));
+        }
+        if (plugin.id.includes('@')) {
+            keys.add(plugin.id.split('@')[0]);
+        }
+    }
+    if (plugin.name) keys.add(plugin.name);
+    const repository = (plugin as any).repository;
+    if (repository) {
+        keys.add(repository);
+        const repoName = String(repository).split('/').pop();
+        if (repoName) keys.add(repoName);
+    }
+    return Array.from(keys);
+}
+
+function buildInstalledPluginKeySet(installed: PluginInstallation[]): Set<string> {
+    const installedSet = new Set<string>();
+    for (const plugin of installed) {
+        for (const key of getInstalledPluginKeys(plugin)) {
+            installedSet.add(key);
+        }
+    }
+    return installedSet;
+}
+
+function isDirectoryPluginInstalled(plugin: any, installedKeys: Set<string>): boolean {
+    const keys = getDirectoryPluginKeys(plugin);
+    return keys.some(key => installedKeys.has(key));
+}
+
+function resolveInstalledPluginId(plugin: any): string | null {
+    if (plugin?.id && String(plugin.id).startsWith('plugin:')) {
+        return plugin.id;
+    }
+    const repository = plugin?.repository;
+    if (repository) {
+        const repoName = String(repository).split('/').pop();
+        if (repoName) return `plugin:${repoName}`;
+    }
+    if (plugin?.name) {
+        return `plugin:${plugin.name}`;
+    }
+    return null;
+}
+
+function dedupePlugins(directory: any[]): any[] {
+    const seen = new Set<string>();
+    const deduped: any[] = [];
+    for (const plugin of directory) {
+        const key = getDirectoryPluginPrimaryKey(plugin);
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
+        deduped.push(plugin);
+    }
+    return deduped;
 }
 
 export function MarketplaceMenu({ onExit }: MarketplaceMenuProps) {
@@ -31,18 +111,9 @@ export function MarketplaceMenu({ onExit }: MarketplaceMenuProps) {
                 PluginManager.getInstalledPlugins()
             ]);
 
-            setPlugins(directory);
-
-            const installedSet = new Set<string>();
-            installed.forEach(p => {
-                // Determine ID from name or repo
-                // The directory usually has 'name' or 'repository'.
-                // PluginManager uses 'plugin:name' or 'plugin:repo'.
-                // We'll try to match by name or repository URL if available.
-                installedSet.add(p.name);
-                if (p.id) installedSet.add(p.id.replace('plugin:', ''));
-            });
-            setInstalledPlugins(installedSet);
+            const deduped = dedupePlugins(directory);
+            setPlugins(deduped);
+            setInstalledPlugins(buildInstalledPluginKeySet(installed));
         } catch (e) {
             setError(`Failed to load marketplace: ${(e as Error).message}`);
         } finally {
@@ -53,20 +124,27 @@ export function MarketplaceMenu({ onExit }: MarketplaceMenuProps) {
     const handleTogglePlugin = async (plugin: any) => {
         if (installing) return;
 
-        const isInstalled = installedPlugins.has(plugin.name);
+        const isInstalled = isDirectoryPluginInstalled(plugin, installedPlugins);
         setInstalling(plugin.name);
         setStatusMessage(isInstalled ? "Uninstalling..." : "Installing...");
 
         try {
             if (isInstalled) {
-                const result = await PluginManager.uninstallPlugin(`plugin:${plugin.name}`, 'user');
-                if (result.success) {
-                    setStatusMessage(`Uninstalled ${plugin.name}`);
-                    const newInstalled = new Set(installedPlugins);
-                    newInstalled.delete(plugin.name);
-                    setInstalledPlugins(newInstalled);
+                const pluginId = resolveInstalledPluginId(plugin);
+                if (!pluginId) {
+                    setError(`Unable to determine installed plugin ID for ${plugin.name}`);
                 } else {
-                    setError(result.message);
+                    const result = await PluginManager.uninstallPlugin(pluginId, 'user');
+                    if (result.success) {
+                        setStatusMessage(`Uninstalled ${plugin.name}`);
+                        const newInstalled = new Set(installedPlugins);
+                        for (const key of getDirectoryPluginKeys(plugin)) {
+                            newInstalled.delete(key);
+                        }
+                        setInstalledPlugins(newInstalled);
+                    } else {
+                        setError(result.message);
+                    }
                 }
             } else {
                 // Install
@@ -81,7 +159,9 @@ export function MarketplaceMenu({ onExit }: MarketplaceMenuProps) {
                 if (result.success) {
                     setStatusMessage(`Installed ${plugin.name}`);
                     const newInstalled = new Set(installedPlugins);
-                    newInstalled.add(plugin.name);
+                    for (const key of getDirectoryPluginKeys(plugin)) {
+                        newInstalled.add(key);
+                    }
                     setInstalledPlugins(newInstalled);
                 } else {
                     setError(result.message);
@@ -155,11 +235,11 @@ export function MarketplaceMenu({ onExit }: MarketplaceMenuProps) {
             <Box marginTop={1} flexDirection="column">
                 {plugins.map((plugin, i) => {
                     const isSelected = i === selectedIndex;
-                    const isInstalled = installedPlugins.has(plugin.name);
+                    const isInstalled = isDirectoryPluginInstalled(plugin, installedPlugins);
                     const isProcessing = installing === plugin.name;
 
                     return (
-                        <Box key={plugin.name || i} flexDirection="row">
+                        <Box key={getDirectoryPluginPrimaryKey(plugin) || i} flexDirection="row">
                             <Text color={isSelected ? 'cyan' : 'white'}>
                                 {isSelected ? '❯ ' : '  '}
                             </Text>

@@ -4,9 +4,6 @@
  */
 
 import { exec, execFile, ExecOptions, ExecFileOptions } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execPromise = promisify(exec);
 
 // --- Regex Constants ---
 const CWD_RESET_REGEX = /(?:^|\n)(Shell cwd was reset to .+)$/;

@@ -25,6 +25,7 @@ export class JSONSchemaGenerator {
      * Main entry point to emit a JSON Schema from a schema definition.
      */
     emit(schema: any, options?: JSONSchemaOptions): any {
+        void options;
         // This is a simplified reconstruction of the massive emitter in runtime.js
         const rootSchema = this.process(schema);
         return rootSchema;

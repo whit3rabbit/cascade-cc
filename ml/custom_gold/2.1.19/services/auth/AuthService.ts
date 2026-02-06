@@ -3,21 +3,9 @@
  * Role: Orchestrates API key and OAuth authentication headers.
  */
 
-import axios from 'axios';
 import { ApiKeyManager } from './ApiKeyManager.js';
 import { OAuthService } from './OAuthService.js';
-import { PROFILE_URL, OAUTH_BETA_HEADER } from '../../constants/product.js';
-
-interface ProfileResponse {
-    account: {
-        display_name: string;
-    };
-    organization: {
-        organization_type: string;
-        rate_limit_tier: string;
-        has_extra_usage_enabled: boolean;
-    };
-}
+import { OAUTH_BETA_HEADER } from '../../constants/product.js';
 
 let cachedProfile: { plan: string, displayName?: string } | null = null;
 let lastFetchTime = 0;
@@ -94,7 +82,7 @@ async function fetchProfile(accessToken: string): Promise<{ plan: string, displa
                     lastFetchTime = now;
                     return cachedProfile;
                 }
-            } catch (retryError) {
+            } catch {
                 // Fall through to error logging
             }
         }
@@ -144,7 +132,7 @@ export async function isAuthenticated(): Promise<boolean> {
 export async function getAuthDetails(): Promise<{ type: 'oauth' | 'apikey' | 'none', plan: string }> {
     const oauthToken = await OAuthService.getValidToken();
     if (oauthToken) {
-        const session = (OAuthService as any).session; // Accessing internal for details if possible
+        const _session = (OAuthService as any).session; // Accessing internal for details if possible
         const profile = await fetchProfile(oauthToken);
         return {
             type: 'oauth',

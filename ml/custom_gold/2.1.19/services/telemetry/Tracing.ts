@@ -8,10 +8,6 @@ import { baggageEntryMetadataFromString, propagation, createBaggage } from '../.
 
 // --- Types ---
 
-interface BaggageHeader {
-    [key: string]: string;
-}
-
 interface BaggageEntry {
     value: string;
     metadata?: any;

@@ -7,9 +7,8 @@ import { request } from 'undici';
 import semver from 'semver';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { mkdir, rename, unlink, chmod, writeFile, stat, readFile } from 'fs/promises';
+import { rename, chmod } from 'fs/promises';
 import { readFileSync, existsSync } from 'fs';
-import { createHash } from 'crypto';
 import os from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -18,6 +17,11 @@ export interface UpdateInfo {
     latestVersion: string;
     currentVersion: string;
     hasUpdate: boolean;
+}
+
+export interface UpdateChannelInfo {
+    stableVersion?: string;
+    latestVersion?: string;
 }
 
 import { EnvService } from '../config/EnvService.js';
@@ -60,6 +64,38 @@ export class UpdaterService {
                 console.error('[Updater] Failed to check for updates:', error);
             }
             return null;
+        }
+    }
+
+    static async getUpdateChannelInfo(): Promise<UpdateChannelInfo | null> {
+        try {
+            const { body } = await request(this.REGISTRY_URL, {
+                headers: {
+                    'Accept': 'application/vnd.npm.install-v1+json'
+                }
+            });
+
+            const data = await body.json() as any;
+            return {
+                stableVersion: data['dist-tags']?.['stable'],
+                latestVersion: data['dist-tags']?.['latest']
+            };
+        } catch (error) {
+            if (EnvService.isTruthy("DEBUG_UPDATER")) {
+                console.error('[Updater] Failed to fetch update channels:', error);
+            }
+            return null;
+        }
+    }
+
+    static getCurrentVersion(): string | null {
+        try {
+            const packageJsonPath = join(__dirname, '../../../package.json');
+            const content = readFileSync(packageJsonPath, 'utf-8');
+            const pkg = JSON.parse(content);
+            return pkg.version;
+        } catch {
+            return EnvService.get("npm_package_version") || null;
         }
     }
 
@@ -153,14 +189,5 @@ export class UpdaterService {
         }
     }
 
-    private static getCurrentVersion(): string | null {
-        try {
-            const packageJsonPath = join(__dirname, '../../../package.json');
-            const content = readFileSync(packageJsonPath, 'utf-8');
-            const pkg = JSON.parse(content);
-            return pkg.version;
-        } catch (e) {
-            return EnvService.get("npm_package_version") || null;
-        }
-    }
+    // getCurrentVersion is intentionally public for diagnostics.
 }

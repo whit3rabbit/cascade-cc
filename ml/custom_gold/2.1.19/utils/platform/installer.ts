@@ -40,7 +40,7 @@ export async function updateExecutableLink(executablePath: string, targetBinary:
                 if (stats.isSymbolicLink() || stats.isFile()) {
                     await rm(executablePath, { force: true });
                 }
-            } catch (e) {
+            } catch {
                 // Ignore if file doesn't exist
             }
         }

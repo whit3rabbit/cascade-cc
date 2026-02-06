@@ -10,7 +10,7 @@ try {
     if (vscodeRg.rgPath) {
         rgPath = vscodeRg.rgPath;
     }
-} catch (e) {
+} catch {
     // vscode-ripgrep not found, rely on system rg
 }
 

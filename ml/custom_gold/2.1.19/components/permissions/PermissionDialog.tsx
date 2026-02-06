@@ -4,9 +4,9 @@
  * Deobfuscated from chunk1518 and chunk1524
  */
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Box, Text, useInput } from 'ink';
-import { usePermissionDialog, UsePermissionDialogProps, PermissionOptionValue } from './usePermissionDialog.js';
+import { usePermissionDialog, UsePermissionDialogProps } from './usePermissionDialog.js';
 import { PermissionOption } from './PermissionOption.js';
 
 

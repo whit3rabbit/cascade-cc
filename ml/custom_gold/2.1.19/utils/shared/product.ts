@@ -4,8 +4,9 @@
  */
 
 import { createHash } from "node:crypto";
-
-const BASE_PRODUCT_NAME = "Claude Code";
+import { PRODUCT_NAME } from "../../constants/product.js";
+import { getOAuthConfig } from "../../constants/oauth.js";
+import { BUILD_INFO } from "../../constants/build.js";
 
 /**
  * Returns the product name, optionally specialized with a unique ID derived from the config path.
@@ -24,7 +25,8 @@ export function getProductName(suffix = ""): string {
             .substring(0, 8);
     }
 
-    return `${BASE_PRODUCT_NAME}${suffix}${uniqueId}`;
+    const oauthSuffix = getOAuthConfig().OAUTH_FILE_SUFFIX;
+    return `${PRODUCT_NAME}${oauthSuffix}${suffix}${uniqueId}`;
 }
 
 /**
@@ -40,5 +42,5 @@ export function getSystemUser(): string {
  * Returns the current product version.
  */
 export function getProductVersion(): string {
-    return "0.0.1"; // Placeholder
+    return BUILD_INFO.VERSION;
 }

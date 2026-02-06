@@ -72,7 +72,7 @@ export const AccountManager = {
             if (parts.length !== 3) return null;
             const payload = Buffer.from(parts[1], 'base64').toString();
             return JSON.parse(payload);
-        } catch (e) {
+        } catch {
             return null;
         }
     }

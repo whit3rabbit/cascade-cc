@@ -28,11 +28,11 @@ export async function cleanupOldDirectories(targetDir: string, threshold: Date):
                     await rm(fullPath, { recursive: true, force: true });
                     result.deleted++;
                 }
-            } catch (err) {
+            } catch {
                 result.errors++;
             }
         }));
-    } catch (err) {
+    } catch {
         // Directory usually doesn't exist, which is fine
     }
     return result;
@@ -55,11 +55,11 @@ export async function cleanupOldFiles(targetDir: string, threshold: Date, extens
                     await unlink(fullPath);
                     result.deleted++;
                 }
-            } catch (err) {
+            } catch {
                 result.errors++;
             }
         }));
-    } catch (err) {
+    } catch {
         // Directory doesn't exist
     }
     return result;

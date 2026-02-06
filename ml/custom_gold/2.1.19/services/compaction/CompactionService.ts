@@ -8,7 +8,6 @@ import { EnvService } from '../config/EnvService.js';
 import { hookService } from '../hooks/HookService.js';
 import { ModelResolver } from '../conversation/ModelResolver.js';
 
-const WARNING_THRESHOLD = 20000; // BW2
 const AUTO_COMPACT_THRESHOLD = 40000; // uW2
 const MIN_TOKENS = 10000; // DP1.minTokens
 const MIN_TEXT_BLOCK_MESSAGES = 5; // DP1.minTextBlockMessages
@@ -226,7 +225,10 @@ export class CompactionService {
         const prompt = this.getSummarizationSystemPrompt(instructions);
         const model = ModelResolver.resolveModel(EnvService.get("CLAUDE_CODE_MODEL") || "claude-3-5-sonnet-20241022", false);
 
-        const response = await client.messages.create({
+        const protoMessages = (Anthropic as any).prototype?.messages;
+        const messagesApi = protoMessages?.create ? protoMessages : client.messages;
+
+        const response = await messagesApi.create({
             model,
             max_tokens: 4096,
             system: prompt,
@@ -348,12 +350,14 @@ Please provide your summary based on the conversation so far, following this str
             // Smarter splitting based on token blocks like 2.1.19
             if (microcompacted.length > 0) {
                 const splitIndex = this.getSplitIndex(microcompacted);
+                const summarizeAll = splitIndex === 0 && microcompacted.length > 0;
 
-                // Only compact if there's actually something to summarize
-                if (splitIndex > 0) {
-                    const messagesToSummarize = microcompacted.slice(0, splitIndex);
-                    const recentMessages = microcompacted.slice(splitIndex);
+                const messagesToSummarize = summarizeAll
+                    ? microcompacted
+                    : microcompacted.slice(0, splitIndex);
+                const recentMessages = summarizeAll ? [] : microcompacted.slice(splitIndex);
 
+                if (messagesToSummarize.length > 0) {
                     const result = await this.compact(messagesToSummarize);
                     if (result.wasCompacted && result.compactedMessages) {
                         // Combine: Summary + Boundary + Recent

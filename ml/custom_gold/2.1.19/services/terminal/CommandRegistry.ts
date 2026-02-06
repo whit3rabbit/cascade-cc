@@ -81,7 +81,7 @@ export class CommandRegistry {
                         return 0;
                     });
                 }
-            } catch (e) {
+            } catch {
                 // Ignore git errors (not a repo, etc)
             }
         }

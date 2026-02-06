@@ -7,9 +7,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from 'zod';
 import {
-    checkToolPermissions,
-    formatDecisionReason,
-    handlePermissionResponse,
     $_ as checkToolPermissionsAlias,
     Rn2 as formatDecisionReasonAlias,
     kdA as handlePermissionResponseAlias
@@ -187,7 +184,7 @@ export class ControlStreamService {
     safeParseJSON(jsonString: string): any | null {
         try {
             return JSON.parse(jsonString);
-        } catch (error) {
+        } catch {
             return null;
         }
     }
@@ -255,7 +252,7 @@ export class ControlStreamService {
     /**
      * Creates a function to handle 'can_use_tool' requests.
      */
-    createCanUseTool(preCheck?: () => void) {
+    createCanUseTool(_preCheck?: () => void) {
         return async (toolName: string, input: any, context: any, ...rest: any[]) => {
             const { agentId, abortController } = context || {};
 

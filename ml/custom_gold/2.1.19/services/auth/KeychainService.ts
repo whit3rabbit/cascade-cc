@@ -8,7 +8,7 @@ import { userInfo } from 'node:os';
 import { EnvService } from '../config/EnvService.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, chmodSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 const PLAINTEXT_STORAGE_PATH = join(CONFIG_DIR, '.credentials.json');

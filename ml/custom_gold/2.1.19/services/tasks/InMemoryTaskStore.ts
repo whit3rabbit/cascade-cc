@@ -11,7 +11,7 @@ export class InMemoryTaskStore implements TaskStore {
         return this.tasks.get(taskId);
     }
 
-    async listTasks(cursor?: string, _sessionId?: string): Promise<{ tasks: Task[], nextCursor?: string }> {
+    async listTasks(_cursor?: string, _sessionId?: string): Promise<{ tasks: Task[], nextCursor?: string }> {
         const allTasks = Array.from(this.tasks.values());
         // Simple pagination can be added if needed
         return { tasks: allTasks };

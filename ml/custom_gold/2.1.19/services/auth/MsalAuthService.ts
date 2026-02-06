@@ -3,11 +3,12 @@
  * Role: Core MSAL-based authentication service for managing tokens and account state.
  */
 
-import { PublicClientApplication, Configuration, LogLevel, AuthorizationUrlRequest, AuthorizationCodeRequest } from '@azure/msal-node';
+import { PublicClientApplication, Configuration, LogLevel } from '@azure/msal-node';
 import { createMSALConfiguration } from './msalConfig.js';
 import { Account } from './AccountManager.js';
 import * as http from 'http';
 import open from 'open';
+import { HTTP_PROTOCOL, LOCALHOST } from '../../constants/product.js';
 
 export interface TokenRequest {
     account?: Account;
@@ -41,7 +42,7 @@ export class MsalAuthService {
             },
             system: {
                 loggerOptions: {
-                    loggerCallback(loglevel: LogLevel, message: string, containsPii: boolean) {
+                    loggerCallback(_loglevel: LogLevel, _message: string, _containsPii: boolean) {
                         // console.log(message);
                     },
                     piiLoggingEnabled: false,
@@ -89,20 +90,41 @@ export class MsalAuthService {
      */
     async acquireTokenInteractive(request: TokenRequest): Promise<AuthenticationResult> {
         return new Promise((resolve, reject) => {
+            let redirectUri: string | null = null;
+            const scopes = request.scopes || ["User.Read"];
+            let timeoutId: NodeJS.Timeout | null = null;
+
             const server = http.createServer(async (req, res) => {
-                const url = new URL(req.url!, `http://${req.headers.host}`);
+                const rawUrl = req.url;
+                if (!rawUrl) {
+                    res.end('Error occurred loading redirectUrl');
+                    reject(new Error("Unable to load redirect URL."));
+                    server.close();
+                    return;
+                }
+
+                const base = redirectUri ?? `${HTTP_PROTOCOL}${LOCALHOST}`;
+                const url = new URL(rawUrl, base);
+                if (url.pathname !== "/redirect" && url.pathname !== "/") {
+                    res.writeHead(404);
+                    res.end();
+                    return;
+                }
+
                 const code = url.searchParams.get('code');
+                const error = url.searchParams.get('error');
 
                 if (code) {
                     res.writeHead(200, { 'Content-Type': 'text/html' });
                     res.end('<h1>Authentication successful! You can close this window.</h1>');
+                    if (timeoutId) clearTimeout(timeoutId);
                     server.close();
 
                     try {
                         const result = await this.client.acquireTokenByCode({
                             code,
-                            scopes: request.scopes || ["User.Read"],
-                            redirectUri: "http://localhost:3000/redirect", // Must match registration
+                            scopes,
+                            redirectUri: redirectUri || base
                         });
 
                         resolve({
@@ -117,20 +139,51 @@ export class MsalAuthService {
                     } catch (err) {
                         reject(err);
                     }
+                    return;
+                }
+
+                if (error) {
+                    res.end(`Error occurred: ${error}`);
+                    if (timeoutId) clearTimeout(timeoutId);
+                    server.close();
+                    reject(new Error(error));
+                    return;
+                }
+
+                res.writeHead(400);
+                res.end("Authorization code not found");
+            });
+
+            server.on("error", (err) => {
+                if (timeoutId) clearTimeout(timeoutId);
+                reject(err);
+            });
+
+            server.listen(0, LOCALHOST, async () => {
+                const address = server.address();
+                if (!address || typeof address === "string" || !address.port) {
+                    reject(new Error("Invalid loopback address type."));
+                    server.close();
+                    return;
+                }
+
+                redirectUri = `${HTTP_PROTOCOL}${LOCALHOST}:${address.port}/redirect`;
+                try {
+                    const authUrl = await this.client.getAuthCodeUrl({
+                        scopes,
+                        redirectUri,
+                        loginHint: request.loginHint
+                    });
+                    await open(authUrl);
+                } catch (err) {
+                    if (timeoutId) clearTimeout(timeoutId);
+                    server.close();
+                    reject(err);
                 }
             });
 
-            server.listen(3000, async () => {
-                const authUrl = await this.client.getAuthCodeUrl({
-                    scopes: request.scopes || ["User.Read"],
-                    redirectUri: "http://localhost:3000/redirect",
-                    loginHint: request.loginHint
-                });
-                await open(authUrl);
-            });
-
             // Timeout after 5 minutes
-            setTimeout(() => {
+            timeoutId = setTimeout(() => {
                 server.close();
                 reject(new Error("Timeout waiting for authentication"));
             }, 300000);

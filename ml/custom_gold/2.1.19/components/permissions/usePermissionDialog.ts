@@ -5,7 +5,6 @@
  */
 
 import { useState, useCallback, useMemo } from 'react';
-import { useInput } from 'ink';
 
 export interface PermissionOptionValue {
     type: 'accept-once' | 'accept-session' | 'accept-always' | 'reject';
@@ -42,32 +41,6 @@ export interface UsePermissionDialogProps {
     parseInput: (input: any) => any;
     operationType?: string;
 }
-
-// Logic from FPK (inferred)
-const getPermissionOptions = (
-    { yesInputMode, noInputMode, toolPermissionContext }:
-        { yesInputMode: boolean; noInputMode: boolean; toolPermissionContext: any }
-): { option: PermissionOptionValue, label: string }[] => {
-    // This would typically be dynamic based on context
-    return [
-        {
-            option: { type: 'accept-once', label: 'Allow this time', feedbackConfig: { type: 'accept' } },
-            label: 'Allow this time'
-        },
-        {
-            option: { type: 'accept-session', scope: 'session', label: 'Allow for this session', feedbackConfig: { type: 'accept' } },
-            label: 'Allow for this session'
-        },
-        {
-            option: { type: 'accept-always', label: 'Always allow', feedbackConfig: { type: 'accept' } },
-            label: 'Always allow'
-        },
-        {
-            option: { type: 'reject', label: 'Reject', feedbackConfig: { type: 'reject' } },
-            label: 'Reject'
-        }
-    ];
-};
 
 export const usePermissionDialog = (props: UsePermissionDialogProps) => {
     const {

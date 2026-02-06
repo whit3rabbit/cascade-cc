@@ -4,7 +4,6 @@
  * Service for handling tool permissions and policy enforcement.
  */
 
-import { terminalLog } from "../../utils/shared/runtime.js";
 import { getSettings, getToolSettings, updateSettingsForSource } from "../../services/config/SettingsService.js";
 import { hookService } from "../hooks/HookService.js";
 import { isBubblewrapSandbox, isDocker } from "../../utils/shared/runtimeAndEnv.js";
@@ -130,7 +129,7 @@ function matchWebFetchRule(rule: string, url: string): boolean {
         try {
             const parsed = new URL(url);
             return parsed.hostname === allowedDomain || parsed.hostname.endsWith('.' + allowedDomain);
-        } catch (e) {
+        } catch {
             return false;
         }
     }
@@ -360,7 +359,7 @@ export function handlePermissionResponse(
     response: any,
     toolName: string,
     input: any,
-    context: any
+    _context: any
 ): PermissionResponse {
     const behavior = response.behavior || "ask";
     const scope = response.scope;

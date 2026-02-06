@@ -153,8 +153,8 @@ export function isDemo(): boolean {
  * Diagnostics stub.
  */
 export const diag = {
-    debug: (...args: any[]) => { /* console.debug('[Diag]', ...args); */ },
-    info: (...args: any[]) => { /* console.info('[Diag]', ...args); */ },
+    debug: (..._args: any[]) => { /* console.debug('[Diag]', ...args); */ },
+    info: (..._args: any[]) => { /* console.info('[Diag]', ...args); */ },
     warn: (...args: any[]) => { console.warn('[Diag]', ...args); },
     error: (...args: any[]) => { console.error('[Diag]', ...args); }
 };

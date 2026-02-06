@@ -7,10 +7,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { WebSocketClientTransport } from "@modelcontextprotocol/sdk/client/websocket.js";
-import { LogManager } from "../logging/LogManager.js";
 import { getSettings } from "../config/SettingsService.js";
 import { EnvService } from "../config/EnvService.js";
 import { McpServerManager, McpServerConfig } from "./McpServerManager.js";
+import { MCP_PROXY_PATH, MCP_PROXY_URL } from "../../constants/product.js";
+import { getSessionId } from "../../utils/shared/runtimeAndEnv.js";
 
 interface ActiveClient {
     client: Client;
@@ -72,14 +73,15 @@ export class McpClientManager {
 
                 if (expandedConfig.type === "claudeai-proxy") {
                     const { OAuthService } = await import('../auth/OAuthService.js');
-                    const { getSessionId } = await import('../../utils/shared/runtimeAndEnv.js');
 
-                    // Construct URL if missing
-                    if (!targetUrl) {
-                        const proxyUrlBase = EnvService.get('MCP_PROXY_URL') || 'https://api.claude.ai';
-                        const proxyPath = EnvService.get('MCP_PROXY_PATH') || '/api/mcp/proxy/{server_id}/sse';
-                        targetUrl = proxyUrlBase + proxyPath.replace('{server_id}', serverId);
+                    const proxyUrlBase = EnvService.get('MCP_PROXY_URL') || MCP_PROXY_URL;
+                    const proxyPath = EnvService.get('MCP_PROXY_PATH') || MCP_PROXY_PATH;
+                    const proxyServerId = expandedConfig.id || serverId;
+                    if (!proxyServerId) {
+                        throw new Error(`MCP Server ${serverId} missing 'id' for claudeai-proxy transport`);
                     }
+
+                    targetUrl = `${proxyUrlBase}${proxyPath.replace('{server_id}', proxyServerId)}`;
 
                     // Custom transport options with Auth
                     transport = new SSEClientTransport(new URL(targetUrl), {
@@ -87,7 +89,7 @@ export class McpClientManager {
                             fetch: async (input: any, init: any) => {
                                 const accessToken = await OAuthService.getValidToken();
                                 if (!accessToken) {
-                                    throw new Error("Authentication required for claude.ai proxy. Please run /login.");
+                                    throw new Error("No claude.ai OAuth token found");
                                 }
 
                                 const headers = new Headers(init?.headers);
@@ -143,7 +145,7 @@ export class McpClientManager {
                 cleanup: async () => {
                     try {
                         await client.close();
-                    } catch (e) {
+                    } catch {
                         // ignore errors on close
                     }
                 }

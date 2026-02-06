@@ -14,21 +14,29 @@ export interface StatusLineProps {
     isTyping: boolean;
     cwd: string;
     showTasks: boolean;
+    showDiff?: boolean;
+    showLoop?: boolean;
+    showTeams?: boolean;
     usage?: { inputTokens: number; outputTokens: number };
     planMode: boolean;
+    acceptEdits?: boolean;
     exitConfirmation?: boolean;
 }
 
 export const StatusLine: React.FC<StatusLineProps> = (props) => {
     const {
-        vimMode,
-        vimModeEnabled,
+        vimMode: _vimMode,
+        vimModeEnabled: _vimModeEnabled,
         model,
         isTyping,
-        cwd,
+        cwd: _cwd,
         showTasks,
-        usage = { inputTokens: 0, outputTokens: 0 },
+        showDiff,
+        showLoop,
+        showTeams,
+        usage: _usage = { inputTokens: 0, outputTokens: 0 },
         planMode,
+        acceptEdits,
         exitConfirmation
     } = props;
     const theme = useTheme();
@@ -75,11 +83,20 @@ export const StatusLine: React.FC<StatusLineProps> = (props) => {
                             <Text color={theme.subtle}>plan mode on </Text>
                             <Text color={theme.inactive}>(shift+Tab to cycle)</Text>
                         </Box>
-                    ) : (
+                    ) : acceptEdits ? (
                         <Box>
                             <Text color={theme.success}>⏵⏵ </Text>
                             <Text color={theme.subtle}>accept edits on </Text>
                             <Text color={theme.inactive}>(shift+Tab to cycle)</Text>
+                        </Box>
+                    ) : (
+                        <Box>
+                            <Text color={theme.subtle}>
+                                {showTasks ? 'tasks ' : showDiff ? 'diff ' : showLoop ? 'loop ' : showTeams ? 'teams ' : 'default mode '}
+                            </Text>
+                            {!showTasks && !showDiff && !showLoop && !showTeams && (
+                                <Text color={theme.inactive}>(shift+Tab to plan)</Text>
+                            )}
                         </Box>
                     )}
                 </Box>

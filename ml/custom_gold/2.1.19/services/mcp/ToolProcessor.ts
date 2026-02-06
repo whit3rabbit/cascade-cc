@@ -55,7 +55,7 @@ export async function prepareToolForConversation(toolConfig: ToolConfig, context
  * Transforms tool input data based on tool name before sending to the tool implementation.
  * This is where high-level 'Claude-friendly' inputs are converted to low-level system inputs.
  */
-export function transformToolInput(toolDefinition: { name: string }, inputData: any, context?: any): any {
+export function transformToolInput(toolDefinition: { name: string }, inputData: any, _context?: any): any {
     switch (toolDefinition.name) {
         case "bash":
             {

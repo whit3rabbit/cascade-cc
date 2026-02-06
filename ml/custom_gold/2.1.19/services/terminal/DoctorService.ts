@@ -1,7 +1,13 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { platform } from 'node:os';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join as joinPath } from 'node:path';
 import { EnvService } from '../config/EnvService.js';
+import { getSettings } from '../config/SettingsService.js';
+import { getClaudePaths } from '../../utils/shared/runtimeAndEnv.js';
+import { isProcessRunning } from '../../utils/process/ProcessLock.js';
+import { UpdaterService } from '../updater/UpdaterService.js';
 
 const execAsync = promisify(exec);
 
@@ -12,6 +18,7 @@ export interface DiagnosticInfo {
     invokedBinary: string;
     configInstallMethod: string;
     autoUpdates: string;
+    updateChannel: string;
     hasUpdatePermissions: boolean | null;
     multipleInstallations: Array<{ type: string; path: string }>;
     warnings: Array<{ issue: string; fix: string }>;
@@ -31,11 +38,66 @@ export interface DiagnosticInfo {
     };
     envVars: Array<{ name: string; message: string; status: 'ok' | 'capped' | 'error' }>;
     packageManager?: string;
+    stableVersion?: string;
+    latestVersion?: string;
+    versionLocks: Array<{ version: string; pid: number; isProcessRunning: boolean }>;
     sessionMetrics?: {
         totalCostUSD: number;
         inputTokens: number;
         outputTokens: number;
     };
+}
+
+export interface DiagnosticSummary {
+    ok: number;
+    warn: number;
+    errorCount: number;
+}
+
+export function getDiagnosticSummary(info: DiagnosticInfo): DiagnosticSummary {
+    let ok = 0;
+    let warn = 0;
+    let errorCount = 0;
+
+    const bumpStatus = (status: 'ok' | 'capped' | 'error' | 'not-set') => {
+        if (status === 'ok') ok++;
+        else if (status === 'capped' || status === 'not-set') warn++;
+        else if (status === 'error') errorCount++;
+    };
+
+    info.envVars.forEach(v => bumpStatus(v.status));
+    if (info.ripgrepStatus.workingDirectory) ok++; else errorCount++;
+    if (info.ghStatus.installed && info.ghStatus.authenticated) ok++; else warn++;
+
+    return { ok, warn, errorCount };
+}
+
+export function formatDoctorReport(info: DiagnosticInfo): string {
+    let report = `Diagnostics\n`;
+    report += `└ Currently running: ${info.installationType} (${info.version})\n`;
+    if (info.packageManager) report += `└ Package manager: ${info.packageManager}\n`;
+    report += `└ Path: ${info.installationPath}\n`;
+    report += `└ Invoked: ${info.invokedBinary}\n`;
+    report += `└ Config install method: ${info.configInstallMethod}\n`;
+    report += `└ Search: ${info.ripgrepStatus.workingDirectory ? "OK" : "Not working"} (${info.ripgrepStatus.mode === 'builtin' ? 'bundled' : (info.ripgrepStatus.systemPath || 'system')})\n`;
+
+    report += `\nUpdates\n`;
+    report += `└ Auto-updates: ${info.packageManager ? "Managed by package manager" : info.autoUpdates}\n`;
+    report += `└ Auto-update channel: ${info.updateChannel}\n`;
+    report += `└ Stable version: ${info.stableVersion || 'unknown'}\n`;
+    report += `└ Latest version: ${info.latestVersion || 'unknown'}\n`;
+
+    report += `\nVersion Locks\n`;
+    if (info.versionLocks.length === 0) {
+        report += `└ No active version locks\n`;
+    } else {
+        for (const lock of info.versionLocks) {
+            report += `└ ${lock.version}: PID ${lock.pid} ${lock.isProcessRunning ? '(running)' : '(stale)'}\n`;
+        }
+    }
+
+    report += `\nPress Enter to continue…`;
+    return report;
 }
 
 /**
@@ -44,15 +106,17 @@ export interface DiagnosticInfo {
  */
 export class DoctorService {
     static async getDiagnosticInfo(): Promise<DiagnosticInfo> {
-        const version = "2.1.19-deob";
+        const version = UpdaterService.getCurrentVersion() || "unknown";
         const installationPath = process.argv[1] || "unknown";
         const invokedBinary = process.argv[0] || "node";
         const installationType = process.env.npm_config_global ? "npm-global" : "native";
+        const configInstallMethod = installationType === "native" ? "native" : "npm";
 
         const warnings: Array<{ issue: string; fix: string }> = [];
 
         // Ripgrep status
-        let rgStatus = { workingDirectory: true, mode: "system", systemPath: null as string | null };
+        const useBuiltinRipgrep = EnvService.get("CLAUDE_CODE_USE_BUILTIN_RIPGREP") === "true";
+        let rgStatus = { workingDirectory: true, mode: useBuiltinRipgrep ? "builtin" : "system", systemPath: null as string | null };
         try {
             const { stdout } = await execAsync('rg --version');
             if (!stdout.includes('ripgrep')) {
@@ -65,7 +129,7 @@ export class DoctorService {
                     rgStatus.systemPath = "system";
                 }
             }
-        } catch (e) {
+        } catch {
             rgStatus.workingDirectory = false;
             warnings.push({
                 issue: "ripgrep not found in PATH",
@@ -126,6 +190,37 @@ export class DoctorService {
             envVars.push({ name: "ANTHROPIC_API_KEY", message: "Configured (masked)", status: "ok" });
         }
 
+        // Update channels
+        const settings = getSettings();
+        const updateChannel = (settings.updateChannel || settings.autoUpdatesChannel || 'latest') as string;
+        const updateInfo = await UpdaterService.getUpdateChannelInfo();
+
+        // Version locks
+        const lockDir = getClaudePaths().locks;
+        let versionLocks: Array<{ version: string; pid: number; isProcessRunning: boolean }> = [];
+        try {
+            const entries = readdirSync(lockDir);
+            for (const entry of entries) {
+                if (!entry.endsWith('.lock')) continue;
+                const lockPath = joinPath(lockDir, entry);
+                try {
+                    const raw = readFileSync(lockPath, 'utf8');
+                    if (!raw.trim()) continue;
+                    const parsed = JSON.parse(raw) as { pid?: number; version?: string };
+                    if (typeof parsed.pid !== 'number' || !parsed.version) continue;
+                    versionLocks.push({
+                        pid: parsed.pid,
+                        version: parsed.version,
+                        isProcessRunning: isProcessRunning(parsed.pid)
+                    });
+                } catch {
+                    continue;
+                }
+            }
+        } catch {
+            versionLocks = [];
+        }
+
         // Session metrics
         const { costService } = await import('./CostService.js');
         const usage = costService.getUsage();
@@ -140,8 +235,9 @@ export class DoctorService {
             version,
             installationPath,
             invokedBinary,
-            configInstallMethod: "direct",
+            configInstallMethod,
             autoUpdates: "enabled",
+            updateChannel,
             hasUpdatePermissions: true,
             multipleInstallations: [],
             warnings,
@@ -149,6 +245,9 @@ export class DoctorService {
             ghStatus,
             gitStatus,
             envVars,
+            stableVersion: updateInfo?.stableVersion,
+            latestVersion: updateInfo?.latestVersion,
+            versionLocks,
             sessionMetrics
         };
     }

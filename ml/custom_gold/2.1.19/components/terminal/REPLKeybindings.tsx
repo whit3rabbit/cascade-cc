@@ -18,7 +18,7 @@ export interface REPLKeybindingsProps {
  */
 export const REPLKeybindings: React.FC<REPLKeybindingsProps> = ({
     onCancel,
-    vimMode
+    vimMode: _vimMode
 }) => {
     useInput((input, key) => {
         // Porting logic from current REPL.tsx global useInput

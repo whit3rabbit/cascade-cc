@@ -85,9 +85,9 @@ export class TmuxBackend {
     async rebalancePanes(windowTarget: string, external = false): Promise<void> {
         if (external) {
             await this.rebalancePanesTiled(windowTarget);
-            return;
+        } else {
+            await this.rebalancePanesWithLeader(windowTarget);
         }
-        await this.rebalancePanesWithLeader(windowTarget);
     }
 
     async killPane(paneId: string, external = false): Promise<boolean> {
@@ -299,12 +299,20 @@ export class TmuxBackend {
     async rebalancePanesWithLeader(windowTarget: string): Promise<void> {
         const panes = await runTmuxCommand(["list-panes", "-t", windowTarget, "-F", "#{pane_id}"]);
         const paneIds = panes.stdout.trim().split("\n").filter(Boolean);
-        if (paneIds.length === 0) return;
+        if (paneIds.length <= 2) {
+            return;
+        }
         await runTmuxCommand(["select-layout", "-t", windowTarget, "main-vertical"]);
-        await runTmuxCommand(["resize-pane", "-t", paneIds[0], "-x", "30%"]);
+        const firstPane = paneIds[0];
+        await runTmuxCommand(["resize-pane", "-t", firstPane, "-x", "30%"]);
     }
 
     async rebalancePanesTiled(windowTarget: string): Promise<void> {
+        const panes = await runTmuxCommand(["list-panes", "-t", windowTarget, "-F", "#{pane_id}"], true);
+        const paneIds = panes.stdout.trim().split("\n").filter(Boolean);
+        if (paneIds.length <= 1) {
+            return;
+        }
         await runTmuxCommand(["select-layout", "-t", windowTarget, "tiled"], true);
     }
 }

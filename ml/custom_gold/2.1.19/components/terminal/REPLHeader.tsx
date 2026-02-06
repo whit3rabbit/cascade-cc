@@ -19,7 +19,7 @@ export interface REPLHeaderProps {
  * Handles the top-level status and logo display.
  */
 export const REPLHeader: React.FC<REPLHeaderProps> = ({
-    screen,
+    screen: _screen,
     agentName,
     agentColor
 }) => {

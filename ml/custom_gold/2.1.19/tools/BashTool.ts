@@ -4,7 +4,7 @@
  */
 
 import { executeBashCommand, cleanCwdResetWarning, cleanSandboxViolations } from '../utils/shared/bashUtils.js';
-import { isSandboxEnabled, isUrlAllowed, areUnsandboxedCommandsAllowed } from '../services/sandbox/SandboxSettings.js';
+import { isSandboxEnabled, areUnsandboxedCommandsAllowed } from '../services/sandbox/SandboxSettings.js';
 import { EnvService } from '../services/config/EnvService.js';
 import { getSessionEnvScript } from '../utils/shared/runtimeAndEnv.js';
 import { parseCommandWithRedirections } from '../utils/shared/commandStringProcessing.js';
@@ -29,7 +29,7 @@ export const BashTool = {
         const cwd = context.cwd || process.cwd();
 
         // 1. Redirection Safety & URL validation
-        const { commandWithoutRedirections, hasDangerousRedirection } = parseCommandWithRedirections(command);
+        const { commandWithoutRedirections: _commandWithoutRedirections, hasDangerousRedirection } = parseCommandWithRedirections(command);
         if (hasDangerousRedirection) {
             return {
                 is_error: true,

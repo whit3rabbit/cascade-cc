@@ -3,7 +3,7 @@
  * Role: Formats Language Server Protocol (LSP) results (symbols, call hierarchies, etc.) for display.
  */
 
-import { formatUri, formatLocation } from "./formatUri.js";
+import { formatUri } from "./formatUri.js";
 
 // --- LSP Types ---
 

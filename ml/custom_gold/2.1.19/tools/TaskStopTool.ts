@@ -1,6 +1,5 @@
 
 import { taskManager } from '../services/terminal/TaskManager.js';
-import { Task } from '../services/terminal/TaskManager.js';
 
 export interface TaskStopInput {
     task_id: string;

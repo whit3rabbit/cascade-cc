@@ -5,7 +5,7 @@
 
 import { join } from "node:path";
 import { readFile, unlink } from "node:fs/promises";
-import { executeBashCommand, spawnBashCommand } from "./bashUtils.js";
+import { executeBashCommand } from "./bashUtils.js";
 
 /**
  * Gets the error message when no image is found in the clipboard.

@@ -17,8 +17,8 @@ export interface WebFetchInput {
 export const WebFetchTool = {
     name: "WebFetch",
     description: "Fetches content from a specified URL and converts HTML to markdown.",
-    async call(input: WebFetchInput, context: any) {
-        let { url, prompt } = input;
+    async call(input: WebFetchInput, _context: any) {
+        let { url, prompt: _prompt } = input;
 
         // basic URL validation and upgrade
         if (!url.startsWith('http')) {

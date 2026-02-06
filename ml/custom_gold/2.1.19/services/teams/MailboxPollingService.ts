@@ -6,7 +6,6 @@
 import { readUnreadMessages, markMessagesAsRead } from './TeammateMailbox.js';
 import { notificationQueue } from '../terminal/NotificationService.js';
 import { EnvService } from '../config/EnvService.js';
-import { getAgentId } from '../../utils/shared/runtimeAndEnv.js';
 
 export class MailboxPollingService {
     private static interval: NodeJS.Timeout | null = null;
@@ -58,7 +57,7 @@ export class MailboxPollingService {
                 // Mark as read so we don't notify multiple times
                 markMessagesAsRead(agentName, teamName);
             }
-        } catch (error) {
+        } catch {
             // Silently fail polling errors to avoid spamming the terminal
         } finally {
             this.isPolling = false;

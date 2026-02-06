@@ -58,7 +58,7 @@ export function readEndpointConfig(): any | null {
     try {
         const fileContent = readFileSync(filePath, 'utf-8');
         return JSON.parse(Buffer.from(fileContent, 'base64').toString('utf-8'));
-    } catch (error) {
+    } catch {
         return null;
     }
 }

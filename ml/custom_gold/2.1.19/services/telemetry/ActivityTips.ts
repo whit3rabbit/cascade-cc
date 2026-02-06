@@ -1,4 +1,3 @@
-import { EnvService } from '../config/EnvService.js';
 import { getSettings, updateSettings } from '../config/SettingsService.js';
 
 export interface ActivityTip {

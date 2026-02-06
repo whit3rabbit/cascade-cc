@@ -5,7 +5,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import SelectInput from 'ink-select-input';
 import { AgentWizard } from '../wizard/AgentWizard.js';
 import { saveAgent, listAgents, AgentData } from '../../services/agents/AgentPersistence.js';
 
@@ -75,7 +74,7 @@ export function AgentsMenu({ onSelect, onExit }: AgentsMenuProps) {
             await saveAgent(newAgent, data.location);
             refreshAgents();
             setView('list');
-        } catch (err) {
+        } catch {
             // Error handling
         }
     };

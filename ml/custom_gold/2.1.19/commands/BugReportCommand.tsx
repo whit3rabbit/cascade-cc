@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import { getProductVersion, getProductName } from '../utils/shared/product.js';
+import { getProductVersion } from '../utils/shared/product.js';
 import { platform, terminal } from '../utils/shared/process.js';
 import { getGitState, isGitRepo } from '../utils/shared/git.js';
 import { formatTranscript } from '../utils/shared/transcript.js';
@@ -27,8 +27,6 @@ export const BugReportCommand: React.FC<BugReportCommandProps> = ({
     const [feedbackId, setFeedbackId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [gitInfo, setGitInfo] = useState<{ isGit: boolean, state: any } | null>(null);
-    const { stdout } = useStdout();
-    const columns = (stdout?.columns || 80) - 4;
 
     useEffect(() => {
         async function fetchGit() {

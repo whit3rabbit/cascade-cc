@@ -4,11 +4,10 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname, resolve, basename, extname } from 'node:path';
+import { join, dirname, resolve, extname } from 'node:path';
 import { homedir } from 'node:os';
 
 import { getBaseConfigDir, getManagedRulesDirectory } from '../../utils/shared/runtimeAndEnv.js';
-import { EnvService } from '../config/EnvService.js';
 
 export type RuleScope = 'Managed' | 'User' | 'Project' | 'Local';
 

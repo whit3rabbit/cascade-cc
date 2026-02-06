@@ -1,128 +1,88 @@
 /**
  * File: src/services/telemetry/Telemetry.ts
- * Role: Telemetry Service Interface
+ * Role: Telemetry Service Interface using Statsig
  */
 
-import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { appendFile, mkdir, readFile, unlink, readdir } from 'node:fs/promises';
-import { Log } from '../statsig/StatsigService.js';
-import { request } from 'undici';
-
-// Internal telemetry queue or buffer
-interface TelemetryEvent {
-    name: string;
-    properties: Record<string, any>;
-    timestamp: number;
-}
-
-const telemetryBuffer: TelemetryEvent[] = [];
-let isInitialized = false;
-let flushInterval: any = null;
+import StatsigModule from 'statsig-js';
+// Handle CJS/ESM interop
+const Statsig = (StatsigModule as any).default || StatsigModule;
 
 import { EnvService } from '../config/EnvService.js';
+import { Log } from '../statsig/StatsigService.js';
 
-const TELEMETRY_DIR = join(EnvService.get('CLAUDE_CONFIG_DIR'), 'telemetry');
-const TELEMETRY_FILE = join(TELEMETRY_DIR, 'events.jsonl');
+let isInitialized = false;
 
-async function flushEvents() {
-    if (telemetryBuffer.length === 0) return;
+// Default to a placeholder if not provided, though typically we'd want a real key.
+// In the 2.1.19 code, the key might be obscured or fetched remotely.
+// We'll allow it to be set via env var STATSIG_CLIENT_KEY.
+const STATSIG_CLIENT_KEY = EnvService.get("STATSIG_CLIENT_KEY") || "client-claude-code-placeholder";
 
-    const eventsToWrite = [...telemetryBuffer];
-    telemetryBuffer.length = 0; // Clear buffer immediately
-
-    try {
-        await mkdir(TELEMETRY_DIR, { recursive: true });
-        const data = eventsToWrite.map(e => JSON.stringify(e)).join('\n') + '\n';
-        await appendFile(TELEMETRY_FILE, data, 'utf8');
-
-        if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
-            console.log(`[Telemetry] Flushed ${eventsToWrite.length} events to disk`);
-        }
-
-        // Attempt to upload everything from disk
-        await uploadEvents();
-    } catch (error) {
-        console.error('[Telemetry] Failed to flush events:', error);
-    }
-}
-
-/**
- * Synchronously flushes events to disk. Safe for use in exit handlers.
- */
-export function flushSync() {
-    if (telemetryBuffer.length === 0) return;
+export async function initializeTelemetry() {
+    if (isInitialized) return;
 
     try {
-        const { appendFileSync, mkdirSync } = require('node:fs');
-        const eventsToWrite = [...telemetryBuffer];
-        telemetryBuffer.length = 0;
+        const environment = {
+            tier: EnvService.get('NODE_ENV') || 'production',
+        };
 
-        mkdirSync(TELEMETRY_DIR, { recursive: true });
-        const data = eventsToWrite.map(e => JSON.stringify(e)).join('\n') + '\n';
-        appendFileSync(TELEMETRY_FILE, data, 'utf8');
-
-        if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
-            console.log(`[Telemetry] Synchronously flushed ${eventsToWrite.length} events`);
-        }
-    } catch (error) {
-        console.error('[Telemetry] Failed to sync flush:', error);
-    }
-}
-
-const TELEMETRY_ENDPOINT = EnvService.get("CLAUDE_TELEMETRY_URL") || "https://statsigapi.net/v1/log_event";
-
-async function uploadEvents() {
-    try {
-        const data = await readFile(TELEMETRY_FILE, 'utf8');
-        if (!data.trim()) return;
-
-        const events = data.trim().split('\n').map(l => JSON.parse(l));
-
-        const response = await request(TELEMETRY_ENDPOINT, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'STATSIG-API-KEY': EnvService.get("STATSIG_CLIENT_KEY") || "client-claude-key"
+        // Initialize Statsig
+        await Statsig.initialize(
+            STATSIG_CLIENT_KEY,
+            {
+                userID: EnvService.get('USER') || 'unknown',
+                email: 'unknown',
             },
-            body: JSON.stringify({
-                events,
-                statsigMetadata: {
-                    sdkType: 'node-lite',
-                    sdkVersion: '1.0.0'
-                }
-            })
-        });
+            {
+                environment,
+                localMode: !EnvService.get("STATSIG_CLIENT_KEY"), // Run in local mode if no key provided to avoid errors
+            }
+        );
 
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-            await unlink(TELEMETRY_FILE);
-            if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
-                console.log(`[Telemetry] Successfully uploaded ${events.length} events`);
-            }
-        } else {
-            if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
-                console.warn(`[Telemetry] Failed to upload events. Status: ${response.statusCode}`);
-            }
-        }
-    } catch (error) {
+        isInitialized = true;
+        Log.info("Telemetry Service Initialized via Statsig");
+
         if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
-            console.error('[Telemetry] Upload error:', error);
+            console.log(`[Telemetry] Statsig initialized with key: ${STATSIG_CLIENT_KEY.substring(0, 8)}...`);
         }
+
+    } catch (error) {
+        console.error('[Telemetry] Failed to initialize Statsig:', error);
     }
 }
 
 export function track(eventName: string, properties: Record<string, any> = {}) {
-    const event: TelemetryEvent = {
-        name: eventName,
-        properties,
-        timestamp: Date.now()
-    };
+    if (!isInitialized) return;
 
-    if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
-        console.log(`[Telemetry] ${eventName}`, properties);
+    try {
+        Statsig.logEvent(eventName, null, properties);
+        if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
+            console.log(`[Telemetry] Tracked event: ${eventName}`, properties);
+        }
+    } catch (error) {
+        if (EnvService.isTruthy("DEBUG_TELEMETRY")) {
+            console.error(`[Telemetry] Failed to track event ${eventName}:`, error);
+        }
     }
+}
 
-    telemetryBuffer.push(event);
+export async function shutdownTelemetry() {
+    if (isInitialized) {
+        Statsig.shutdown();
+        isInitialized = false;
+        Log.info(`Telemetry Service Shutdown.`);
+    }
+}
+
+/**
+ * Legacy flush sync method - Statsig handles flushing automatically on shutdown, but we can stub this.
+ */
+export function flushSync() {
+    // Statsig-js doesn't expose a flushSync for node process exit reliably in the browser SDK flavor,
+    // but typically shutdown() handles pending events.
+    if (isInitialized) {
+        Statsig.shutdown();
+        isInitialized = false;
+    }
 }
 
 export class Telemetry {
@@ -141,25 +101,6 @@ export class Telemetry {
             ...properties
         });
     }
-}
-
-export function initializeTelemetry() {
-    if (isInitialized) return;
-    isInitialized = true;
-
-    // Start background flusher (every 30s)
-    flushInterval = setInterval(flushEvents, 30000);
-
-    Log.info("Telemetry Service Initialized");
-}
-
-export async function shutdownTelemetry() {
-    if (flushInterval) {
-        clearInterval(flushInterval);
-        flushInterval = null;
-    }
-    await flushEvents();
-    Log.info(`Telemetry Service Shutdown.`);
 }
 
 export { Log } from '../statsig/StatsigService.js';

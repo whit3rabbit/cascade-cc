@@ -4,11 +4,8 @@
  */
 
 import * as path from 'node:path';
-import { readFileSync, existsSync, accessSync, constants } from 'node:fs';
+import { existsSync, accessSync, constants } from 'node:fs';
 import { LspClient } from './LspClient.js';
-import { detectProjectType } from './ProjectDetection.js';
-import { getSettings } from '../config/SettingsService.js';
-import { McpServerManager } from '../mcp/McpServerManager.js';
 import { onCleanup } from '../../utils/cleanup.js';
 
 export interface LspServerConfig {

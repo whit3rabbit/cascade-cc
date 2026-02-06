@@ -21,7 +21,7 @@ export interface ValidationResult {
 /**
  * Validates an agent configuration object.
  */
-export function validateAgentConfig(agentConfig: AgentConfig, allTools: any[] = []): ValidationResult {
+export function validateAgentConfig(agentConfig: AgentConfig, _allTools: any[] = []): ValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];
 

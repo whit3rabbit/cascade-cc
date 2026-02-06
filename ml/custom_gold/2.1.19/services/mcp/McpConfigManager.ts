@@ -5,7 +5,6 @@
 
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 
 import { EnvService } from '../config/EnvService.js';
 
@@ -43,7 +42,7 @@ export const McpConfigManager = {
     async clearTempDir(): Promise<void> {
         try {
             await rm(MCP_TEMP_DIR, { recursive: true, force: true });
-        } catch (err) {
+        } catch {
             // Ignore cleanup errors
         }
     },

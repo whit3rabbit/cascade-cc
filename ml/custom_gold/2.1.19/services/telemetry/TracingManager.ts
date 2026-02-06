@@ -3,7 +3,7 @@
  * Role: Manages high-level OpenTelemetry spans for user interactions and LLM requests.
  */
 
-import { trace, context, Span, Tracer, SpanContext } from '@opentelemetry/api';
+import { trace, context, Span, Tracer } from '@opentelemetry/api';
 import { getSettings } from '../config/SettingsService.js';
 
 const tracer: Tracer = trace.getTracer("com.anthropic.claude_code.tracing", "1.0.0");

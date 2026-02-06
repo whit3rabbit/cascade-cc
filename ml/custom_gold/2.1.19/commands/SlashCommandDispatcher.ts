@@ -3,11 +3,6 @@
  * Role: Central dispatcher for handling slash commands in the REPL.
  */
 
-import { PromptManager } from "../services/conversation/PromptManager.js";
-import { DoctorService } from "../services/terminal/DoctorService.js";
-import { EnvService } from "../services/config/EnvService.js";
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
 import { updateSettings } from "../services/config/SettingsService.js";
 import { commandRegistry } from "../services/terminal/CommandRegistry.js";
 
@@ -21,7 +16,7 @@ export interface CommandContext {
     setIsTyping: (isTyping: boolean) => void;
     exit: () => void;
     cwd: string;
-    setCurrentMenu: (menu: 'config' | 'mcp' | 'tasks' | 'search' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | 'compact' | 'memory' | 'cost' | 'marketplace' | 'resources' | 'prompts' | null) => void;
+    setCurrentMenu: (menu: 'config' | 'mcp' | 'tasks' | 'search' | 'model' | 'status' | 'agents' | 'bug' | 'doctor' | 'compact' | 'memory' | 'cost' | 'marketplace' | 'resources' | 'prompts' | 'remote-env' | null, options?: any) => void;
     setBugReportInitialDescription: (description: string) => void;
     messages: any[];
 }
@@ -93,6 +88,40 @@ export class SlashCommandDispatcher {
                 }]);
                 return true;
 
+            case '/usage':
+                context.setCurrentMenu('config', { tab: 'Usage' });
+                return true;
+
+            case '/keybindings':
+                (async () => {
+                    const { join } = await import('path');
+                    const { homedir } = await import('os');
+                    const { existsSync, mkdirSync, writeFileSync } = await import('fs');
+                    const open = (await import('open')).default;
+
+                    const keybindingsPath = join(homedir(), '.claude', 'keybindings.json');
+                    const dir = join(homedir(), '.claude');
+
+                    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+                    if (!existsSync(keybindingsPath)) {
+                        writeFileSync(keybindingsPath, JSON.stringify([
+                            {
+                                "key": "alt+enter",
+                                "command": "chat:insertNewline",
+                                "when": "inputHasFocus"
+                            }
+                        ], null, 2));
+                    }
+
+                    try {
+                        await open(keybindingsPath);
+                        context.setMessages(prev => [...prev, { role: 'assistant', content: `Opened keybindings file: **${keybindingsPath}**` }]);
+                    } catch (e) {
+                        context.setMessages(prev => [...prev, { role: 'assistant', content: `❌ Failed to open keybindings: ${e instanceof Error ? e.message : String(e)}` }]);
+                    }
+                })();
+                return true;
+
             case '/config':
                 context.setCurrentMenu('config');
                 return true;
@@ -113,48 +142,6 @@ export class SlashCommandDispatcher {
                 context.setCurrentMenu('prompts');
                 return true;
 
-            case '/init':
-                {
-                    const claudeMdPath = join(context.cwd, 'CLAUDE.md');
-                    if (existsSync(claudeMdPath)) {
-                        context.setMessages(prev => [...prev, { role: 'assistant', content: '✅ `CLAUDE.md` already exists in this directory.' }]);
-                        return true;
-                    } else {
-                        // Return false to let the REPL handle this as a prompt command
-                        return false; // This triggers fallthrough to REPL which likely fails if not handled. 
-                        // But since we added registry check at top, /init from registry SHOULD have been caught?
-                        // "init" is registered. "findCommand('/init')" finds it.
-                        // So the check at top returns the string prompt.
-                        // Wait, if it matches switch case '/init', we enter here.
-                        // So we should remove '/init' from switch OR return the prompt here?
-                        // Registry has logic. Switch has logic.
-                        // Use registry logic if available?
-                        // For init, we want the prompt.
-
-                        // We handled prompt commands at TOP. So /init shouldn't reach here if it's in registry.
-                        // BUT init logic here checks CLAUDE.md existence.
-                        // Registry logic (in init.ts) gets prompt.
-                        // We should fallback to registry logic by returning false? 
-                        // No, if I return false, REPL executes '/init' as prompt.
-
-                        // If I remove '/init' from switch, the top check works.
-                        // But checking CLAUDE.md is useful.
-
-                        // I will update this block to return the prompt manually or just let top block handle it?
-                        // If I let top block handle, I need to REMOVE this case or check inside top block?
-                        // The top block runs BEFORE switch.
-                        // So /init is handled by top block. This switch case is UNREACHABLE for /init if registered.
-                        // UNLESS getPromptForCommand returns null?
-
-                        // initCommandDefinition is registered.
-                        // So top block catches it.
-                        // So I should remove /init case?
-                        // But wait, the check `if (existsSync(claudeMdPath))` is nice.
-                        // init.ts getPromptForCommand doesn't check existence?
-                        // Let's check init.ts.
-                    }
-                }
-                return true;
 
             case '/doctor':
                 context.setCurrentMenu('doctor');
@@ -186,6 +173,14 @@ export class SlashCommandDispatcher {
                 context.setCurrentMenu('agents');
                 return true;
 
+            case '/teleport':
+                context.setMessages(prev => [...prev, { role: 'assistant', content: args ? `Teleporting to session: **${args}** (Note: Teleportation logic is currently a stub)` : `Usage: /teleport <session_id>` }]);
+                return true;
+
+            case '/remote-env':
+                context.setCurrentMenu('remote-env');
+                return true;
+
             case '/undo':
                 context.setMessages(prev => prev.length >= 2 ? prev.slice(0, -2) : []);
                 return true;
@@ -207,12 +202,12 @@ export class SlashCommandDispatcher {
                     try {
                         context.setIsTyping(true);
                         await OAuthService.login({
-                            onUrl: async (url) => {
+                            onUrl: async (_manualUrl, autoUrl) => {
                                 context.setMessages(prev => [...prev, {
                                     role: 'assistant',
-                                    content: `Opening browser for login...\n\nIf it doesn't open automatically, please visit this URL:\n[${url}](${url})`
+                                    content: `Opening browser for login...\n\nIf it doesn't open automatically, please visit this URL:\n[${autoUrl}](${autoUrl})`
                                 }]);
-                                await open(url);
+                                await open(autoUrl);
                             }
                         });
 

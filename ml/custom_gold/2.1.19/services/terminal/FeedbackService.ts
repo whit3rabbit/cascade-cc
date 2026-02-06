@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { OAuthService } from '../auth/OAuthService.js';
 import { getProductName } from '../../utils/shared/product.js';
 
@@ -46,13 +47,17 @@ function getUserAgent(): string {
  */
 export async function submitFeedback(report: any, signal?: AbortSignal): Promise<{ success: boolean; feedbackId?: string; error?: string }> {
     try {
-        // Original logic flow:
         await ensureAuthenticated();
 
         const auth = await getAuthHeaders();
+        // Even if we fail to get a token, we might still try? 
+        // The original checks headers. 
+        // But for safety let's assume we proceed if we have headers or handle it.
+        // In the original code (chunk1197), FH() returns headers or error.
         if (auth.error) {
-            // return { success: false, error: auth.error };
-            // In deobfuscation mode, we proceed with simulated success regardless
+            // Proceeding might fail, but let's follow the logic.
+            // Actually original returns { success: !1 } if FH() has error.
+            return { success: false, error: auth.error };
         }
 
         const headers = {
@@ -61,8 +66,6 @@ export async function submitFeedback(report: any, signal?: AbortSignal): Promise
             ...auth.headers
         };
 
-        // --- ORIGINAL NETWORK CALL (DISABLED) ---
-        /*
         const response = await axios.post('https://api.anthropic.com/api/claude_cli_feedback', {
             content: JSON.stringify(report)
         }, {
@@ -70,31 +73,31 @@ export async function submitFeedback(report: any, signal?: AbortSignal): Promise
             timeout: 30000,
             signal
         });
-        
+
         if (response.status === 200 && response.data?.feedback_id) {
             return { success: true, feedbackId: response.data.feedback_id };
         }
 
-        if (response.status === 403 && response.data?.error?.type === "permission_error" && response.data?.error?.message?.includes("custom data retention settings")) {
-            return {
-                success: false,
-                error: "Feedback cannot be submitted because of your custom data retention settings."
-            };
-        }
-        */
+        // Original logs error here: SV1(Error("Failed to submit feedback: request did not return feedback_id"));
+        return { success: false, error: "Failed to submit feedback: request did not return feedback_id" };
 
-        // --- SIMULATED SUCCESS FOR DEOBFUSCATION ENVIRONMENT ---
-        console.log('[FeedbackService] Submission simulations successful (no data sent to Anthropic)');
-
-        return {
-            success: true,
-            feedbackId: `fb-${Math.random().toString(36).substring(2, 11)}`
-        };
-    } catch (e) {
-        if (signal?.aborted) {
+    } catch (e: any) {
+        if (axios.isCancel(e) || signal?.aborted) {
             return { success: false };
         }
 
+        if (axios.isAxiosError(e) && e.response?.status === 403) {
+            const data = e.response.data as any;
+            if (data?.error?.type === "permission_error" && data?.error?.message?.includes("Custom data retention settings")) {
+                // SV1(Error("Cannot submit feedback because custom data retention settings are enabled"));
+                return {
+                    success: false,
+                    error: "Feedback cannot be submitted because of your custom data retention settings."
+                };
+            }
+        }
+
+        // SV1(e);
         return {
             success: false,
             error: e instanceof Error ? e.message : String(e)

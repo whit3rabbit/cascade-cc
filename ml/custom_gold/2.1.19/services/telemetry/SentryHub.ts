@@ -1,15 +1,18 @@
 /**
  * File: src/services/telemetry/SentryHub.ts
- * Role: Manages exception tracking, breadcrumbs, and user context (Sentry configuration).
+ * Role: Manages exception tracking, breadcrumbs, and user context using @sentry/node.
  */
+
+import * as Sentry from '@sentry/node';
+import { EnvService } from '../config/EnvService.js';
 
 export interface Breadcrumb {
     message?: string;
     category?: string;
-    level?: string;
-    type?: string;
+    level?: Sentry.SeverityLevel;
     data?: Record<string, any>;
     timestamp?: number;
+    type?: string;
 }
 
 export interface SentryUser {
@@ -19,61 +22,93 @@ export interface SentryUser {
     [key: string]: any;
 }
 
-export interface SentryScope {
-    breadcrumbs: Breadcrumb[];
-    user: SentryUser | null;
-    tags: Record<string, string>;
-    addBreadcrumb(crumb: Breadcrumb): void;
-    setUser(user: SentryUser | null): void;
-    setTag(key: string, value: string): void;
-}
-
 /**
  * Hub manages the current scope and client for telemetry reporting.
  */
 export class SentryHub {
-    private client: any;
-    private scope: SentryScope;
+    private static instance: SentryHub;
+    private initialized: boolean = false;
 
-    constructor(client?: any, scope?: SentryScope) {
-        this.client = client;
-        this.scope = scope || {
-            breadcrumbs: [],
-            user: null,
-            tags: {},
-            addBreadcrumb(crumb: Breadcrumb) {
-                this.breadcrumbs.push(crumb);
-                if (this.breadcrumbs.length > 100) this.breadcrumbs.shift();
-            },
-            setUser(user: SentryUser | null) { this.user = user; },
-            setTag(k: string, v: string) { this.tags[k] = v; }
-        };
+    constructor() {
+        this.initialize();
     }
 
-    captureException(err: Error, hint?: any): void {
-        console.error(`[Telemetry] Captured exception: ${err.message}`, hint);
-        if (this.client && typeof this.client.captureException === 'function') {
-            this.client.captureException(err, { ...this.scope, ...hint });
+    public static getInstance(): SentryHub {
+        if (!SentryHub.instance) {
+            SentryHub.instance = new SentryHub();
+        }
+        return SentryHub.instance;
+    }
+
+    private initialize() {
+        if (this.initialized) return;
+
+        const dsn = EnvService.get('SENTRY_DSN'); // Fallback or empty if not provided
+        const environment = EnvService.get('NODE_ENV') || 'production';
+        const release = '2.1.19'; // Matching the deobfuscated version
+
+        if (dsn) {
+            Sentry.init({
+                dsn,
+                environment,
+                release,
+                // Disable automatic instrumentation that might interfere with CLI
+                defaultIntegrations: false,
+                integrations: [
+                    Sentry.onUncaughtExceptionIntegration(),
+                    Sentry.onUnhandledRejectionIntegration(),
+                ],
+            });
+            this.initialized = true;
+        }
+    }
+
+    captureException(err: Error | unknown, hint?: any): void {
+        const message = err instanceof Error ? err.message : String(err);
+        if (EnvService.isTruthy('DEBUG_TELEMETRY')) {
+            console.error(`[Telemetry] Captured exception: ${message}`, hint);
+        }
+
+        if (this.initialized) {
+            Sentry.captureException(err, hint);
+        }
+    }
+
+    captureMessage(message: string, level?: Sentry.SeverityLevel): void {
+        if (EnvService.isTruthy('DEBUG_TELEMETRY')) {
+            console.log(`[Telemetry] Captured message: ${message}`);
+        }
+        if (this.initialized) {
+            Sentry.captureMessage(message, level);
         }
     }
 
     addBreadcrumb(crumb: Breadcrumb): void {
-        this.scope.addBreadcrumb({
-            timestamp: Date.now() / 1000,
-            ...crumb
-        });
+        if (this.initialized) {
+            Sentry.addBreadcrumb(crumb);
+        }
     }
 
     setUser(user: SentryUser | null): void {
-        this.scope.setUser(user);
+        if (this.initialized) {
+            Sentry.setUser(user);
+        }
     }
 
     setTag(key: string, value: string): void {
-        this.scope.setTag(key, value);
+        if (this.initialized) {
+            Sentry.setTag(key, value);
+        }
+    }
+
+    setContext(key: string, context: Record<string, any> | null): void {
+        if (this.initialized) {
+            Sentry.setContext(key, context);
+        }
     }
 }
 
-const globalHub = new SentryHub();
+const globalHub = SentryHub.getInstance();
 
 /**
  * Returns the global telemetry hub.

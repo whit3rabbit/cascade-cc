@@ -322,7 +322,6 @@ export function extractHeredocs(command: string): { processedCommand: string, he
 
         const afterContentStart = command.slice(contentStartIndex);
         // Important: we split by \n but need to keep the \n in the content eventually
-        const lines = afterContentStart.split("\n");
         let delimiterLineIndex = -1;
 
         // Skip the very first empty string if contentStartIndex was a newline
@@ -510,7 +509,6 @@ export function reconstructCommand(tokens: ShellToken[], originalCommand: string
  * Checks if a command string is safe to execute.
  */
 export function isCommandSafe(commandString: string): boolean {
-    const placeholders = getQuotePlaceholders();
     // Simplified safe check
     const tokens = parseShellString(commandString, (w) => `$${w}`);
 
@@ -602,8 +600,6 @@ export function parseCommandWithRedirections(commandString: string): CommandPars
         hasDangerousRedirection
     };
 }
-
-import { EnvService } from '../../services/config/EnvService.js';
 
 /**
  * Recursively expands environment variables in a string and identifies missing ones.

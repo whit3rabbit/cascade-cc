@@ -67,7 +67,7 @@ export function createBufferedFileWriter(options: BufferedFileWriterOptions): Bu
             appendFileSync(filePath, buffer.join(""));
             buffer = [];
             currentBufferLength = 0;
-        } catch (err) {
+        } catch {
             // Silently fail if logging fails to avoid crashing the app
         }
     }
@@ -112,11 +112,11 @@ export const LogManager = {
             }) + "\n";
 
             appendFileSync(filePath, entry);
-        } catch (err) {
+        } catch {
             try {
                 mkdirSync(dirname(filePath), { recursive: true });
                 appendFileSync(filePath, JSON.stringify(data) + "\n");
-            } catch (innerErr) {
+            } catch {
                 // Silently fail if logging fails
             }
         }
@@ -179,12 +179,12 @@ export async function initializeLogging(): Promise<void> {
             files.slice(10).forEach(f => {
                 try {
                     unlinkSync(f.path);
-                } catch (e) {
+                } catch {
                     // Ignore errors during cleanup
                 }
             });
         }
-    } catch (err) {
+    } catch {
         // Log rotation failure should not block startup
     }
 }

@@ -14,7 +14,6 @@ import { terminalLog } from '../../utils/shared/runtime.js';
  * Main entry point for initializing the Claude Code environment.
  */
 import { createShellSnapshot } from './ShellSnapshotService.js';
-import { McpServerManager } from '../mcp/McpServerManager.js';
 import { mcpClientManager } from '../mcp/McpClientManager.js';
 import { initTreeSitter } from '../../utils/shared/treeSitter.js';
 import { MailboxPollingService } from '../teams/MailboxPollingService.js';
@@ -54,14 +53,18 @@ export async function initializeApp(): Promise<{ isFirstRun: boolean }> {
         isFirstRun = !settings.onboardingComplete;
 
         // 1.5. Cleanup
-        try {
-            const threshold = getCleanupThresholdDate();
-            const plansDir = getPlansDirectory();
-            // Fire and forget cleanup to not slow down startup
-            cleanupOldFiles(plansDir, threshold, '.md').catch(() => { });
-        } catch (e) {
-            // ignore
-        }
+        // Fire and forget cleanup to not slow down startup, and ensure it fails silently.
+        (async () => {
+            try {
+                const threshold = getCleanupThresholdDate();
+                const plansDir = getPlansDirectory();
+                await cleanupOldFiles(plansDir, threshold, '.md');
+            } catch {
+                // Ignore any errors during cleanup
+            }
+        })().catch(() => {
+            // "Fire and forget" - ignore unhandled promise rejections
+        });
 
         // 2. Observability
         await initializeLogging();
@@ -70,8 +73,8 @@ export async function initializeApp(): Promise<{ isFirstRun: boolean }> {
         // 2.5 Tree Sitter
         try {
             await initTreeSitter();
-        } catch (e) {
-            console.warn("TreeSitter initialization failed, some parsing features may be limited.", e);
+        } catch (_e) {
+            console.warn("TreeSitter initialization failed, some parsing features may be limited.", _e);
         }
 
         // 3. Command & Tool Registry
@@ -95,7 +98,7 @@ export async function initializeApp(): Promise<{ isFirstRun: boolean }> {
                 // Ideally we'd set an env var for children.
                 process.env.CLAUDE_LEADER_PANE_ID = leaderPane;
             }
-        } catch (e) {
+        } catch {
             // ignore
         }
 

@@ -21,7 +21,7 @@ interface ToolSelectionStepProps {
 /**
  * Step 1: Select tools for the agent.
  */
-export function ToolSelectionStep({ availableTools, selectedTools, onToggle, onConfirm }: ToolSelectionStepProps) {
+export function ToolSelectionStep({ availableTools, selectedTools, onToggle: _onToggle, onConfirm: _onConfirm }: ToolSelectionStepProps) {
     return (
         <Card title="Step 1: Select Tools" borderColor="cyan">
             <Box flexDirection="column">
@@ -46,7 +46,7 @@ interface ModelSelectionStepProps {
 /**
  * Step 2: Choose reasoning model.
  */
-export function ModelSelectionStep({ models, selectedModel, onSelect }: ModelSelectionStepProps) {
+export function ModelSelectionStep({ models, selectedModel, onSelect: _onSelect }: ModelSelectionStepProps) {
     return (
         <Card title="Step 2: select Model" borderColor="magenta">
             <Box flexDirection="column">
@@ -72,17 +72,8 @@ interface SystemPromptStepProps {
 /**
  * Step 3: Enter system prompt.
  */
-export function SystemPromptStep({ value, onChange, onConfirm, onBack }: SystemPromptStepProps) {
-    const [error, setError] = useState<string | null>(null);
-
-    const handleSubmit = () => {
-        if (!value.trim()) {
-            setError("System prompt is required");
-            return;
-        }
-        setError(null);
-        onConfirm();
-    };
+export function SystemPromptStep({ value, onChange: _onChange, onConfirm: _onConfirm, onBack: _onBack }: SystemPromptStepProps) {
+    const [error] = useState<string | null>(null);
 
     return (
         <Card title="Step 3: System Prompt" borderColor="blue">
@@ -112,7 +103,7 @@ interface ColorSelectionStepProps {
 /**
  * Step 4: Choose agent theme color.
  */
-export function ColorSelectionStep({ onSelect, onBack }: ColorSelectionStepProps) {
+export function ColorSelectionStep({ onSelect: _onSelect, onBack: _onBack }: ColorSelectionStepProps) {
     const colors = ["cyan", "magenta", "yellow", "blue", "green", "red"];
 
     return (
@@ -142,7 +133,7 @@ interface AgentMetadataStepProps {
 /**
  * Step 5: Finalize name and description.
  */
-export function AgentMetadataStep({ name, description, onChangeName, onChangeDescription, onConfirm }: AgentMetadataStepProps) {
+export function AgentMetadataStep({ name, description, onChangeName: _onChangeName, onChangeDescription: _onChangeDescription, onConfirm: _onConfirm }: AgentMetadataStepProps) {
     return (
         <Card title="Step 5: Agent Metadata" borderColor="green">
             <Box flexDirection="column" gap={1}>

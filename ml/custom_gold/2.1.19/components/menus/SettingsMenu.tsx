@@ -10,11 +10,9 @@ import TextInput from 'ink-text-input';
 import { EnvService } from '../../services/config/EnvService.js';
 import { mcpClientManager } from '../../services/mcp/McpClientManager.js';
 import { getSettings, updateSettings } from '../../services/config/SettingsService.js';
-import { themeService } from '../../services/terminal/ThemeService.js';
 import { getAuthDetails } from '../../services/auth/AuthService.js';
 import { costService } from '../../services/terminal/CostService.js';
 import { BUILD_INFO } from '../../constants/build.js';
-import os from 'os';
 
 interface SettingsMenuProps {
     onExit: () => void;

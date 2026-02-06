@@ -189,7 +189,7 @@ export class ConversationService {
                     if (toolUse.input_json) {
                         try {
                             toolUse.input = JSON.parse(toolUse.input_json);
-                        } catch (e) {
+                        } catch {
                             toolUse.input = parseBalancedJSON(toolUse.input_json);
                         }
                         delete toolUse.input_json;
@@ -253,13 +253,13 @@ export class ConversationService {
                     const data = JSON.parse(event.data);
                     if (data.type === 'ping' || data.type === 'error') continue;
                     yield data;
-                } catch (e) { }
+                } catch { }
             }
         }
     }
 
     private static async *executeTools(toolUses: any[], options: any): AsyncGenerator<any> {
-        const { tools, mcpClients, verbose, canUseTool: providedCanUseTool, onPermissionRequest } = options;
+        const { tools, mcpClients: _mcpClients, verbose: _verbose, canUseTool: providedCanUseTool, onPermissionRequest } = options;
 
         const executeToolFn = async function* (block: any, message: any, canUse: any, context: any) {
             const toolDef = tools.find((t: any) => t.name === block.name);

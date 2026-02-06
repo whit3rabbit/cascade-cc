@@ -6,8 +6,6 @@
 import {
     join,
     dirname,
-    relative,
-    isAbsolute,
     extname,
     resolve,
     parse as pathParse
@@ -17,7 +15,6 @@ import { homedir } from 'node:os';
 import matter from 'gray-matter';
 
 import { Lexer } from 'marked';
-import micromatch from 'micromatch';
 
 // --- Types ---
 
@@ -42,8 +39,6 @@ export interface ScanOptions {
 
 const TEXT_EXTENSIONS = new Set(['.md', '.txt', '.js', '.ts', '.jsx', '.tsx', '.json', '.yaml', '.yml', '.html', '.css', '.scss']);
 const MAX_RECURSION_DEPTH = 5;
-const MAX_CONTENT_LENGTH = 40000;
-
 // --- Helpers ---
 
 /**

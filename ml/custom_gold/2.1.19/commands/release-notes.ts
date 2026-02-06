@@ -26,7 +26,7 @@ async function fetchAndCacheChangelog(): Promise<void> {
             mkdirSync(dirname(cachePath), { recursive: true });
             writeFileSync(cachePath, response.data, 'utf-8');
         }
-    } catch (error) {
+    } catch {
         // Silently fail, we'll use existing cache or fallback
     }
 }

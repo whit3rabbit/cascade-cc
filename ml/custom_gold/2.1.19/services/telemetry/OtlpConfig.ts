@@ -9,7 +9,6 @@ import { getStringFromEnv, getNumberFromEnv, parseKeyPairsIntoRecord } from '../
 // The JS had import { diag } from ...; but didn't use it in the displayed lines.
 // I'll skip it for now unless I see usage.
 // Actually, I'll import it just in case.
-import { diag } from '../../utils/shared/runtime.js';
 
 export interface OtlpConfig {
     timeoutMillis: number;

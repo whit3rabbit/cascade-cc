@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
-import { taskManager, Task } from '../../services/terminal/TaskManager.js';
+import { taskManager } from '../../services/terminal/TaskManager.js';
 import { useTheme } from '../../services/terminal/ThemeService.js';
 
 interface TaskMenuProps {
@@ -34,8 +34,8 @@ export const TaskMenu: React.FC<TaskMenuProps> = ({ onExit }) => {
 
         if (item.value === 'cancel') {
             taskManager.cancelTask(selectedTaskId);
-        } else if (item.value === 'remove') {
-            taskManager.removeTask(selectedTaskId);
+        } else if (item.value === 'interrupt') {
+            taskManager.interruptTask(selectedTaskId);
         }
         setSelectedTaskId(null);
     };
@@ -43,9 +43,9 @@ export const TaskMenu: React.FC<TaskMenuProps> = ({ onExit }) => {
     if (tasks.length === 0) {
         return (
             <Box flexDirection="column" padding={1} borderStyle="round" borderColor={theme.subtle}>
-                <Text italic dimColor>No active tasks found.</Text>
+                <Text italic dimColor>No tasks found.</Text>
                 <Box marginTop={1}>
-                    <Text>Press Esc to exit.</Text>
+                    <Text italic dimColor>Press Esc to exit.</Text>
                 </Box>
             </Box>
 
@@ -63,7 +63,7 @@ export const TaskMenu: React.FC<TaskMenuProps> = ({ onExit }) => {
                     <SelectInput
                         items={[
                             { label: 'Cancel Task', value: 'cancel' },
-                            { label: 'Remove from List', value: 'remove' },
+                            { label: 'Interrupt', value: 'interrupt' },
                             { label: 'Back', value: 'back' }
                         ]}
                         onSelect={handleActionSelect}

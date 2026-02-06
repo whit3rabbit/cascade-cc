@@ -4,7 +4,7 @@ import { Logo } from '../terminal/Logo.js';
 import { Card } from '../common/Card.js';
 import { IdeOnboardingDialog } from './IdeOnboardingDialog.js';
 import { LspRecommendationDialog } from './LspRecommendationDialog.js';
-import { getSettings, updateSettings } from '../../services/config/SettingsService.js';
+import { updateSettings } from '../../services/config/SettingsService.js';
 import { getAuthDetails } from '../../services/auth/AuthService.js';
 import { themeService } from '../../services/terminal/ThemeService.js';
 import SelectInput from 'ink-select-input';

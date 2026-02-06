@@ -44,7 +44,7 @@ export function initializeSystemFull(): void {
  * @param options - Connection options.
  * @returns {Connection} A connection instance.
  */
-export function createConnection(url: URL, options: any = {}): Connection {
+export function createConnection(url: URL): Connection {
     if (url.protocol === "ws:" || url.protocol === "wss:") {
         // In a real implementation, this would return a new WebSocket or similar transport.
         return {

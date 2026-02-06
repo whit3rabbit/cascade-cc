@@ -27,7 +27,7 @@ export class StatsigClient extends StatsigClientBase {
         return this.updateUserAsync(this._user, options);
     }
 
-    async updateUserAsync(newUser: StatsigUser, options?: any): Promise<any> {
+    async updateUserAsync(newUser: StatsigUser, _options?: any): Promise<any> {
         this._user = newUser;
         Diagnostics.markInitOverallStart(this._sdkKey);
         this._setStatus("Loading", null);
@@ -41,8 +41,20 @@ export class StatsigClient extends StatsigClientBase {
 
             this._values = {
                 feature_gates: {
+                    // "tengu_tool_pear" is the "Pair Programmer" / Swarm mode gate.
+                    // In the original code (chunk417), this is gated and likely defaults to false unless
+                    // explicitly enabled for the user. We force it to TRUE here to enable Swarm features.
                     "tengu_tool_pear": { value: true, rule_id: "default" },
-                    "tengu_lsp_enabled": { value: true, rule_id: "default" }
+
+                    // "tengu_lsp_enabled" controls the Language Server Protocol features.
+                    // Providing this explicitly ensures LSP features are active.
+                    "tengu_lsp_enabled": { value: true, rule_id: "default" },
+
+                    // Other gates found in original code (chunk417, chunk1169) but not forced here:
+                    // - "tengu_disable_bypass_permissions_mode": Defaults false (good). If true, disables "bypass permissions".
+                    // - "tengu_plan_mode": Related to agent planning capabilities.
+                    // - "tengu_permission_explainer": Likely for explaining why permissions are needed.
+                    // - "tengu_version_check": Controls version checking behavior.
                 },
                 dynamic_configs: {},
                 layer_configs: {},
@@ -134,6 +146,7 @@ export function getExperimentValue(experimentName: string, key: string, defaultV
     const experiment = clientInstance.getExperiment(experimentName);
     return experiment?.get(key, defaultValue) ?? defaultValue;
 }
+
 export function logout() {
     clientInstance = null;
     initializationPromise = null;

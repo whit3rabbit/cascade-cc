@@ -27,7 +27,7 @@ export interface UserPromptMessageProps {
 }
 
 export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
-    const { onSubmit, onClear, history = [], planMode = false } = props;
+    const { onSubmit, onClear: _onClear, history = [], planMode = false } = props;
     const theme = useTheme();
     const [value, setValue] = useState('');
     const [historyIndex, setHistoryIndex] = useState(-1);
@@ -137,7 +137,7 @@ export const UserPromptMessage: React.FC<UserPromptMessageProps> = (props) => {
                 setValue(newValue);
                 setCursorPos(newValue.length);
                 unlinkSync(tempFile);
-            } catch (err) { }
+            } catch { }
             return;
         }
 

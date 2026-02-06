@@ -40,7 +40,7 @@ export async function fetchRemoteSettings(): Promise<RemoteSettings> {
         }
 
         return {};
-    } catch (error) {
+    } catch {
         // console.error("Failed to fetch remote settings, using cache if available.");
         return getCachedRemoteSettings();
     }
@@ -53,7 +53,7 @@ function cacheRemoteSettings(settings: RemoteSettings): void {
     const cachePath = join(getBaseConfigDir(), REMOTE_SETTINGS_FILE);
     try {
         writeFileSync(cachePath, JSON.stringify(settings, null, 2), 'utf8');
-    } catch (err) {
+    } catch {
         // Ignore cache write errors
     }
 }
@@ -68,7 +68,7 @@ export function getCachedRemoteSettings(): RemoteSettings {
     try {
         const data = readFileSync(cachePath, 'utf8');
         return JSON.parse(data);
-    } catch (err) {
+    } catch {
         return {};
     }
 }
@@ -82,7 +82,7 @@ export function clearRemoteSettingsCache(): void {
         if (existsSync(cachePath)) {
             unlinkSync(cachePath);
         }
-    } catch (err) {
+    } catch {
         // Ignore cache delete errors
     }
 }

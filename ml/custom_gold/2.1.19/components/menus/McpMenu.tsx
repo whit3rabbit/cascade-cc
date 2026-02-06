@@ -36,21 +36,32 @@ export function McpMenu({ onExit }: McpMenuProps) {
         try {
             const configured = await McpServerManager.getAllMcpServers();
             setConfiguredServers(configured);
-        } catch (e) {
+        } catch {
             // Fallback if manager fails
             setConfiguredServers({});
         }
     };
 
     const items: ServerItem[] = useMemo(() => {
-        const list: ServerItem[] = [];
+        const map = new Map<string, ServerItem>();
+
+        const upsert = (item: ServerItem) => {
+            const existing = map.get(item.id);
+            if (!existing) {
+                map.set(item.id, item);
+                return;
+            }
+            if (existing.status !== 'connected' && item.status === 'connected') {
+                map.set(item.id, item);
+            }
+        };
 
         // 1. User MCPs (from config settings)
         Object.keys(configuredServers).forEach(name => {
             const isConnected = activeClients.includes(name);
             // If it's not a plugin, we assume it's a user MCP
             if (!name.startsWith('plugin:')) {
-                list.push({
+                upsert({
                     id: name,
                     type: 'user',
                     status: isConnected ? 'connected' : 'disabled',
@@ -62,7 +73,7 @@ export function McpMenu({ onExit }: McpMenuProps) {
         // Add user MCPs that might be active but not in config (dynamic/adhoc)
         activeClients.forEach(name => {
             if (!name.startsWith('plugin:') && !configuredServers[name]) {
-                list.push({
+                upsert({
                     id: name,
                     type: 'user',
                     status: 'connected',
@@ -74,7 +85,7 @@ export function McpMenu({ onExit }: McpMenuProps) {
         // 2. Built-in MCPs
         activeClients.forEach(name => {
             if (name.startsWith('plugin:')) {
-                list.push({
+                upsert({
                     id: name,
                     type: 'builtin',
                     status: 'connected',
@@ -83,8 +94,7 @@ export function McpMenu({ onExit }: McpMenuProps) {
             }
         });
 
-        // Deduplicate by ID just in case
-        return Array.from(new Map(list.map(item => [item.id, item])).values());
+        return Array.from(map.values());
     }, [activeClients, configuredServers]);
 
     const userMcpItems = items.filter(i => i.type === 'user');

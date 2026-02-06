@@ -2,7 +2,7 @@
  * File: src/services/tasks/TaskManager.ts
  */
 
-import { Task, TaskStatus, TaskStore, TaskMessageQueue, TaskType, TaskResult } from './TaskTypes.js';
+import { Task, TaskStatus, TaskStore, TaskMessageQueue, TaskType } from './TaskTypes.js';
 import { PersistentTaskStore } from './PersistentTaskStore.js';
 import { InMemoryTaskMessageQueue } from './InMemoryTaskMessageQueue.js';
 import { randomUUID } from 'node:crypto';

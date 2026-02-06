@@ -67,6 +67,10 @@ class GlobalTaskManager {
         this.cancelTask(id);
     }
 
+    interruptTask(id: string): void {
+        this.killTask(id);
+    }
+
 
     getTasks(): Task[] {
         return Array.from(this.tasks.values());

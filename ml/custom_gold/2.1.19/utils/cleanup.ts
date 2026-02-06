@@ -4,6 +4,7 @@
  */
 
 import { terminalLog } from "./shared/runtime.js";
+import { clearIterm2Progress } from "./terminal/iterm2ProgressBar.js";
 
 type CleanupTask = () => void | Promise<void>;
 const cleanupTasks: CleanupTask[] = [];
@@ -44,6 +45,9 @@ export async function runCleanup(): Promise<void> {
  */
 export function setupCleanupHandlers(): void {
     const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+
+    // Ensure iterm2 progress bar is cleared on exit
+    onCleanup(() => clearIterm2Progress());
 
     signals.forEach(signal => {
         process.on(signal, async () => {

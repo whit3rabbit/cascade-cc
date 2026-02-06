@@ -104,7 +104,7 @@ export function getAgentId(): string | undefined {
 /**
  * Returns beta flags for the given model.
  */
-export function getBetaFlags(model?: string): string[] {
+export function getBetaFlags(_model?: string): string[] {
     // Returns empty or comma-separated list of flags from env
     const flags = EnvService.get("CLAUDE_BETA_FLAGS") || "";
     return flags.split(',').filter(Boolean);
@@ -216,7 +216,6 @@ export function getHostPlatform(): string {
  * Returns the paths for various Claude-related system files.
  */
 export function getClaudePaths() {
-    const platformName = getHostPlatform();
     const executableName = process.platform === "win32" ? "claude.exe" : "claude";
 
     return {

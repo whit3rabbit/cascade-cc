@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 export function readFileContent(filePath: string): string | null {
     try {
         return readFileSync(filePath, 'utf8');
-    } catch (error) {
+    } catch {
         return null;
     }
 }

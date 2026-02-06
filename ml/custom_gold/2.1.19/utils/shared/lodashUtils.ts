@@ -80,5 +80,4 @@ export const root = (typeof global === 'object' && global && global.Object === O
 /**
  * Global Symbol reference.
  */
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 export const Symbol = root.Symbol;

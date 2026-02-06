@@ -69,10 +69,10 @@ export class TelemetryTracker {
             discard: () => {
                 this.measurements.delete(eventId);
             },
-            add: (key: string, value: any) => {
+            add: (_key: string, _value: any) => {
                 // Add attribute to measurement
             },
-            increment: (key: string) => {
+            increment: (_key: string) => {
                 // Increment counter
             },
             event: {

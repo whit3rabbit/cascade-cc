@@ -24,7 +24,7 @@ export class MemoryWriteTool {
             try {
                 const content = readFileSync(memoryPath, 'utf8');
                 memory = JSON.parse(content);
-            } catch (error) {
+            } catch {
                 console.warn("[MemoryWriteTool] Failed to read existing memory, starting fresh.");
             }
         }

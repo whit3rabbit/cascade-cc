@@ -4,7 +4,7 @@
  */
 
 import { join, basename } from 'node:path';
-import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { getBaseConfigDir } from '../../utils/shared/runtimeAndEnv.js';
 import matter from 'gray-matter';
 import { AgentMetadata } from '../../types/AgentTypes.js';
@@ -90,7 +90,7 @@ export function listAgents(): AgentData[] {
                 const agent = loadAgent(join(projectAgentsDir, file), 'project');
                 if (agent) agents.push(agent);
             }
-        } catch (err) {
+        } catch {
             // Ignore directory read errors
         }
     }
@@ -104,7 +104,7 @@ export function listAgents(): AgentData[] {
                 const agent = loadAgent(join(userAgentsDir, file), 'user');
                 if (agent) agents.push(agent);
             }
-        } catch (err) {
+        } catch {
             // Ignore directory read errors
         }
     }

@@ -1,6 +1,5 @@
 
 import { EnvService } from '../config/EnvService.js';
-import { getSettings } from '../config/SettingsService.js';
 import { DEFAULT_AGENT_MODEL } from '../../types/AgentTypes.js';
 
 /**

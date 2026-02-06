@@ -3,9 +3,8 @@
  * Role: Provides LSP capabilities (Go to Definition, Find References, etc.) to the LLM.
  */
 
-import { z } from 'zod';
 import { LspServerManager } from '../services/lsp/LspServerManager.js';
-import { LspToolInputSchema, LspToolOutputSchema, LspOperation, LspToolResult } from '../services/terminal/schemas.js';
+import { LspToolInputSchema, LspOperation, LspToolResult } from '../services/terminal/schemas.js';
 import { formatLspResult } from '../services/lsp/LspFormatting.js';
 import * as path from 'node:path';
 
@@ -31,7 +30,7 @@ All operations require:
     inputSchema: LspToolInputSchema,
     userFacingName: () => "Language Server",
 
-    async call(input: LspOperation, context?: any): Promise<LspToolResult> {
+    async call(input: LspOperation, _context?: any): Promise<LspToolResult> {
         const serverManager = LspServerManager.getInstance();
         const { operation, filePath, lineNumber, character } = input;
         const cwd = process.cwd();

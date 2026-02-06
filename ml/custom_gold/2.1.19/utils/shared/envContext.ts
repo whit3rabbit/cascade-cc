@@ -7,10 +7,7 @@ import { extname as getFileExtension } from "node:path";
 import {
     getAgentContext,
     getSessionId,
-    toBoolean,
     getClaudeCodeClientType,
-    isTeammate,
-    getAgentId,
     getBetaFlags,
     getEntrypoint,
     getEnvContext

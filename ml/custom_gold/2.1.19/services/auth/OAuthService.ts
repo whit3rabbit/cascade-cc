@@ -17,6 +17,13 @@ import {
     OAUTH_BETA_HEADER,
     PROFILE_URL
 } from "../../constants/product.js";
+import {
+    OAUTH_SCOPE_INFERENCE,
+    OAUTH_SCOPES_ALL,
+    OAUTH_SCOPES_DEFAULT,
+    hasInferenceScope,
+    parseOAuthScopes
+} from "../../constants/oauth.js";
 import { KeychainService } from "./KeychainService.js";
 import { getProductName } from "../../utils/shared/product.js";
 import RetryStrategy from "../../utils/http/RetryStrategy.js";
@@ -77,10 +84,16 @@ export interface AuthSession {
     expiresAt: number;
     scopes: string[];
     account?: OAuthAccount;
+    subscriptionType?: string | null;
+    rateLimitTier?: string | null;
 }
 
-const SCOPES_DEFAULT = ["profile", "email", "openid"];
-const SCOPES_INFERENCE = "inference";
+export interface OAuthFlowOptions {
+    orgUUID?: string;
+    loginWithClaudeAi?: boolean;
+    inferenceOnly?: boolean;
+    expiresIn?: number;
+}
 
 let currentSession: AuthSession | null = null;
 
@@ -137,8 +150,7 @@ export const OAuthService = {
 
         // Scope selection (chunk406: clearConversation_3 logic)
         // o58 = ["org:create_api_key", "user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers"]
-        // (Simplified here for actual usage)
-        const scopes = options.inferenceOnly ? ["user:inference"] : ["user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers"];
+        const scopes = options.inferenceOnly ? [OAUTH_SCOPE_INFERENCE] : OAUTH_SCOPES_ALL;
         url.searchParams.append("scope", scopes.join(" "));
 
         url.searchParams.append("code_challenge", options.codeChallenge);
@@ -192,7 +204,9 @@ export const OAuthService = {
         });
 
         if (response.status !== 200) {
-            throw new Error(`Token exchange failed: ${response.statusText}`);
+            throw new Error(response.status === 401
+                ? "Authentication failed: Invalid authorization code"
+                : `Token exchange failed (${response.status}): ${response.statusText}`);
         }
 
         return response.data;
@@ -249,11 +263,12 @@ export const OAuthService = {
      * Refreshes access token (internal).
      */
     async refreshToken(refreshToken: string, scopes: string[]): Promise<AuthSession> {
+        const scopeList = scopes.length ? scopes : OAUTH_SCOPES_DEFAULT;
         const body = {
             grant_type: "refresh_token",
             refresh_token: refreshToken,
             client_id: CLIENT_ID,
-            scope: scopes.join(" ")
+            scope: scopeList.join(" ")
         };
 
         const response = await RetryStrategy.post(TOKEN_URL, body, {
@@ -275,11 +290,16 @@ export const OAuthService = {
         // Map organization_type to subscriptionType (chunk407: YK6 logic)
         const subscriptionType = this.mapSubscriptionType(profile.organization?.organization_type);
 
+        const parsedScopes = parseOAuthScopes(data.scope);
+        const finalScopes = parsedScopes.length ? parsedScopes : scopeList;
+
         return {
             accessToken,
             refreshToken: newRefreshToken,
             expiresAt: Date.now() + (data.expires_in * 1000),
-            scopes: data.scope?.split(" ") || scopes,
+            scopes: finalScopes,
+            subscriptionType,
+            rateLimitTier: profile.organization?.rate_limit_tier ?? null,
             account: {
                 accountUuid: profile.account.uuid,
                 emailAddress: profile.account.email,
@@ -357,79 +377,24 @@ export const OAuthService = {
     /**
      * Orchestrates the full login flow (chunk809: startOAuthFlow logic).
      */
-    async login(options: {
-        onUrl: (url: string) => Promise<void>,
-        orgUUID?: string,
-        loginWithClaudeAi?: boolean,
-        expiresIn?: number
+    async startOAuthFlow(options: OAuthFlowOptions & {
+        onUrl: (manualUrl: string, autoUrl: string) => Promise<void>
     }): Promise<AuthSession> {
-        const server = new LocalAuthServer();
-        const port = await server.start();
-        const state = createOAuthState();
-        const verifier = createCodeVerifier();
-        const challenge = createCodeChallenge(verifier);
-
-        const url = this.buildAuthUrl({
-            codeChallenge: challenge,
-            state,
-            port,
-            orgUUID: options.orgUUID,
-            loginWithClaudeAi: options.loginWithClaudeAi
-        });
-
+        const flow = new OAuthFlow();
         try {
-            const code = await server.waitForCode(state, () => options.onUrl(url));
-            const automatic = server.hasPendingResponse();
-
-            // Telemetry: tengu_oauth_auth_code_received (automatic: automatic)
-            // (Telemetry would be handled here in real implementation)
-
-            const tokenResponse = await this.exchangeToken(code, state, verifier, port, !automatic, options.expiresIn);
-
-            // Pre-login cleanup (chunk809: yN6({ clearOnboarding: false }))
-            await this.logout({ clearOnboarding: false });
-
-            // Fetch profile and roles (chunk809: YK6 and zK6 logic)
-            const profile = await this.fetchProfile(tokenResponse.access_token);
-            const roles = await this.fetchRoles(tokenResponse.access_token);
-
-            // Map organization_type to subscriptionType (chunk407: YK6 logic)
-            const subscriptionType = this.mapSubscriptionType(profile.organization?.organization_type);
-
-            const session: AuthSession = {
-                accessToken: tokenResponse.access_token,
-                refreshToken: tokenResponse.refresh_token,
-                expiresAt: Date.now() + (tokenResponse.expires_in * 1000),
-                scopes: tokenResponse.scope.split(" "),
-                account: {
-                    accountUuid: profile.account.uuid,
-                    emailAddress: profile.account.email,
-                    organizationUuid: profile.organization.uuid,
-                    displayName: profile.account.display_name,
-                    hasExtraUsageEnabled: profile.organization.has_extra_usage_enabled,
-                    billingType: profile.organization.billing_type,
-                    organizationRole: roles.organization_role,
-                    workspaceRole: roles.workspace_role,
-                    organizationName: roles.organization_name,
-                    subscriptionType,
-                    rateLimitTier: profile.organization?.rate_limit_tier ?? null
-                }
-            };
-
-            if (automatic) {
-                server.handleSuccessRedirect(session.scopes);
-            }
-
-            await this.saveSession(session);
-            return session;
-        } catch (e) {
-            if (server.hasPendingResponse()) {
-                server.handleErrorRedirect();
-            }
-            throw e;
+            return await flow.startOAuthFlow(options.onUrl, options);
         } finally {
-            server.close();
+            flow.cleanup();
         }
+    },
+
+    /**
+     * Backwards-compatible alias for startOAuthFlow.
+     */
+    async login(options: OAuthFlowOptions & {
+        onUrl: (manualUrl: string, autoUrl: string) => Promise<void>
+    }): Promise<AuthSession> {
+        return this.startOAuthFlow(options);
     },
 
     /**
@@ -465,108 +430,269 @@ export const OAuthService = {
     }
 };
 
+export class OAuthFlow {
+    private codeVerifier: string;
+    private authCodeListener: LocalAuthServer | null = null;
+    private port: number | null = null;
+    private manualAuthCodeResolver: ((code: string) => void) | null = null;
+
+    constructor() {
+        this.codeVerifier = createCodeVerifier();
+    }
+
+    async startOAuthFlow(
+        onUrl: (manualUrl: string, autoUrl: string) => Promise<void>,
+        options: OAuthFlowOptions = {}
+    ): Promise<AuthSession> {
+        this.authCodeListener = new LocalAuthServer();
+        this.port = await this.authCodeListener.start();
+        const port = this.port;
+        if (port === null) {
+            throw new Error("OAuth callback server did not return a port.");
+        }
+
+        const state = createOAuthState();
+        const challenge = createCodeChallenge(this.codeVerifier);
+
+        const common = {
+            codeChallenge: challenge,
+            state,
+            port,
+            loginWithClaudeAi: options.loginWithClaudeAi,
+            inferenceOnly: options.inferenceOnly,
+            orgUUID: options.orgUUID
+        };
+
+        const manualUrl = OAuthService.buildAuthUrl({ ...common, isManual: true });
+        const autoUrl = OAuthService.buildAuthUrl({ ...common, isManual: false });
+
+        try {
+            const code = await this.waitForAuthorizationCode(state, async () => onUrl(manualUrl, autoUrl));
+            const automatic = this.authCodeListener?.hasPendingResponse() ?? false;
+
+            const tokenResponse = await OAuthService.exchangeToken(
+                code,
+                state,
+                this.codeVerifier,
+                port,
+                !automatic,
+                options.expiresIn
+            );
+
+            await OAuthService.logout({ clearOnboarding: false });
+
+            const profile = await OAuthService.fetchProfile(tokenResponse.access_token);
+            const roles = await OAuthService.fetchRoles(tokenResponse.access_token);
+            const subscriptionType = OAuthService.mapSubscriptionType(profile.organization?.organization_type);
+
+            const parsedScopes = parseOAuthScopes(tokenResponse.scope);
+            const scopes = parsedScopes.length
+                ? parsedScopes
+                : options.inferenceOnly
+                    ? [OAUTH_SCOPE_INFERENCE]
+                    : OAUTH_SCOPES_DEFAULT;
+
+            const session: AuthSession = {
+                accessToken: tokenResponse.access_token,
+                refreshToken: tokenResponse.refresh_token,
+                expiresAt: Date.now() + (tokenResponse.expires_in * 1000),
+                scopes,
+                subscriptionType,
+                rateLimitTier: profile.organization?.rate_limit_tier ?? null,
+                account: {
+                    accountUuid: profile.account.uuid,
+                    emailAddress: profile.account.email,
+                    organizationUuid: profile.organization.uuid,
+                    displayName: profile.account.display_name,
+                    hasExtraUsageEnabled: profile.organization.has_extra_usage_enabled,
+                    billingType: profile.organization.billing_type,
+                    organizationRole: roles.organization_role,
+                    workspaceRole: roles.workspace_role,
+                    organizationName: roles.organization_name,
+                    subscriptionType,
+                    rateLimitTier: profile.organization?.rate_limit_tier ?? null
+                }
+            };
+
+            if (automatic) {
+                this.authCodeListener?.handleSuccessRedirect(session.scopes);
+            }
+
+            const { setStatsigStorage } = await import("./MsalAuthService.js");
+            setStatsigStorage({ oauthAccount: session.account ?? null, accessToken: session.accessToken });
+
+            await OAuthService.saveSession(session);
+            return session;
+        } catch (e) {
+            if (this.authCodeListener?.hasPendingResponse()) {
+                this.authCodeListener.handleErrorRedirect();
+            }
+            throw e;
+        } finally {
+            this.authCodeListener?.close();
+        }
+    }
+
+    handleManualAuthCodeInput(input: { authorizationCode: string; state?: string }) {
+        if (this.manualAuthCodeResolver) {
+            this.manualAuthCodeResolver(input.authorizationCode);
+            this.manualAuthCodeResolver = null;
+            this.authCodeListener?.close();
+        }
+    }
+
+    cleanup() {
+        this.authCodeListener?.close();
+        this.manualAuthCodeResolver = null;
+    }
+
+    private async waitForAuthorizationCode(state: string, onStart: () => void): Promise<string> {
+        return new Promise((resolve, reject) => {
+            this.manualAuthCodeResolver = resolve;
+            const listener = this.authCodeListener;
+            if (!listener) {
+                reject(new Error("OAuth callback server is not initialized."));
+                return;
+            }
+            listener.waitForAuthorization(state, onStart).then(code => {
+                this.manualAuthCodeResolver = null;
+                resolve(code);
+            }).catch(err => {
+                this.manualAuthCodeResolver = null;
+                reject(err);
+            });
+        });
+    }
+}
+
 /**
  * Port of chunk754 hD6 (Local Auth Server).
  */
 export class LocalAuthServer {
-    private server: http.Server;
-    private port: number = 0;
+    private localServer: http.Server;
+    private port = 0;
+    private promiseResolver: ((code: string) => void) | null = null;
+    private promiseRejecter: ((err: Error) => void) | null = null;
     private expectedState: string | null = null;
     private pendingResponse: http.ServerResponse | null = null;
-    private resolve: ((code: string) => void) | null = null;
-    private reject: ((err: Error) => void) | null = null;
+    private callbackPath: string;
 
-    constructor() {
-        this.server = http.createServer();
+    constructor(callbackPath: string = "/callback") {
+        this.localServer = http.createServer();
+        this.callbackPath = callbackPath;
     }
 
-    async start(): Promise<number> {
+    async start(port?: number): Promise<number> {
         return new Promise((resolve, reject) => {
-            this.server.on("error", reject);
-            this.server.listen(0, "127.0.0.1", () => {
-                const addr = this.server.address();
+            this.localServer.once("error", err => {
+                reject(new Error(`Failed to start OAuth callback server: ${err.message}`));
+            });
+            this.localServer.listen(port ?? 0, "localhost", () => {
+                const addr = this.localServer.address();
                 this.port = (addr as any).port;
                 resolve(this.port);
             });
         });
     }
 
+    getPort(): number {
+        return this.port;
+    }
+
     hasPendingResponse(): boolean {
         return this.pendingResponse !== null;
     }
 
-    async waitForCode(state: string, onStart: () => void): Promise<string> {
-        this.expectedState = state;
+    async waitForAuthorization(state: string, onStart: () => void): Promise<string> {
         return new Promise((resolve, reject) => {
-            this.resolve = resolve;
-            this.reject = reject;
-            this.server.on("request", this.handleRequest.bind(this));
-            onStart();
+            this.promiseResolver = resolve;
+            this.promiseRejecter = reject;
+            this.expectedState = state;
+            this.startLocalListener(onStart);
         });
     }
 
-    private handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
-        const url = new URL(req.url || "", `http://localhost:${this.port}`);
-        if (url.pathname !== "/callback") {
-            res.writeHead(404);
-            res.end();
+    handleSuccessRedirect(scopes: string[], handler?: (res: http.ServerResponse, scopes: string[]) => void) {
+        if (!this.pendingResponse) {
+            return;
+        }
+        if (handler) {
+            handler(this.pendingResponse, scopes);
+            this.pendingResponse = null;
             return;
         }
 
-        const code = url.searchParams.get("code");
-        const returnedState = url.searchParams.get("state");
-
-        if (!code) {
-            res.writeHead(400);
-            res.end("Missing code");
-            this.doReject(new Error("No code received"));
-            return;
-        }
-
-        if (returnedState !== this.expectedState) {
-            res.writeHead(400);
-            res.end("Invalid state");
-            this.doReject(new Error("State mismatch"));
-            return;
-        }
-
-        this.pendingResponse = res;
-        this.doResolve(code);
-    }
-
-    handleSuccessRedirect(scopes: string[]) {
-        if (!this.pendingResponse) return;
-
-        // chunk754: oF(A) check (checks for inference scope)
-        const isClaudeAi = scopes.includes("user:inference");
-        const redirectUrl = isClaudeAi ? CLAUDEAI_SUCCESS_URL : CONSOLE_SUCCESS_URL;
-
+        const redirectUrl = hasInferenceScope(scopes) ? CLAUDEAI_SUCCESS_URL : CONSOLE_SUCCESS_URL;
         this.pendingResponse.writeHead(302, { Location: redirectUrl });
         this.pendingResponse.end();
         this.pendingResponse = null;
     }
 
     handleErrorRedirect() {
-        if (!this.pendingResponse) return;
+        if (!this.pendingResponse) {
+            return;
+        }
 
         this.pendingResponse.writeHead(302, { Location: CLAUDEAI_SUCCESS_URL });
         this.pendingResponse.end();
         this.pendingResponse = null;
     }
 
-    private doResolve(code: string) {
-        if (this.resolve) {
-            this.resolve(code);
-            this.resolve = null;
-            this.reject = null;
+    private startLocalListener(onStart: () => void) {
+        this.localServer.on("request", this.handleRedirect.bind(this));
+        this.localServer.on("error", this.handleError.bind(this));
+        onStart();
+    }
+
+    private handleRedirect(req: http.IncomingMessage, res: http.ServerResponse) {
+        const url = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
+        if (url.pathname !== this.callbackPath) {
+            res.writeHead(404);
+            res.end();
+            return;
+        }
+
+        const code = url.searchParams.get("code") ?? undefined;
+        const state = url.searchParams.get("state") ?? undefined;
+        this.validateAndRespond(code, state, res);
+    }
+
+    private validateAndRespond(code: string | undefined, state: string | undefined, res: http.ServerResponse) {
+        if (!code) {
+            res.writeHead(400);
+            res.end("Authorization code not found");
+            this.reject(new Error("No authorization code received"));
+            return;
+        }
+        if (state !== this.expectedState) {
+            res.writeHead(400);
+            res.end("Invalid state parameter");
+            this.reject(new Error("Invalid state parameter"));
+            return;
+        }
+        this.pendingResponse = res;
+        this.resolve(code);
+    }
+
+    private handleError(err: Error) {
+        console.error("[OAuth] Callback server error:", err);
+        this.close();
+        this.reject(err);
+    }
+
+    private resolve(code: string) {
+        if (this.promiseResolver) {
+            this.promiseResolver(code);
+            this.promiseResolver = null;
+            this.promiseRejecter = null;
         }
     }
 
-    private doReject(err: Error) {
-        if (this.reject) {
-            this.reject(err);
-            this.resolve = null;
-            this.reject = null;
+    private reject(err: Error) {
+        if (this.promiseRejecter) {
+            this.promiseRejecter(err);
+            this.promiseResolver = null;
+            this.promiseRejecter = null;
         }
     }
 
@@ -574,8 +700,9 @@ export class LocalAuthServer {
         if (this.pendingResponse) {
             this.handleErrorRedirect();
         }
-        this.server.removeAllListeners();
-        this.server.close();
-        this.server.unref();
+        if (this.localServer) {
+            this.localServer.removeAllListeners();
+            this.localServer.close();
+        }
     }
 }

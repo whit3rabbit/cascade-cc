@@ -24,7 +24,7 @@ export class TerminalMarkdownRenderer {
                 language: lang || 'plaintext',
                 ignoreIllegals: true
             });
-        } catch (e) {
+        } catch {
             return code;
         }
     }

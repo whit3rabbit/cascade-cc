@@ -41,7 +41,7 @@ export const MCPSearchTool = {
                     results.push(`[Resource] ${serverName}/${r.name} (${r.uri})`);
                 });
 
-            } catch (e) {
+            } catch {
                 // ignore failed searches on specific servers
             }
         }

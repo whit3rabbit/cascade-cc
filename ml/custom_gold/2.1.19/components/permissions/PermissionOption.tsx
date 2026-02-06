@@ -12,9 +12,9 @@ export interface PermissionOptionProps {
 
 export const PermissionOption: React.FC<PermissionOptionProps> = ({
     label,
-    value,
+    value: _value,
     isFocused,
-    onSelect,
+    onSelect: _onSelect,
     shortcut,
     description
 }) => {

@@ -38,7 +38,7 @@ export function useTerminalInput({
     onSubmit,
     onExit,
     onClearInput,
-    onHistoryUp,
+    onHistoryUp: _onHistoryUp,
     onHistoryDown,
     multiline = false,
     cursorOffset,
@@ -50,14 +50,13 @@ export function useTerminalInput({
     onVimModeChange
 }: TerminalInputProps) {
     const { addNotification, removeNotification } = useNotifications();
-    const { pushToBuffer, undo, redo, canUndo, canRedo } = useUndoRedo();
+    const { undo, redo } = useUndoRedo();
     const killRing = useKillRing();
     const lastKeyWasYank = useRef(false);
 
     const {
         onHistoryUp: internalOnHistoryUp,
-        onHistoryDown: internalOnHistoryDown,
-        resetHistory
+        onHistoryDown: internalOnHistoryDown
     } = useArrowKeyHistory({
         history,
         currentValue: value,
@@ -77,15 +76,6 @@ export function useTerminalInput({
         agents
     });
 
-    const vimMode = useVimMode({
-        enabled: vimModeEnabled,
-        onModeChange: onVimModeChange,
-        value,
-        onChange,
-        cursorOffset,
-        setCursorOffset
-    });
-
     const stash = useStash({
         value,
         onChange,
@@ -93,10 +83,6 @@ export function useTerminalInput({
             addNotification({ key: 'stash', text: msg, timeoutMs: 2000 });
         }
     });
-
-    const onInputProxy = useCallback((char: string, key: any, bypassRecording: boolean = false) => {
-        handleInput(char, key, bypassRecording);
-    }, [/* handleInput defined below */]);
 
     // Use a ref to break the dependency cycle between handleInput and macros
     const handleInputRef = useRef<((char: string, key: any, bypassRecording?: boolean) => void) | null>(null);
@@ -107,6 +93,28 @@ export function useTerminalInput({
     }, []);
 
     const macros = useMacros({ onInput: onInputProxyRef });
+
+    const handleUndo = useCallback(() => {
+        const state = undo();
+        if (state) {
+            onChange(state.text);
+            setCursorOffset(state.cursorOffset);
+        }
+    }, [undo, onChange, setCursorOffset]);
+
+    const vimMode = useVimMode({
+        enabled: vimModeEnabled,
+        onModeChange: onVimModeChange,
+        value,
+        onChange,
+        cursorOffset,
+        setCursorOffset,
+        killRing,
+        macros,
+        onSubmit,
+        onExit,
+        onUndo: handleUndo
+    });
 
     const onExitConfirm = useCallback(() => {
         onExit?.();
@@ -353,6 +361,14 @@ export function useTerminalInput({
         }
 
         if (key.return) {
+            // Shift+Enter or Option+Enter (Meta+Enter) for newline
+            if (key.shift || key.meta) {
+                const newValue = value.slice(0, cursorOffset) + '\n' + value.slice(cursorOffset);
+                onChange(newValue);
+                setCursorOffset(cursorOffset + 1);
+                return;
+            }
+
             // Multiline escape logic
             if (value.slice(0, cursorOffset).endsWith('\\')) {
                 const newValue = value.slice(0, cursorOffset - 1) + '\n' + value.slice(cursorOffset);

@@ -54,8 +54,6 @@ function generateSnapshotScript(shellPath: string, snapshotFile: string): string
     return script;
 }
 
-import { EnvService } from '../config/EnvService.js';
-
 /**
  * Creates a shell snapshot file and returns its path.
  */

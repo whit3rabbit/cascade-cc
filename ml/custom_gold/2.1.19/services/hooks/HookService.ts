@@ -1,10 +1,9 @@
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { getSettings } from '../config/SettingsService.js';
 import { HookEvent, HookInput, HookOutput, HookOutputSchema, HookTrigger, HookDefinition, HookInputSchema } from './HookTypes.js';
-import { PromptManager } from '../conversation/PromptManager.js';
 import { Anthropic } from '../anthropic/AnthropicClient.js';
 import { EnvService } from '../config/EnvService.js';
-import { findAgent } from '../agents/AgentPersistence.js';
 import { terminalLog } from '../../utils/shared/runtime.js';
 
 export class HookService {
@@ -123,7 +122,7 @@ export class HookService {
         try {
             const regex = new RegExp(matcher);
             return regex.test(valueToMatch);
-        } catch (e) {
+        } catch {
             return matcher === valueToMatch;
         }
     }
@@ -188,7 +187,7 @@ Return ONLY valid JSON. Format: { "ok": boolean, "reason": string }`;
         }
     }
 
-    private async executeAgentHook(hookDef: HookDefinition, input: HookInput): Promise<HookOutput> {
+    private async executeAgentHook(hookDef: HookDefinition, _input: HookInput): Promise<HookOutput> {
         // Dynamically import to avoid circular dependency
         const { ConversationService } = await import('../conversation/ConversationService.js');
 
@@ -363,3 +362,14 @@ Return ONLY valid JSON. Format: { "ok": boolean, "reason": string }`;
 }
 
 export const hookService = new HookService();
+
+const isTestEnv = process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID;
+if (isTestEnv) {
+    try {
+        const require = createRequire(import.meta.url);
+        const { jest: jestGlobals } = require('@jest/globals');
+        hookService.dispatch = jestGlobals.fn(hookService.dispatch.bind(hookService));
+    } catch {
+        // Ignore if jest globals aren't available
+    }
+}

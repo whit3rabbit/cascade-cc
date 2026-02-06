@@ -54,7 +54,7 @@ class ApiKeyManagerImpl {
                         return key;
                     }
                 }
-            } catch (e) {
+            } catch {
                 // Ignore errors during automatic check
             }
         }

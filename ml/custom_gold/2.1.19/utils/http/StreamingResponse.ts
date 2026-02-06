@@ -120,7 +120,7 @@ export class StreamingResponse {
                             sr.receivedMessages.push(parsed);
                             sr.messages.push(parsed);
                             // In a real implementation, we might emit events or update state here.
-                        } catch (e) {
+                        } catch {
                             console.error("Failed to parse SSE data as JSON:", event.data);
                         }
                     }

@@ -5,7 +5,7 @@
 
 import { createHash } from "node:crypto";
 import { join, dirname, isAbsolute } from "node:path";
-import fs, { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { getBaseConfigDir } from "./runtimeAndEnv.js";
 
 // --- Types ---

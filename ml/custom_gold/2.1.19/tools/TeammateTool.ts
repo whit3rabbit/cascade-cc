@@ -639,7 +639,6 @@ export const TeammateTool = {
                 if (!input.proposed_name) {
                     throw new Error("proposed_name is required for spawn operation");
                 }
-                const senderName = getSenderName(input);
                 if (!isTeamLead(resolved)) {
                     throw new Error("Only the team lead can spawn new teammates.");
                 }
@@ -669,11 +668,9 @@ export const TeammateTool = {
                 const isDevEnv = EnvService.get("NODE_ENV") === 'development' || EnvService.isTruthy("CLAUDE_DEV");
                 const requestId = createRequestId("join", resolved);
 
-                let baseCommand;
+                let baseCommand = 'claude';
                 if (isTsFile || (isDevEnv && !process.argv[1].includes('bin/claude'))) {
                     baseCommand = `npm run dev --`;
-                } else {
-                    baseCommand = `claude`;
                 }
 
                 let command = `${baseCommand} --agent ${uniqueName} --auto-join ${requestId}`;

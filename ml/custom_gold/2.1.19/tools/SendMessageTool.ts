@@ -4,7 +4,6 @@
  */
 
 import { z } from 'zod';
-import { findAgent } from '../services/agents/AgentPersistence.js';
 import { writeToMailbox } from '../services/teams/TeammateMailbox.js';
 import { getAgentId } from '../utils/shared/runtimeAndEnv.js';
 import { SendMessagePayload } from '../types/AgentTypes.js';
@@ -118,11 +117,9 @@ export const SendMessageTool = {
         const sender = getAgentId() || "unknown";
 
         // Recipient Validation
+        // 2.1.19 Alignment: TeammateTool.write does not validate recipient existence (fire and forget/dynamic), so we skip findAgent check.
         if (T.recipient && T.recipient !== "User") {
-            const agentExists = findAgent(T.recipient);
-            if (!agentExists) {
-                // Log warning but proceed as dynamic teammates might exist
-            }
+            // No-op validation for dynamic teammates
         }
 
         const msgObject = {

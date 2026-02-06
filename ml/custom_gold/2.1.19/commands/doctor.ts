@@ -4,7 +4,7 @@
  */
 
 import { CommandDefinition, createCommandHelper } from './helpers.js';
-import { DoctorService } from '../services/terminal/DoctorService.js';
+import { DoctorService, formatDoctorReport } from '../services/terminal/DoctorService.js';
 
 /**
  * Command definition for /doctor, diagnosing installation health.
@@ -18,35 +18,7 @@ export const doctorCommandDefinition: CommandDefinition = createCommandHelper(
         isEnabled: () => !process.env.DISABLE_DOCTOR_COMMAND,
         async call(onDone: (result: string) => void) {
             const info = await DoctorService.getDiagnosticInfo();
-
-            let report = `## Diagnostics\n`;
-            report += `└ Currently running: ${info.installationType} (${info.version})\n`;
-            if (info.packageManager) report += `└ Package manager: ${info.packageManager}\n`;
-            report += `└ Path: ${info.installationPath}\n`;
-            report += `└ Invoked: ${info.invokedBinary}\n`;
-            report += `└ Search (ripgrep): ${info.ripgrepStatus.workingDirectory ? "OK" : "Not working"} (${info.ripgrepStatus.mode})\n\n`;
-
-            if (info.warnings.length > 0) {
-                report += `### ⚠️ Warnings\n`;
-                for (const w of info.warnings) {
-                    report += `- **${w.issue}**\n  *Fix:* ${w.fix}\n`;
-                }
-                report += `\n`;
-            }
-
-            report += `### Environment Variables\n`;
-            for (const ev of info.envVars) {
-                const statusIcon = ev.status === 'ok' ? '✅' : (ev.status === 'capped' ? '⚠️' : '❌');
-                report += `└ ${statusIcon} ${ev.name}: ${ev.message}\n`;
-            }
-
-            if (info.sessionMetrics && info.sessionMetrics.totalCostUSD > 0) {
-                report += `\n### Session Metrics\n`;
-                report += `└ Total Cost: $${info.sessionMetrics.totalCostUSD.toFixed(4)}\n`;
-                report += `└ Tokens: ${info.sessionMetrics.inputTokens} (in) / ${info.sessionMetrics.outputTokens} (out)\n`;
-            }
-
-            onDone(report);
+            onDone(formatDoctorReport(info));
         }
     }
 );

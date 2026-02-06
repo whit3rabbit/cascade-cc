@@ -75,7 +75,7 @@ export function installKeybindings(terminalName: string): InstallResult {
                     .replace(/\/\/.*|\/\*[\s\S]*?\*\//g, "") // Strip comments
                     .replace(/,(\s*[\]}])/g, "$1"); // Strip trailing commas
                 keybindings = JSON.parse(stripped);
-            } catch (e) {
+            } catch {
                 console.warn("Failed to parse keybindings.json, treating as empty array.");
             }
 
@@ -83,7 +83,7 @@ export function installKeybindings(terminalName: string): InstallResult {
             const id = randomBytes(4).toString("hex");
             try {
                 copyFileSync(keybindingsPath, `${keybindingsPath}.${id}.bak`);
-            } catch (e) {
+            } catch {
                 return {
                     success: false,
                     message: "Failed to backup existing keybindings. Aborting."

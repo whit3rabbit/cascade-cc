@@ -8,7 +8,6 @@ import axios, { AxiosRequestConfig, AxiosResponse, Method } from 'axios';
 import { randomUUID } from 'node:crypto';
 
 const MAX_RETRIES = 3;
-const BASE_DELAY_MS = 1000;
 
 /**
  * Delays execution for a specified duration.

@@ -140,7 +140,6 @@ import { ProxyAgent, Dispatcher } from 'undici';
 // Helper to get proxy dispatcher
 function getDispatcher(): Dispatcher | undefined {
     const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
-    const noProxy = process.env.NO_PROXY;
 
     if (proxyUrl) {
         return new ProxyAgent(proxyUrl);
@@ -210,7 +209,7 @@ export class Anthropic {
                                     return {
                                         ...msg,
                                         content: msg.content.map((block: any) => {
-                                            const { cache_control, ...rest } = block;
+                                            const { cache_control: _cache_control, ...rest } = block;
                                             return rest;
                                         })
                                     };
@@ -220,7 +219,7 @@ export class Anthropic {
                         }
                         if (data.body && Array.isArray(data.body.system)) {
                             data.body.system = data.body.system.map((block: any) => {
-                                const { cache_control, ...rest } = block;
+                                const { cache_control: _cache_control, ...rest } = block;
                                 return rest;
                             });
                         }

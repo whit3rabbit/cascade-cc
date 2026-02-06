@@ -43,7 +43,7 @@ export class LspClient {
             });
 
             // Standard LSP initialize request
-            const initResponse = await this.sendRequest("initialize", {
+            await this.sendRequest("initialize", {
                 processId: process.pid,
                 rootUri: `file://${process.cwd()}`,
                 capabilities: {},

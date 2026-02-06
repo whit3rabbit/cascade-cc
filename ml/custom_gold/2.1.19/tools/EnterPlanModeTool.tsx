@@ -23,7 +23,7 @@ export interface EnterPlanModeResult {
 /**
  * Result component for EnterPlanMode tool.
  */
-export const EnterPlanModeResultView: React.FC<{ data: EnterPlanModeResult }> = ({ data }) => (
+export const EnterPlanModeResultView: React.FC<{ data: EnterPlanModeResult }> = () => (
     <Box flexDirection="column" marginTop={1}>
         <Box flexDirection="row">
             <Text color="green">✅</Text>

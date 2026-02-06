@@ -11,6 +11,7 @@ import {
     suggestDirectories
 } from '../services/terminal/FileIndexService.js';
 import { Suggestion } from '../services/terminal/FileIndexService.js';
+import { getBashHistory } from '../utils/terminal/bashHistory.js';
 
 const DEBOUNCE_DELAY_MS = 200;
 
@@ -122,6 +123,31 @@ export function useAutocomplete({
             }
         }
 
+        // 4. Shell history completion (if nothing else matched)
+        if (mode === 'prompt' && text.length >= 3) {
+            const history = await getBashHistory();
+            if (snapshotInput !== lastFetchInputRef.current) return;
+
+            const filteredHistory = history
+                .filter(cmd => cmd.toLowerCase().includes(text.toLowerCase()))
+                .slice(0, 10)
+                .map((cmd, idx) => ({
+                    id: `history-${idx}`,
+                    displayText: cmd,
+                    description: 'from shell history'
+                }));
+
+            if (filteredHistory.length > 0) {
+                setSuggestionsState(prev => ({
+                    ...prev,
+                    suggestions: filteredHistory,
+                    selectedSuggestionIndex: calculateNextSelectedIndex(prev.suggestions, prev.selectedSuggestionIndex, filteredHistory)
+                }));
+                setSuggestionSourceType('history');
+                return;
+            }
+        }
+
         clearSuggestions();
     }, [mode, commands, suppressSuggestions, clearSuggestions, setSuggestionsState]);
 
@@ -159,7 +185,7 @@ export function useAutocomplete({
 
     // Intercept keyboard input for navigation and selection
     useInput((_, key) => {
-        const { suggestions, selectedSuggestionIndex } = suggestionsState;
+        const { suggestions } = suggestionsState;
         if (suggestions.length === 0) return;
 
         if (key.return || key.tab) {

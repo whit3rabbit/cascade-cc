@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { Fuse } from '../../vendor/Fuse.js';
 
@@ -50,11 +50,11 @@ export async function suggestFiles(query: string = ""): Promise<Suggestion[]> {
         // 1. Try Git first
         const { stdout } = await execa('git', ['ls-files'], { cwd: process.cwd() });
         files = stdout.split('\n').filter(Boolean);
-    } catch (error) {
+    } catch {
         // 2. Fallback to recursive readdir
         try {
             files = await recursiveReaddir(process.cwd());
-        } catch (fallbackError) {
+        } catch {
             return [];
         }
     }
@@ -89,12 +89,12 @@ export async function suggestDirectories(prefix: string = ""): Promise<Suggestio
             .filter(Boolean)
             .map(d => d.replace(/^\.\//, ''))
             .filter(d => d && d !== '.');
-    } catch (error) {
+    } catch {
         // Fallback to shallow readdir
         try {
             const entries = await readdir(process.cwd(), { withFileTypes: true });
             dirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => e.name);
-        } catch (e) {
+        } catch {
             return [];
         }
     }

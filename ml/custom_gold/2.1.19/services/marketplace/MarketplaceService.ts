@@ -1,8 +1,16 @@
-import { LoadedMarketplace, MarketplaceFailure } from './MarketplaceLoader.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { execSync } from 'node:child_process';
+import axios from 'axios';
+import { LoadedMarketplace } from './MarketplaceLoader.js';
 import { getSettings, updateSettings } from '../config/SettingsService.js';
+import { MarketplaceSource, parseMarketplaceSource } from '../../utils/marketplace/SourceParser.js';
+import { sanitizeFilePath } from '../../utils/fs/pathSanitizer.js';
+import { getBaseConfigDir } from '../../utils/shared/runtimeAndEnv.js';
+import { gitClone, gitPull } from '../../utils/shared/git.js';
 
 export interface MarketplaceServiceType {
-    addMarketplace: (name: string, url: string) => Promise<void>;
+    addMarketplace: (name: string, source: string | MarketplaceSource) => Promise<void>;
     removeMarketplace: (name: string) => Promise<void>;
     refreshMarketplace: (name: string, onProgress?: (msg: string) => void) => Promise<void>;
     refreshAllMarketplaces: (onProgress?: (msg: string) => void) => Promise<void>;
@@ -10,7 +18,123 @@ export interface MarketplaceServiceType {
     autoInstallOfficialMarketplace: () => Promise<void>;
 }
 
-import axios from 'axios';
+const DEFAULT_MARKETPLACE_MANIFEST_PATH = path.join('.claude-plugin', 'marketplace.json');
+type ValidMarketplaceSource = Exclude<MarketplaceSource, { error: string }>;
+
+function getMarketplaceCacheDir(): string {
+    const cacheDir = path.join(getBaseConfigDir(), 'marketplaces');
+    if (!fs.existsSync(cacheDir)) {
+        fs.mkdirSync(cacheDir, { recursive: true });
+    }
+    return cacheDir;
+}
+
+function sanitizeMarketplaceName(name: string): string {
+    return name.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+function normalizeMarketplaceSource(input: string | MarketplaceSource): ValidMarketplaceSource {
+    if (typeof input === 'string') {
+        const parsed = parseMarketplaceSource(input);
+        if (!parsed) {
+            throw new Error(`Invalid marketplace source: ${input}`);
+        }
+        if ('error' in parsed) {
+            throw new Error(parsed.error);
+        }
+        return parsed;
+    }
+    if ('error' in input) {
+        throw new Error(input.error);
+    }
+    return input;
+}
+
+async function ensureGitRepo(url: string, targetPath: string, ref?: string, onProgress?: (msg: string) => void) {
+    if (fs.existsSync(targetPath)) {
+        if (onProgress) onProgress(`Updating marketplace at ${targetPath}...`);
+        await gitPull(targetPath);
+    } else {
+        if (onProgress) onProgress(`Cloning marketplace from ${url}...`);
+        await gitClone(url, targetPath);
+    }
+    if (ref) {
+        execSync(`git checkout ${ref}`, { cwd: targetPath, stdio: 'ignore' });
+    }
+}
+
+function getSanitizedPath(inputPath: string): string {
+    const sanitized = sanitizeFilePath(inputPath);
+    if (!sanitized) {
+        throw new Error(`Invalid path: ${inputPath}`);
+    }
+    return sanitized;
+}
+
+function getRelativeManifestPath(inputPath?: string): string {
+    const raw = inputPath || DEFAULT_MARKETPLACE_MANIFEST_PATH;
+    const sanitized = sanitizeFilePath(raw);
+    if (!sanitized) {
+        throw new Error(`Invalid marketplace manifest path: ${raw}`);
+    }
+    return sanitized;
+}
+
+async function loadMarketplaceData(
+    source: ValidMarketplaceSource,
+    name: string,
+    onProgress?: (msg: string) => void
+): Promise<{ data: any; installLocation?: string }> {
+    const src = source;
+    switch (src.source) {
+        case 'url': {
+            const response = await axios.get(src.url, { timeout: 10000 });
+            return { data: response.data, installLocation: src.url };
+        }
+        case 'github': {
+            const cacheDir = getMarketplaceCacheDir();
+            const cachePath = path.join(cacheDir, sanitizeMarketplaceName(name));
+            const repoUrl = `https://github.com/${src.repository}.git`;
+            await ensureGitRepo(repoUrl, cachePath, src.ref, onProgress);
+            const manifestPath = path.join(cachePath, getRelativeManifestPath((src as any).path));
+            if (!fs.existsSync(manifestPath)) {
+                throw new Error(`Marketplace file not found at ${manifestPath}`);
+            }
+            const content = fs.readFileSync(manifestPath, 'utf8');
+            return { data: JSON.parse(content), installLocation: cachePath };
+        }
+        case 'git': {
+            const cacheDir = getMarketplaceCacheDir();
+            const cachePath = path.join(cacheDir, sanitizeMarketplaceName(name));
+            await ensureGitRepo(src.url, cachePath, src.ref, onProgress);
+            const manifestPath = path.join(cachePath, getRelativeManifestPath((src as any).path));
+            if (!fs.existsSync(manifestPath)) {
+                throw new Error(`Marketplace file not found at ${manifestPath}`);
+            }
+            const content = fs.readFileSync(manifestPath, 'utf8');
+            return { data: JSON.parse(content), installLocation: cachePath };
+        }
+        case 'file': {
+            const filePath = getSanitizedPath(src.path);
+            if (!fs.existsSync(filePath)) {
+                throw new Error(`Marketplace file not found at ${filePath}`);
+            }
+            const content = fs.readFileSync(filePath, 'utf8');
+            return { data: JSON.parse(content), installLocation: filePath };
+        }
+        case 'directory': {
+            const dirPath = getSanitizedPath(src.path);
+            const manifestPath = path.join(dirPath, DEFAULT_MARKETPLACE_MANIFEST_PATH);
+            if (!fs.existsSync(manifestPath)) {
+                throw new Error(`Marketplace file not found at ${manifestPath}`);
+            }
+            const content = fs.readFileSync(manifestPath, 'utf8');
+            return { data: JSON.parse(content), installLocation: dirPath };
+        }
+        default:
+            throw new Error(`Unsupported marketplace source type: ${(src as any).source}`);
+    }
+}
 
 /**
  * Service for managing external plugin marketplaces.
@@ -19,14 +143,18 @@ export const MarketplaceService: MarketplaceServiceType = {
     /**
      * Adds a new marketplace source.
      */
-    async addMarketplace(name: string, url: string): Promise<void> {
+    async addMarketplace(name: string, sourceInput: string | MarketplaceSource): Promise<void> {
+        const source = normalizeMarketplaceSource(sourceInput);
         updateSettings((current) => {
             const marketplaces = current.marketplaces || {};
             return {
                 ...current,
                 marketplaces: {
                     ...marketplaces,
-                    [name]: { url }
+                    [name]: {
+                        source,
+                        ...((source as any).source === 'url' ? { url: (source as any).url } : {})
+                    }
                 }
             };
         });
@@ -38,7 +166,7 @@ export const MarketplaceService: MarketplaceServiceType = {
     async removeMarketplace(name: string): Promise<void> {
         updateSettings((current) => {
             const marketplaces = current.marketplaces || {};
-            const { [name]: removed, ...rest } = marketplaces;
+            const { [name]: _removed, ...rest } = marketplaces;
             return {
                 ...current,
                 marketplaces: rest
@@ -55,16 +183,23 @@ export const MarketplaceService: MarketplaceServiceType = {
         const settings = getSettings();
         const marketplaceConfig = settings.marketplaces?.[name];
 
-        if (!marketplaceConfig || !marketplaceConfig.url) {
-            throw new Error(`Marketplace '${name}' configuration missing or invalid URL`);
+        if (!marketplaceConfig) {
+            throw new Error(`Marketplace '${name}' not found`);
         }
 
         try {
-            const response = await axios.get(marketplaceConfig.url, { timeout: 10000 });
-            const data = response.data;
+            const source: ValidMarketplaceSource | null = marketplaceConfig.source
+                ? normalizeMarketplaceSource(marketplaceConfig.source)
+                : (marketplaceConfig.url ? { source: 'url', url: marketplaceConfig.url } : null);
 
-            // Simple validation
-            if (!data.plugins || !Array.isArray(data.plugins)) {
+            if (!source) {
+                throw new Error(`Marketplace '${name}' configuration missing source`);
+            }
+
+            const { data, installLocation } = await loadMarketplaceData(source, name, onProgress);
+
+            const plugins = Array.isArray(data) ? data : data.plugins;
+            if (!plugins || !Array.isArray(plugins)) {
                 throw new Error("Invalid marketplace format: expected 'plugins' array");
             }
 
@@ -77,14 +212,16 @@ export const MarketplaceService: MarketplaceServiceType = {
                         ...marketplaces,
                         [name]: {
                             ...marketplaceConfig,
+                            source,
+                            installLocation,
                             lastUpdated: new Date().toISOString(),
-                            plugins: data.plugins
+                            plugins
                         }
                     }
                 };
             });
 
-            if (onProgress) onProgress(`Marketplace ${name} refreshed with ${data.plugins.length} plugins.`);
+            if (onProgress) onProgress(`Marketplace ${name} refreshed with ${plugins.length} plugins.`);
         } catch (error: any) {
             const msg = error.response ? `HTTP ${error.response.status}` : error.message;
             throw new Error(`Failed to refresh ${name}: ${msg}`);
@@ -136,6 +273,10 @@ export const MarketplaceService: MarketplaceServiceType = {
     async autoInstallOfficialMarketplace(): Promise<void> {
         const OFFICIAL_MARKETPLACE_NAME = "claude-plugins-official";
         const OFFICIAL_MARKETPLACE_REPO = "anthropics/claude-plugins-official";
+        const OFFICIAL_MARKETPLACE_SOURCE: MarketplaceSource = {
+            source: "github",
+            repository: OFFICIAL_MARKETPLACE_REPO
+        };
 
         // 1. Check if disabled via env var
         if (process.env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL) {
@@ -204,19 +345,7 @@ export const MarketplaceService: MarketplaceServiceType = {
 
         // 5. Attempt Installation
         try {
-            // We use addMarketplace which expects a URL.
-            // The official marketplace in the reference (chunk1364) seems to point to a github repo.
-            // "anthropics/claude-plugins-official"
-            // Our addMarketplace implementation currently expects a URL (http/https). 
-            // If we support github shortnames, we should convert it or handle it.
-            // For now, let's assume raw github user content URL or similar if we strictly follow `addMarketplace(url)`.
-            // HOWEVER, looking at chunk1364: `repository: "anthropics/claude-plugins-official"`.
-            // And chunk1627 calls `My(dB6)` where dB6 is the config object.
-            // If our `addMarketplace` only takes a URL, we might need to adjust or pass the raw JSON URL.
-            // Let's use the raw githubusercontent URL for main branch as a safe bet for now.
-            const rawUrl = `https://raw.githubusercontent.com/${OFFICIAL_MARKETPLACE_REPO}/main/marketplace.json`;
-
-            await MarketplaceService.addMarketplace(OFFICIAL_MARKETPLACE_NAME, rawUrl);
+            await MarketplaceService.addMarketplace(OFFICIAL_MARKETPLACE_NAME, OFFICIAL_MARKETPLACE_SOURCE);
             // Verify it was added and refresh
             await MarketplaceService.refreshMarketplace(OFFICIAL_MARKETPLACE_NAME);
 

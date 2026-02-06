@@ -3,11 +3,10 @@
  * Role: UI component for selecting and switching Claude models.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { Select } from '../common/Select.js';
 import { Divider } from '../common/Divider.js';
-import { ActionHint } from '../common/ActionHint.js';
 
 interface ModelOption {
     label: string;
@@ -51,8 +50,6 @@ export function ModelPicker({
     onCancel,
     isStandalone = false
 }: ModelPickerProps) {
-    const [activeValue, setActiveValue] = useState(initialModel || DEFAULT_MODELS[0].value);
-
     const options = useMemo(() => {
         // We generally use the DEFAULT_MODELS. If initialModel is not in it, we might want to add it,
         // but for this specific TUI request we mainly want to show the list as requested.

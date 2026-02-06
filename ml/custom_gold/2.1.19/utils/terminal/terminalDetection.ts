@@ -70,7 +70,7 @@ export async function getLeaderPaneId(): Promise<string | null> {
             if (res.exitCode === 0) {
                 return res.stdout.trim();
             }
-        } catch (error) {
+        } catch {
             // ignore error
         }
     }

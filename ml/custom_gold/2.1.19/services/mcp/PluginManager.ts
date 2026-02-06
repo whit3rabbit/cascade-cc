@@ -5,7 +5,6 @@ import { getSettings, updateSettings } from '../config/SettingsService.js';
 import { gitClone, gitPull } from '../../utils/shared/git.js';
 import { getBaseConfigDir } from '../../utils/shared/runtimeAndEnv.js';
 import semver from 'semver';
-import { McpServerConfig } from './McpServerManager.js';
 import { LspServerManager, LspServerConfig } from '../lsp/LspServerManager.js';
 import { commandRegistry } from '../terminal/CommandRegistry.js';
 import { registerAgent, loadAgent } from '../agents/AgentPersistence.js';
@@ -29,6 +28,8 @@ export interface PluginInstallation {
     projectPath?: string;
     installPath: string;
     enabled: boolean;
+    repository?: string;
+    source?: string;
 }
 
 /**
@@ -120,7 +121,7 @@ export class PluginManager {
                         }
                     }
                 }
-            } catch (e) {
+            } catch {
                 // Ignore if skills dir is empty or fails
             }
         }
@@ -155,7 +156,7 @@ export class PluginManager {
         }
     }
 
-    private static async loadAgents(pluginPath: string, namespace: string) {
+    private static async loadAgents(pluginPath: string, _namespace: string) {
         const agentsDir = path.join(pluginPath, 'agents');
         if (fs.existsSync(agentsDir)) {
             try {
@@ -172,11 +173,11 @@ export class PluginManager {
                         registerAgent({ ...agent, scope: 'plugin' } as any);
                     }
                 }
-            } catch (e) { }
+            } catch { }
         }
     }
 
-    private static async loadHooks(pluginPath: string, namespace: string) {
+    private static async loadHooks(pluginPath: string, _namespace: string) {
         const hooksPath = path.join(pluginPath, 'hooks', 'hooks.json');
         if (fs.existsSync(hooksPath)) {
             try {
@@ -190,13 +191,13 @@ export class PluginManager {
                         }
                     }
                 }
-            } catch (e) {
-                terminalLog(`Failed to load hooks from ${hooksPath}: ${e}`, "error");
+            } catch (_e) {
+                terminalLog(`Failed to load hooks from ${hooksPath}: ${_e}`, "error");
             }
         }
     }
 
-    private static async loadLspServers(pluginPath: string, namespace: string) {
+    private static async loadLspServers(pluginPath: string, _namespace: string) {
         // 1. Check for .lsp.json
         const lspConfigPath = path.join(pluginPath, '.lsp.json');
         const lspConfigs: Record<string, LspServerConfig> = {};
@@ -205,8 +206,8 @@ export class PluginManager {
             try {
                 const config = JSON.parse(fs.readFileSync(lspConfigPath, 'utf8'));
                 Object.assign(lspConfigs, config);
-            } catch (e) {
-                terminalLog(`Failed to load LSP config from ${lspConfigPath}: ${e}`, "error");
+            } catch (_e) {
+                terminalLog(`Failed to load LSP config from ${lspConfigPath}: ${_e}`, "error");
             }
         }
 
@@ -251,7 +252,7 @@ export class PluginManager {
                         }
                     }
                 }
-            } catch (e) {
+            } catch {
                 // Ignore
             }
         }
@@ -292,7 +293,9 @@ export class PluginManager {
                     version: (config as any).version || '1.0.0',
                     scope: (config as any).scope || 'user',
                     installPath: (config as any).installPath || '',
-                    enabled: (config as any).enabled !== false
+                    enabled: (config as any).enabled !== false,
+                    repository: (config as any).repository,
+                    source: (config as any).source
                 });
             }
         }

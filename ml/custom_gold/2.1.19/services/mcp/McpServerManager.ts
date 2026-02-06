@@ -5,10 +5,8 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { homedir } from 'node:os';
 import { z } from 'zod';
 import { getSettings, updateSettings } from '../config/SettingsService.js';
-import { EnvService } from '../config/EnvService.js';
 import { getEnterpriseMcpConfigPath } from '../../utils/shared/runtimeAndEnv.js';
 
 // --- MCP Server Configuration Schemas ---

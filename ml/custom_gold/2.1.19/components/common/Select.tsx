@@ -32,7 +32,7 @@ export function Select({
     defaultValue,
     onChange,
     onFocus,
-    onCancel,
+    onCancel: _onCancel,
     visibleOptionCount = 10,
     title,
     emptyMessage = "No options available"

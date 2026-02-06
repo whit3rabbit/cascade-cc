@@ -3,9 +3,8 @@
  * Role: Logic for assembling the system prompt and managing token budget.
  */
 
-import { getBaseConfigDir } from "../../utils/shared/runtimeAndEnv.js";
 import { terminalLog } from "../../utils/shared/runtime.js";
-import { AgentMessage, AgentMetadata } from "../../types/AgentTypes.js";
+import { AgentMessage } from "../../types/AgentTypes.js";
 
 export interface TokenBreakdown {
     categories: TokenCategory[];
@@ -78,7 +77,7 @@ At the very end of your turn, once you have asked the user questions and are hap
      * Gathers project-specific context (CLAUDE.md, git status, etc.)
      * Equivalent to `wL` in chunk1084 and implemented in chunk1452.
      */
-    private static async getBasePrompt(options: any): Promise<string> {
+    private static async getBasePrompt(_options: any): Promise<string> {
         return `
 You are an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
@@ -166,7 +165,7 @@ ${inlineDef.prompt || ""}
     /**
      * Compacts message history by summarizing older turns.
      */
-    static async compactMessages(messages: AgentMessage[], options: any): Promise<AgentMessage[]> {
+    static async compactMessages(messages: AgentMessage[], _options: any): Promise<AgentMessage[]> {
         const { compactionService } = await import('../compaction/CompactionService.js');
 
         try {

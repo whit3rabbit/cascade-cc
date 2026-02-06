@@ -27,7 +27,7 @@ export async function getGitState(): Promise<any> {
             isClean,
             isHeadOnRemote: true // Simplified
         };
-    } catch (e) {
+    } catch {
         return null;
     }
 }

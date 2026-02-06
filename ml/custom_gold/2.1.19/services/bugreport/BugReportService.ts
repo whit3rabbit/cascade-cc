@@ -4,9 +4,9 @@
  */
 
 import { zip, Zippable, strToU8 } from 'fflate';
-import { promises as fs, createWriteStream } from 'fs';
+import { promises as fs } from 'fs';
 import { join } from 'path';
-import { homedir, platform, release, arch, cpus, totalmem } from 'os';
+import { platform, release, arch, cpus, totalmem } from 'os';
 import { EnvService } from '../config/EnvService.js';
 
 export class BugReportService {
@@ -70,7 +70,7 @@ export class BugReportService {
             try {
                 const data = await fs.readFile(logPath, 'utf8');
                 return data;
-            } catch (e) {
+            } catch {
                 return `Log file not found at ${logPath}`;
             }
         } catch (error) {

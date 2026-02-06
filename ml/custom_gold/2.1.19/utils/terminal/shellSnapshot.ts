@@ -4,7 +4,7 @@
  * Generates and manages shell configuration snapshots.
  */
 
-import { existsSync, statSync, mkdirSync, realpathSync, unlinkSync, readdirSync } from "node:fs";
+import { statSync, mkdirSync, realpathSync, unlinkSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as os from "node:os";
 import { fileExists, getHomeDir, getRelativeFilePath, resolvePathFromHome } from "../fs/paths.js";
@@ -12,13 +12,11 @@ import { onCleanup } from "../cleanup.js";
 import { getPlatform, isWsl } from "../platform/detector.js";
 import { getGitBashPath } from "../platform/shell.js";
 import { shellQuote as R4 } from "./shellQuote.js";
-import { terminalLog, errorLog, m1 as getCwd } from "../shared/runtime.js";
+import { terminalLog, errorLog } from "../shared/runtime.js";
 import { spawnBashCommand, executeBashCommand } from "../shared/bashUtils.js";
 import { EnvService } from "../../services/config/EnvService.js";
 
 const SHELL_SNAPSHOT_TIMEOUT = 10000;
-const base64EncodedString = "\\\\";
-
 /**
  * Gets the rip-grep alias or function definition.
  */
@@ -139,7 +137,10 @@ RIPGREP_FUNC_END
       echo "# Functions" >> "$SNAPSHOT_FILE"
       declare -f > /dev/null 2>&1
       declare -F | cut -d' ' -f3 | grep -vE '^(_|__)' | while read func; do
-        declare -f "$func" >> "$SNAPSHOT_FILE"
+        # Encode the function to base64, preserving all special characters
+        encoded_func=$(declare -f "$func" | base64 )
+        # Write the function definition to the snapshot
+        echo "eval \"\$(echo '$encoded_func' | base64 -d)\" > /dev/null 2>&1" >> "$SNAPSHOT_FILE"
       done
       echo "# Shell Options" >> "$SNAPSHOT_FILE"
       shopt -p | head -n 1000 >> "$SNAPSHOT_FILE"
@@ -242,7 +243,7 @@ export async function createShellSnapshot(shellPath: string): Promise<string | u
                 timeout: SHELL_SNAPSHOT_TIMEOUT,
                 maxBuffer: 1048576,
                 encoding: "utf8",
-            }, (error: any, stdout: string | Buffer, stderr: string | Buffer) => {
+            }, (error: any, _stdout: string | Buffer, _stderr: string | Buffer) => {
                 if (error) {
                     const msg = error instanceof Error ? error.message : String(error);
                     terminalLog(`Shell snapshot creation failed: ${msg}`);

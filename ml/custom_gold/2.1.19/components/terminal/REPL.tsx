@@ -4,9 +4,8 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Box, useApp } from 'ink';
+import { Box, useApp, useInput } from 'ink';
 import { ConversationService } from '../../services/conversation/ConversationService.js';
-import { handlePermissionResponse } from '../../services/terminal/PermissionService.js';
 import { mcpClientManager } from '../../services/mcp/McpClientManager.js';
 import { commandRegistry } from '../../services/terminal/CommandRegistry.js';
 import { SlashCommandDispatcher } from '../../commands/SlashCommandDispatcher.js';
@@ -17,29 +16,25 @@ import { TerminalInput } from './TerminalInput.js';
 import { Transcript } from './Transcript.js';
 import { UnifiedSearchMenu } from '../menus/UnifiedSearchMenu.js';
 import { TaskMenu } from '../menus/TaskMenu.js';
-import { PermissionDialog } from '../permissions/PermissionDialog.js';
-import { WorkerPermissionDialog } from '../permissions/WorkerPermissionDialog.js';
-import { SandboxPermissionDialog } from '../permissions/SandboxPermissionDialog.js';
+import { LoopMenu } from '../menus/LoopMenu.js';
 import { CostThresholdDialog } from '../permissions/CostThresholdDialog.js';
-import { OnboardingWorkflow } from '../onboarding/OnboardingWorkflow.js';
-import { LspRecommendationDialog } from '../onboarding/LspRecommendationDialog.js';
 import { SettingsMenu } from '../menus/SettingsMenu.js';
 import { McpMenu } from '../menus/McpMenu.js';
 import { MarketplaceMenu } from '../menus/MarketplaceMenu.js';
 import { ResourceMenu } from '../menus/ResourceMenu.js';
 import { PromptMenu } from '../menus/PromptMenu.js';
 import { AgentsMenu } from '../menus/AgentsMenu.js';
+import { RemoteEnvMenu } from '../menus/RemoteEnvMenu.js';
 import { BugReportCommand } from '../../commands/BugReportCommand.js';
 import { StatusLine } from './StatusLine.js';
 import { ModelPicker } from '../ModelPicker/ModelPicker.js';
 import { CompactCommand } from '../../commands/CompactCommand.js';
 import { MemoryCommand } from '../../commands/MemoryCommand.js';
 import { CostCommand } from '../../commands/CostCommand.js';
-import { DoctorCommand } from '../../commands/DoctorCommand.js';
+import { Doctor } from './Doctor.js';
 import { CORE_TOOLS } from '../../tools/index.js';
 import { getAuthDetails } from '../../services/auth/AuthService.js';
 import { getSettings } from '../../services/config/SettingsService.js';
-import { taskManager } from '../../services/terminal/TaskManager.js';
 import { costService } from '../../services/terminal/CostService.js';
 import { hookService } from '../../services/hooks/HookService.js';
 import { useAppState } from '../../hooks/useAppState.js';
@@ -53,7 +48,7 @@ export interface REPLProps {
     isFirstRun?: boolean;
 }
 
-export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent, isFirstRun }) => {
+export const REPL: React.FC<REPLProps> = ({ initialPrompt: _initialPrompt, verbose: _verbose, model, agent, isFirstRun: _isFirstRun }) => {
     const { exit } = useApp();
     const [appState, updateAppState] = useAppState();
 
@@ -64,24 +59,33 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
     const [screen, setScreen] = useState<'prompt' | 'transcript'>('prompt');
     const [currentMenu, setCurrentMenu] = useState<any>(null);
     const [history, setHistory] = useState<string[]>([]);
-    const [planMode, setPlanMode] = useState(false);
     const [vimModeEnabled, setVimModeEnabled] = useState(false);
+    const [currentVimMode, _setCurrentVimMode] = useState('INSERT');
+    const [exitConfirmation, _setExitConfirmation] = useState(false);
     const [bugReportInitialDescription, setBugReportInitialDescription] = useState('');
     const [showAllInTranscript, setShowAllInTranscript] = useState(false);
     const [selectedAgent, setSelectedAgent] = useState<string | undefined>(agent);
+    const [settingsTab, setSettingsTab] = useState<'Status' | 'Config' | 'Usage'>('Status');
+    const [_screenToggleId, setScreenToggleId] = useState(0);
+
+    // Original Screen States
+    const [tasksSelected, setTasksSelected] = useState(false);
+    const [diffSelected, _setDiffSelected] = useState(false);
+    const [loopSelected, setLoopSelected] = useState(false);
+    const [teamsSelected, setTeamsSelected] = useState(false);
 
     // Permission & Modal States
-    const [toolPermissions, setToolPermissions] = useState<any[]>([]);
-    const [workerPermissions, setWorkerPermissions] = useState<any[]>([]);
-    const [sandboxPermissions, setSandboxPermissions] = useState<any[]>([]);
-    const [showCostWarning, setShowCostWarning] = useState(false);
-    const [showIdeOnboarding, setShowIdeOnboarding] = useState(!getSettings().onboardingComplete);
-    const [lspRecommendation, setLspRecommendation] = useState<any>(null);
+    const [_toolPermissions, setToolPermissions] = useState<any[]>([]);
+    const [_workerPermissions, _setWorkerPermissions] = useState<any[]>([]);
+    const [_sandboxPermissions, _setSandboxPermissions] = useState<any[]>([]);
+    const [_showCostWarning, setShowCostWarning] = useState(false);
+    const [_showIdeOnboarding, _setShowIdeOnboarding] = useState(!getSettings().onboardingComplete);
+    const [lspRecommendation] = useState<any>(null);
     const [cost, setCost] = useState(0);
-    const [usage, setUsage] = useState({ inputTokens: 0, outputTokens: 0 });
+    const [usage, _setUsage] = useState({ inputTokens: 0, outputTokens: 0 });
     const [mcpTools, setMcpTools] = useState<any[]>([]);
-    const [subscription, setSubscription] = useState<string>('');
-    const [scrollOffset, setScrollOffset] = useState(0);
+    const [_subscription, setSubscription] = useState<string>('');
+    const [scrollOffset, _setScrollOffset] = useState(0);
 
     const costThreshold = 0.50;
 
@@ -106,19 +110,82 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
         });
     }, []);
 
+    const cycleMode = useCallback(() => {
+        const modes = ['default', 'acceptEdits', 'plan'];
+        const currentMode = appState.toolPermissionContext.mode;
+        const currentIndex = modes.indexOf(currentMode);
+        const nextMode = modes[(currentIndex + 1) % modes.length];
+        updateAppState(prev => ({
+            ...prev,
+            toolPermissionContext: { ...prev.toolPermissionContext, mode: nextMode as any }
+        }));
+    }, [appState.toolPermissionContext.mode, updateAppState]);
+
+    const cycleScreen = useCallback((direction: 'up' | 'down') => {
+        // Original carousel logic
+        const availableScreens = ['prompt'];
+        if (diffSelected) availableScreens.push('diff');
+        if (tasksSelected) availableScreens.push('tasks');
+        if (loopSelected) availableScreens.push('loop');
+        if (teamsSelected) availableScreens.push('teams');
+
+        const currentActive = tasksSelected ? 'tasks' : loopSelected ? 'loop' : teamsSelected ? 'teams' : 'prompt'; // Simplified check
+        const currentIndex = availableScreens.indexOf(currentActive);
+        let nextIndex;
+        if (direction === 'up') {
+            nextIndex = (currentIndex + 1) % availableScreens.length;
+        } else {
+            nextIndex = (currentIndex - 1 + availableScreens.length) % availableScreens.length;
+        }
+
+        const nextScreen = availableScreens[nextIndex];
+        setTasksSelected(nextScreen === 'tasks');
+        setLoopSelected(nextScreen === 'loop');
+        setTeamsSelected(nextScreen === 'teams');
+        // diffSelected remains true if it was true, just toggle visibility
+    }, [tasksSelected, loopSelected, teamsSelected, diffSelected]);
+
+    useInput((input, key) => {
+        if (key.tab && key.shift) {
+            if (appState.toolPermissionContext.mode === 'plan') {
+                updateAppState(prev => ({
+                    ...prev,
+                    toolPermissionContext: { ...prev.toolPermissionContext, mode: 'acceptEdits' }
+                }));
+            } else {
+                cycleMode();
+            }
+        }
+        if (key.meta && (key.upArrow || key.downArrow)) {
+            cycleScreen(key.upArrow ? 'up' : 'down');
+        }
+    });
+
     const handleSubmit = useCallback(async (input: string) => {
         if (isTyping || !input.trim()) return;
 
         if (input.startsWith('/')) {
             const handled = await SlashCommandDispatcher.handleCommand(input, {
                 setMessages,
-                setPlanMode,
                 setVimModeEnabled,
-                setShowTasks: () => { }, // placeholder
+                setShowTasks: () => setTasksSelected(true),
+                setPlanMode: (updater: any) => updateAppState(prev => {
+                    const currentPlan = prev.toolPermissionContext.mode === 'plan';
+                    const nextPlan = typeof updater === 'function' ? updater(currentPlan) : updater;
+                    return {
+                        ...prev,
+                        toolPermissionContext: { ...prev.toolPermissionContext, mode: nextPlan ? 'plan' : 'default' }
+                    };
+                }),
                 setIsTyping,
                 exit,
                 cwd: process.cwd(),
-                setCurrentMenu,
+                setCurrentMenu: (menu: any, options?: any) => {
+                    if (menu === 'config' && options?.tab) {
+                        setSettingsTab(options.tab);
+                    }
+                    setCurrentMenu(menu);
+                },
                 setBugReportInitialDescription,
                 messages
             });
@@ -173,15 +240,14 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
     }, [isTyping, mcpTools, appState.verbose, model, agent, handlePermissionRequest, exit, messages]);
 
     const activeScreen = useMemo(() => {
-        if (showCostWarning) return 'cost';
-        if (toolPermissions.length > 0) return 'tool-permission';
-        if (workerPermissions.length > 0) return 'worker-permission';
-        if (sandboxPermissions.length > 0) return 'sandbox-permission';
-        if (showIdeOnboarding) return 'ide-onboarding';
         if (lspRecommendation) return 'lsp-recommendation';
+        if (tasksSelected) return 'tasks';
+        if (diffSelected) return 'diff';
+        if (loopSelected) return 'loop';
+        if (teamsSelected) return 'teams';
         if (currentMenu) return currentMenu;
-        return 'transcript';
-    }, [showCostWarning, toolPermissions, workerPermissions, sandboxPermissions, showIdeOnboarding, lspRecommendation, currentMenu]);
+        return screen;
+    }, [lspRecommendation, tasksSelected, diffSelected, loopSelected, teamsSelected, currentMenu, screen]);
 
     const termSize = useTermSize();
 
@@ -199,12 +265,18 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
 
             <REPLHeader
                 screen={screen}
-                setScreen={setScreen as any}
-                setScreenToggleId={() => { }}
-                setShowAllInTranscript={() => setShowAllInTranscript(prev => !prev)}
-                onEnterTranscript={() => setScreen('transcript')}
-                onExitTranscript={() => setScreen('prompt')}
-                todos={[]}
+                setScreen={setScreen}
+                setScreenToggleId={setScreenToggleId}
+                setShowAllInTranscript={setShowAllInTranscript}
+                onEnterTranscript={() => {
+                    setScreen('transcript');
+                    setScreenToggleId(prev => prev + 1);
+                }}
+                onExitTranscript={() => {
+                    setScreen('prompt');
+                    setScreenToggleId(prev => prev + 1);
+                }}
+                todos={appState.tasks[appState.viewingAgentTaskId || ""]?.steps || []}
                 agentName={selectedAgent || agent}
             />
 
@@ -221,18 +293,21 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                 ) : (
                     <Box flexGrow={1} flexDirection="column">
                         {activeScreen === 'cost' && <CostThresholdDialog onApprove={() => setShowCostWarning(false)} onExit={() => exit()} cost={cost} threshold={costThreshold} />}
-                        {activeScreen === 'config' && <SettingsMenu onExit={() => setCurrentMenu(null)} initialTab="Config" />}
+                        {activeScreen === 'config' && <SettingsMenu onExit={() => setCurrentMenu(null)} initialTab={settingsTab} />}
                         {activeScreen === 'mcp' && <McpMenu onExit={async () => setCurrentMenu(null)} />}
                         {activeScreen === 'marketplace' && <MarketplaceMenu onExit={() => setCurrentMenu(null)} />}
                         {activeScreen === 'resources' && <ResourceMenu onExit={() => setCurrentMenu(null)} />}
                         {activeScreen === 'prompts' && <PromptMenu onExit={() => setCurrentMenu(null)} />}
                         {activeScreen === 'agents' && <AgentsMenu onSelect={setSelectedAgent} onExit={() => setCurrentMenu(null)} />}
                         {activeScreen === 'bug' && <BugReportCommand messages={messages} initialDescription={bugReportInitialDescription} onDone={() => setCurrentMenu(null)} />}
-                        {activeScreen === 'doctor' && <DoctorCommand onDone={() => setCurrentMenu(null)} />}
+                        {activeScreen === 'doctor' && <Doctor onExit={() => setCurrentMenu(null)} />}
                         {activeScreen === 'compact' && <CompactCommand messages={messages} setMessages={setMessages} setIsTyping={setIsTyping} onDone={() => setCurrentMenu(null)} />}
                         {activeScreen === 'memory' && <MemoryCommand cwd={process.cwd()} onDone={() => setCurrentMenu(null)} />}
                         {activeScreen === 'cost-menu' && <CostCommand onDone={() => setCurrentMenu(null)} />}
+                        {activeScreen === 'remote-env' && <RemoteEnvMenu onExit={() => setCurrentMenu(null)} />}
                         {activeScreen === 'model' && <ModelPicker initialModel={model || null} onSelect={() => setCurrentMenu(null)} onCancel={() => setCurrentMenu(null)} isStandalone={true} />}
+                        {activeScreen === 'tasks' && <TaskMenu onExit={() => setTasksSelected(false)} />}
+                        {activeScreen === 'loop' && <LoopMenu onExit={() => setLoopSelected(false)} />}
                         {activeScreen === 'search' && <UnifiedSearchMenu
                             history={history}
                             commands={commandRegistry.getAllCommands().map(c => ({
@@ -247,7 +322,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
                 )}
             </Box>
 
-            <REPLInput onSubmit={handleSubmit} isActive={activeScreen === 'transcript'}>
+            <REPLInput onSubmit={handleSubmit} isActive={activeScreen === 'prompt' || activeScreen === 'transcript'}>
                 <TerminalInput
                     value={inputValue}
                     onChange={setInputValue}
@@ -260,15 +335,19 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt, verbose, model, agent
             </REPLInput>
 
             <StatusLine
-                vimMode="INSERT"
-                vimModeEnabled={false}
-                model={model || 'Sonnet 4.5'}
+                vimMode={currentVimMode as any}
+                vimModeEnabled={vimModeEnabled}
+                model={model || ''}
                 isTyping={isTyping}
                 cwd={process.cwd()}
-                showTasks={false}
+                showTasks={tasksSelected}
+                showDiff={diffSelected}
+                showLoop={loopSelected}
+                showTeams={teamsSelected}
                 usage={usage}
-                planMode={false}
-                exitConfirmation={false}
+                planMode={appState.toolPermissionContext.mode === 'plan'}
+                acceptEdits={appState.toolPermissionContext.mode === 'acceptEdits'}
+                exitConfirmation={!!exitConfirmation}
             />
         </Box>
     );

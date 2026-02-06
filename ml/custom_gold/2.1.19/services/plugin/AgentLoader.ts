@@ -5,6 +5,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
+import matter from 'gray-matter';
 
 export interface AgentDefinition {
     name: string;
@@ -12,6 +13,11 @@ export interface AgentDefinition {
     type: string;
     systemPrompt: string;
     source: 'plugin';
+    description?: string;
+    tools?: string[];
+    model?: string;
+    userInvocable?: boolean;
+    // Add other fields as needed based on SKILL.md structure
 }
 
 /**
@@ -40,20 +46,24 @@ export function loadAgentsFromDirectory(directoryPath: string, pluginName: strin
 
 /**
  * Parses an individual Markdown file into an agent definition.
- * 
- * TODO: Implement real frontmatter parsing if needed.
  */
 function loadAgentFromFile(filePath: string, pluginName: string): AgentDefinition | null {
     try {
         const content = readFileSync(filePath, 'utf-8');
+        const parsed = matter(content);
         const agentName = basename(filePath).replace('.md', '');
+        const data = parsed.data || {};
 
         return {
-            name: agentName,
+            name: data.name || agentName,
             plugin: pluginName,
             type: `${pluginName}:${agentName}`,
-            systemPrompt: content,
-            source: 'plugin'
+            systemPrompt: parsed.content.trim(),
+            source: 'plugin',
+            description: data.description,
+            tools: data.tools ? (Array.isArray(data.tools) ? data.tools : data.tools.split(',').map((t: string) => t.trim())) : [],
+            model: data.model,
+            userInvocable: data['user-invocable'] !== false // Default to true if not specified
         };
     } catch (err: any) {
         console.error(`[AgentLoader] Failed to load agent from ${filePath}: ${err.message}`);
