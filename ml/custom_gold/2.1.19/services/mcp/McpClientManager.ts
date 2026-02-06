@@ -19,6 +19,11 @@ interface ActiveClient {
     config: McpServerConfig;
     capabilities: any;
     cleanup: () => Promise<void>;
+    cache: {
+        tools?: any[];
+        prompts?: any[];
+        resources?: any[];
+    };
 }
 
 /**
@@ -137,7 +142,7 @@ export class McpClientManager {
             const capabilities = client.getServerCapabilities();
             console.log(`[MCP] Connected to ${serverId}. Capabilities:`, capabilities);
 
-            this.activeClients.set(serverId, {
+            const activeClient: ActiveClient = {
                 client,
                 transport,
                 config: expandedConfig,
@@ -148,8 +153,37 @@ export class McpClientManager {
                     } catch {
                         // ignore errors on close
                     }
-                }
-            });
+                },
+                cache: {}
+            };
+
+            // Register notification handlers for list_changed
+            if (capabilities?.tools?.listChanged) {
+                client.setNotificationHandler({ method: "notifications/tools/list_changed" } as any, async () => {
+                    console.log(`[MCP] Received tools/list_changed from ${serverId}, refreshing...`);
+                    activeClient.cache.tools = undefined;
+                    // Proactively refresh tools
+                    await this.getToolsForClient(serverId);
+                });
+            }
+
+            if (capabilities?.prompts?.listChanged) {
+                client.setNotificationHandler({ method: "notifications/prompts/list_changed" } as any, async () => {
+                    console.log(`[MCP] Received prompts/list_changed from ${serverId}, refreshing...`);
+                    activeClient.cache.prompts = undefined;
+                    await this.getPromptsForClient(serverId);
+                });
+            }
+
+            if (capabilities?.resources?.listChanged) {
+                client.setNotificationHandler({ method: "notifications/resources/list_changed" } as any, async () => {
+                    console.log(`[MCP] Received resources/list_changed from ${serverId}, refreshing...`);
+                    activeClient.cache.resources = undefined;
+                    await this.getResourcesForClient(serverId);
+                });
+            }
+
+            this.activeClients.set(serverId, activeClient);
 
         } catch (error) {
             console.error(`[MCP] Failed to connect to ${serverId}:`, error);
@@ -235,52 +269,70 @@ export class McpClientManager {
      */
     async getTools(): Promise<any[]> {
         const allTools: any[] = [];
-        const toolTimeout = Number(EnvService.get('MCP_TOOL_TIMEOUT')) || 300000; // 5 min default
-
-        for (const [serverId, active] of this.activeClients.entries()) {
-            try {
-                const toolsResult = await active.client.listTools();
-                const adaptedTools = toolsResult.tools.map(tool => ({
-                    name: tool.name,
-                    description: tool.description,
-                    input_schema: tool.inputSchema,
-                    serverId,
-                    call: async (input: any) => {
-                        const callPromise = active.client.callTool({
-                            name: tool.name,
-                            arguments: input
-                        });
-
-                        const result = await new Promise<any>((resolve, reject) => {
-                            const timer = setTimeout(() => {
-                                reject(new Error(`MCP tool execution timed out after ${toolTimeout}ms`));
-                            }, toolTimeout);
-
-                            callPromise.then((res) => {
-                                clearTimeout(timer);
-                                resolve(res);
-                            }).catch((err) => {
-                                clearTimeout(timer);
-                                reject(err);
-                            });
-                        });
-
-                        if (result.content && Array.isArray(result.content)) {
-                            return result.content.map((c: any) => {
-                                if (c.type === 'text') return c.text;
-                                if (c.type === 'image') return `[Image: ${c.mimeType}]`;
-                                return JSON.stringify(c);
-                            }).join('\n');
-                        }
-                        return JSON.stringify(result);
-                    }
-                }));
-                allTools.push(...adaptedTools);
-            } catch (err) {
-                console.error(`[MCP] Failed to list tools for ${serverId}:`, err);
-            }
+        for (const serverId of this.activeClients.keys()) {
+            const tools = await this.getToolsForClient(serverId);
+            allTools.push(...tools);
         }
         return allTools;
+    }
+
+    /**
+     * Gets tools for a specific client, using cache if available.
+     */
+    async getToolsForClient(serverId: string): Promise<any[]> {
+        const active = this.activeClients.get(serverId);
+        if (!active) return [];
+
+        if (active.cache.tools) {
+            return active.cache.tools;
+        }
+
+        try {
+            const toolTimeout = Number(EnvService.get('MCP_TOOL_TIMEOUT')) || 300000;
+            const toolsResult = await active.client.listTools();
+            const adaptedTools = toolsResult.tools.map(tool => ({
+                name: tool.name,
+                description: tool.description,
+                input_schema: tool.inputSchema,
+                serverId,
+                isMcp: true, // Mark as MCP tool for deferred search logic
+                prompt: async () => tool.description || "", // Simple prompt implementation
+                call: async (input: any) => {
+                    const callPromise = active.client.callTool({
+                        name: tool.name,
+                        arguments: input
+                    });
+
+                    const result = await new Promise<any>((resolve, reject) => {
+                        const timer = setTimeout(() => {
+                            reject(new Error(`MCP tool execution timed out after ${toolTimeout}ms`));
+                        }, toolTimeout);
+
+                        callPromise.then((res) => {
+                            clearTimeout(timer);
+                            resolve(res);
+                        }).catch((err) => {
+                            clearTimeout(timer);
+                            reject(err);
+                        });
+                    });
+
+                    if (result.content && Array.isArray(result.content)) {
+                        return result.content.map((c: any) => {
+                            if (c.type === 'text') return c.text;
+                            if (c.type === 'image') return `[Image: ${c.mimeType}]`;
+                            return JSON.stringify(c);
+                        }).join('\n');
+                    }
+                    return JSON.stringify(result);
+                }
+            }));
+            active.cache.tools = adaptedTools;
+            return adaptedTools;
+        } catch (err) {
+            console.error(`[MCP] Failed to list tools for ${serverId}:`, err);
+            return [];
+        }
     }
 
     /**
@@ -288,18 +340,36 @@ export class McpClientManager {
      */
     async getResources(): Promise<any[]> {
         const allResources: any[] = [];
-        for (const [serverId, active] of this.activeClients.entries()) {
-            try {
-                const capabilities = active.client.getServerCapabilities();
-                if (capabilities?.resources) {
-                    const res = await active.client.listResources();
-                    allResources.push(...res.resources.map(r => ({ ...r, serverId })));
-                }
-            } catch (err) {
-                console.error(`[MCP] Failed to list resources for ${serverId}:`, err);
-            }
+        for (const serverId of this.activeClients.keys()) {
+            const resources = await this.getResourcesForClient(serverId);
+            allResources.push(...resources);
         }
         return allResources;
+    }
+
+    /**
+     * Gets resources for a specific client, using cache if available.
+     */
+    async getResourcesForClient(serverId: string): Promise<any[]> {
+        const active = this.activeClients.get(serverId);
+        if (!active) return [];
+
+        if (active.cache.resources) {
+            return active.cache.resources;
+        }
+
+        try {
+            const capabilities = active.client.getServerCapabilities();
+            if (capabilities?.resources) {
+                const res = await active.client.listResources();
+                const resourcesWithId = res.resources.map(r => ({ ...r, serverId }));
+                active.cache.resources = resourcesWithId;
+                return resourcesWithId;
+            }
+        } catch (err) {
+            console.error(`[MCP] Failed to list resources for ${serverId}:`, err);
+        }
+        return [];
     }
 
     /**
@@ -307,18 +377,36 @@ export class McpClientManager {
      */
     async getPrompts(): Promise<any[]> {
         const allPrompts: any[] = [];
-        for (const [serverId, active] of this.activeClients.entries()) {
-            try {
-                const capabilities = active.client.getServerCapabilities();
-                if (capabilities?.prompts) {
-                    const res = await active.client.listPrompts();
-                    allPrompts.push(...res.prompts.map(p => ({ ...p, serverId })));
-                }
-            } catch (err) {
-                console.error(`[MCP] Failed to list prompts for ${serverId}:`, err);
-            }
+        for (const serverId of this.activeClients.keys()) {
+            const prompts = await this.getPromptsForClient(serverId);
+            allPrompts.push(...prompts);
         }
         return allPrompts;
+    }
+
+    /**
+     * Gets prompts for a specific client, using cache if available.
+     */
+    async getPromptsForClient(serverId: string): Promise<any[]> {
+        const active = this.activeClients.get(serverId);
+        if (!active) return [];
+
+        if (active.cache.prompts) {
+            return active.cache.prompts;
+        }
+
+        try {
+            const capabilities = active.client.getServerCapabilities();
+            if (capabilities?.prompts) {
+                const res = await active.client.listPrompts();
+                const promptsWithId = res.prompts.map(p => ({ ...p, serverId }));
+                active.cache.prompts = promptsWithId;
+                return promptsWithId;
+            }
+        } catch (err) {
+            console.error(`[MCP] Failed to list prompts for ${serverId}:`, err);
+        }
+        return [];
     }
 
     /**

@@ -11,6 +11,7 @@ import { registerAgent, loadAgent } from '../agents/AgentPersistence.js';
 import { hookService } from '../hooks/HookService.js';
 import matter from 'gray-matter';
 import { terminalLog } from '../../utils/shared/runtime.js';
+import { EnvService } from '../config/EnvService.js';
 
 /**
  * Scope for configuration.
@@ -30,6 +31,7 @@ export interface PluginInstallation {
     enabled: boolean;
     repository?: string;
     source?: string;
+    ref?: string;
 }
 
 /**
@@ -145,7 +147,31 @@ export class PluginManager {
                 source: "plugin",
                 getPromptForCommand: async (args) => {
                     let prompt = parsed.content;
+
+                    // Support ${CLAUDE_SESSION_ID}
+                    const sessionId = EnvService.get("CLAUDE_SESSION_ID") || "";
+                    prompt = prompt.replace(/\$\{CLAUDE_SESSION_ID\}/g, sessionId);
+
                     if (args) {
+                        // Support $0, $1, $ARGUMENTS[0], etc.
+                        // Simplified tokenization: split by space, but handle quotes if needed?
+                        // Gold reference uses clearConversation_37(K) which uses mz(A, q => `$${q}`)
+                        // For now, let's do a simple split.
+                        const tokens = args.split(/\s+/).filter(Boolean);
+
+                        // Replace $0, $1, ...
+                        prompt = prompt.replace(/\$(\d+)(?!\w)/g, (_match: string, index: string) => {
+                            const idx = parseInt(index, 10);
+                            return tokens[idx] ?? "";
+                        });
+
+                        // Replace $ARGUMENTS[0], $ARGUMENTS[1], ...
+                        prompt = prompt.replace(/\$ARGUMENTS\[(\d+)\]/g, (_match: string, index: string) => {
+                            const idx = parseInt(index, 10);
+                            return tokens[idx] ?? "";
+                        });
+
+                        // Original $ARGUMENTS replacement
                         prompt = prompt.replace(/\$ARGUMENTS/g, args);
                     }
                     return [{ type: 'text', text: prompt }];
@@ -295,7 +321,8 @@ export class PluginManager {
                     installPath: (config as any).installPath || '',
                     enabled: (config as any).enabled !== false,
                     repository: (config as any).repository,
-                    source: (config as any).source
+                    source: (config as any).source,
+                    ref: (config as any).ref
                 });
             }
         }
@@ -360,6 +387,17 @@ export class PluginManager {
                 try {
                     oldVersion = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).version || '0.0.0';
                 } catch { }
+            }
+
+            const ref = (config as any).ref;
+            if (ref) {
+                console.log(`[Plugins] Checking out pinned ref: ${ref}`);
+                try {
+                    const { execSync } = await import('child_process');
+                    execSync(`git checkout ${ref}`, { cwd: installPath, stdio: 'ignore' });
+                } catch (e) {
+                    console.error(`[Plugins] Failed to checkout ref ${ref}: ${(e as Error).message}`);
+                }
             }
 
             // Perform pull and capture output
@@ -458,6 +496,12 @@ export class PluginManager {
                 } else {
                     await gitClone(repoUrl, installPath);
                 }
+
+                if (plugin.ref) {
+                    console.log(`[Plugins] Checking out ref: ${plugin.ref}`);
+                    const { execSync } = await import('child_process');
+                    execSync(`git checkout ${plugin.ref}`, { cwd: installPath, stdio: 'ignore' });
+                }
             } catch (e) {
                 return { success: false, message: `Failed to clone repository: ${(e as Error).message}` };
             }
@@ -544,7 +588,8 @@ export class PluginManager {
                 enabled: true,
                 installPath, // Store install path for updates
                 source: plugin.source,
-                repository: plugin.repository
+                repository: plugin.repository,
+                ref: plugin.ref
             } as any, scope as any);
 
             // 4. Auto-connect after install

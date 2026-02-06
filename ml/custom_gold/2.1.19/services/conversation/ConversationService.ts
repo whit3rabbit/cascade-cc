@@ -16,6 +16,7 @@ import { ModelResolver } from "./ModelResolver.js";
 
 import { findAgent } from "../agents/AgentPersistence.js";
 import { mcpClientManager } from "../mcp/McpClientManager.js";
+import { ToolSearchService } from "../mcp/ToolSearchService.js";
 
 export interface ConversationOptions {
     commands: any[];
@@ -227,8 +228,28 @@ export class ConversationService {
             content: m.content
         }));
 
+        const allAvailableTools = options.tools || [];
+        const mcpTools = allAvailableTools.filter((t: any) => t.isMcp);
+        const builtInTools = allAvailableTools.filter((t: any) => !t.isMcp);
+
+        let toolsToPass = allAvailableTools;
+        const model = ModelResolver.resolveModel(options.model || "claude-3-5-sonnet-20241022", !!options.planMode);
+
+        if (mcpTools.length > 0 && await ToolSearchService.shouldEnableToolSearch(model, mcpTools)) {
+            const toolSearchTool = ToolSearchService.getToolSearchTool(allAvailableTools);
+            const discoveredToolNames = ToolSearchService.getDiscoveredTools(messages);
+            const discoveredTools = mcpTools.filter((t: any) => discoveredToolNames.has(t.name));
+
+            // Add toolSearchTool and discovered tools to builtInTools for passing to LLM
+            toolsToPass = [...builtInTools, toolSearchTool, ...discoveredTools];
+
+            // We must update options.tools so that executeTools can find the tool definition for ToolSearch
+            options.tools = [...allAvailableTools, toolSearchTool];
+        }
+
+
         const tools = [
-            ...(options.tools || []).map((t: any) => ({
+            ...toolsToPass.map((t: any) => ({
                 name: t.name,
                 description: t.description,
                 input_schema: t.input_schema || t.parameters

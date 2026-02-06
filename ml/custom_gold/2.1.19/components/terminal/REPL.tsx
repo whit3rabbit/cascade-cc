@@ -39,6 +39,7 @@ import { costService } from '../../services/terminal/CostService.js';
 import { hookService } from '../../services/hooks/HookService.js';
 import { useAppState } from '../../hooks/useAppState.js';
 import { useTermSize } from '../../hooks/useTermSize.js';
+import { addToPromptHistory } from '../../services/terminal/HistoryService.js';
 
 export interface REPLProps {
     initialPrompt?: string;
@@ -201,6 +202,7 @@ export const REPL: React.FC<REPLProps> = ({ initialPrompt: _initialPrompt, verbo
 
         setIsTyping(true);
         setHistory(prev => [...prev, input]);
+        addToPromptHistory({ display: input, project: process.cwd() }).catch(() => { });
         setMessages(prev => [...prev, { role: 'user', content: input }]);
 
         try {

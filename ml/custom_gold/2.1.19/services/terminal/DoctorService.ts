@@ -19,6 +19,7 @@ export interface DiagnosticInfo {
     configInstallMethod: string;
     autoUpdates: string;
     updateChannel: string;
+    autoUpdatesChannel: string;
     hasUpdatePermissions: boolean | null;
     multipleInstallations: Array<{ type: string; path: string }>;
     warnings: Array<{ issue: string; fix: string }>;
@@ -236,9 +237,10 @@ export class DoctorService {
             installationPath,
             invokedBinary,
             configInstallMethod,
-            autoUpdates: "enabled",
+            autoUpdates: updateInfo?.latestVersion && updateInfo?.latestVersion !== version ? 'available' : 'latest',
             updateChannel,
-            hasUpdatePermissions: true,
+            autoUpdatesChannel: updateChannel,
+            hasUpdatePermissions: await DoctorService.checkUpdatePermissions(),
             multipleInstallations: [],
             warnings,
             ripgrepStatus: rgStatus,
@@ -250,5 +252,17 @@ export class DoctorService {
             versionLocks,
             sessionMetrics
         };
+    }
+
+    private static async checkUpdatePermissions(): Promise<boolean> {
+        try {
+            const { access } = await import('fs/promises');
+            const { constants } = await import('fs');
+            const installPath = process.execPath;
+            await access(installPath, constants.W_OK);
+            return true;
+        } catch {
+            return false;
+        }
     }
 }

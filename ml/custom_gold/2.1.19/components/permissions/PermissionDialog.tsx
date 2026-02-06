@@ -24,6 +24,9 @@ export const PermissionDialog: React.FC<UsePermissionDialogProps> = (props) => {
         props.toolUseConfirm.tool.name === 'repl_replace' ||
         props.toolUseConfirm.tool.name === 'replace_file_content';
 
+    const isFileWrite = props.toolUseConfirm.tool.name === 'FileWrite' ||
+        props.toolUseConfirm.tool.name === 'write_to_file';
+
     let edits: { old_string: string; new_string: string; replace_all: boolean }[] = [];
     if (isFileEdit && props.toolUseConfirm.input) {
         const { old_string, new_string, replace_all } = props.toolUseConfirm.input;
@@ -62,12 +65,18 @@ export const PermissionDialog: React.FC<UsePermissionDialogProps> = (props) => {
                             {edits.map((edit, i) => (
                                 <StructuredDiff
                                     key={i}
-                                    filePath={props.toolUseConfirm.input?.file_path || props.toolUseConfirm.input?.TargetFile}
+                                    filePath={props.toolUseConfirm.input?.file_path || props.toolUseConfirm.input?.TargetFile || props.toolUseConfirm.input?.AbsolutePath}
                                     oldContent={edit.old_string}
                                     newContent={edit.new_string}
                                 />
                             ))}
                         </Box>
+                    ) : isFileWrite ? (
+                        <StructuredDiff
+                            filePath={props.toolUseConfirm.input?.file_path || props.toolUseConfirm.input?.TargetFile || props.toolUseConfirm.input?.AbsolutePath}
+                            newContent={props.toolUseConfirm.input?.content ?? ''}
+                            mode="write"
+                        />
                     ) : (
                         <Box borderStyle="single" borderColor="gray" paddingX={1}>
                             <Text dimColor>{JSON.stringify(props.toolUseConfirm.input, null, 2)}</Text>

@@ -3,14 +3,33 @@
  * Role: Provides utilities for managing the iTerm2 progress bar.
  */
 
-import { EnvService } from "../../services/config/EnvService.js";
+import semver from "semver";
+
+function supportsIterm2Progress(): boolean {
+    if (!process.stdout.isTTY) return false;
+    if (process.env.WT_SESSION) return false;
+    if (process.env.ConEmuANSI || process.env.ConEmuPID || process.env.ConEmuTask) return true;
+
+    const version = semver.coerce(process.env.TERM_PROGRAM_VERSION || "");
+    if (!version) return false;
+
+    if (process.env.TERM_PROGRAM === "ghostty") {
+        return semver.gte(version, "1.2.0");
+    }
+
+    if (process.env.TERM_PROGRAM === "iTerm.app") {
+        return semver.gte(version, "3.6.6");
+    }
+
+    return false;
+}
 
 /**
  * Sets the iTerm2 progress bar value.
  * @param value - Progress percentage (0-100), or -1 to clear.
  */
 export function setIterm2Progress(value: number): void {
-    if (EnvService.get("TERM_PROGRAM") !== "iTerm.app") return;
+    if (!supportsIterm2Progress()) return;
 
     if (value < 0) {
         clearIterm2Progress();
@@ -27,7 +46,7 @@ export function setIterm2Progress(value: number): void {
  * Sets the iTerm2 progress bar to "busy" (indeterminate) mode.
  */
 export function setIterm2Busy(busy: boolean): void {
-    if (EnvService.get("TERM_PROGRAM") !== "iTerm.app") return;
+    if (!supportsIterm2Progress()) return;
 
     if (busy) {
         process.stdout.write('\x1b]9;4;1\x07');
@@ -40,7 +59,7 @@ export function setIterm2Busy(busy: boolean): void {
  * Clears the iTerm2 progress bar.
  */
 export function clearIterm2Progress(): void {
-    if (EnvService.get("TERM_PROGRAM") !== "iTerm.app") return;
+    if (!supportsIterm2Progress()) return;
 
     process.stdout.write('\x1b]9;4;0\x07');
 }

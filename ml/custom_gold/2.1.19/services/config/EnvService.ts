@@ -292,9 +292,42 @@ export class EnvService {
     }
 
     /**
-     * Override a config value (mostly for testing).
+     * Parse the ENABLE_TOOL_SEARCH setting and return the percentage if it's in auto:N format.
      */
-    static setOverride(key: keyof EnvConfig, value: any): void {
-        this.config[key] = value;
+    static getToolSearchAutoPercentage(value: string): number | null {
+        if (!value.startsWith("auto:")) {
+            return null;
+        }
+        const percentageStr = value.slice(5);
+        const percentage = parseInt(percentageStr, 10);
+        if (isNaN(percentage)) {
+            console.warn(`[Config] Invalid ENABLE_TOOL_SEARCH value "${value}": expected auto:N where N is a number.`);
+            return null;
+        }
+        return Math.max(0, Math.min(100, percentage));
+    }
+
+    /**
+     * Returns the token threshold for tool search based on context window.
+     */
+    static getToolSearchThreshold(contextWindow: number): number {
+        const setting = this.get('ENABLE_TOOL_SEARCH') || 'auto';
+        if (setting === 'auto') {
+            return Math.floor(contextWindow * 0.1); // Default 10%
+        }
+        const percentage = this.getToolSearchAutoPercentage(setting);
+        if (percentage !== null) {
+            return Math.floor(contextWindow * (percentage / 100));
+        }
+        return Math.floor(contextWindow * 0.1); // Fallback to 10%
+    }
+
+    /**
+     * Returns the character threshold for tool search based on token threshold.
+     */
+    static getToolSearchCharThreshold(tokenThreshold: number): number {
+        // Based on reference code discovery: nW2 = 2.5
+        return Math.floor(tokenThreshold * 2.5);
     }
 }
+

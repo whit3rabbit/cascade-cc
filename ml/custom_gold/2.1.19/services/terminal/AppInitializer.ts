@@ -18,6 +18,7 @@ import { mcpClientManager } from '../mcp/McpClientManager.js';
 import { initTreeSitter } from '../../utils/shared/treeSitter.js';
 import { MailboxPollingService } from '../teams/MailboxPollingService.js';
 import { getLeaderPaneId } from '../../utils/terminal/terminalDetection.js';
+import { setupCleanupHandlers } from '../../utils/cleanup.js';
 
 
 
@@ -46,6 +47,7 @@ export async function initializeApp(): Promise<{ isFirstRun: boolean }> {
     let isFirstRun = false;
     try {
         // 0. Shell Snapshot
+        setupCleanupHandlers();
         await createShellSnapshot(EnvService.get("SHELL"));
 
         // 1. Settings first

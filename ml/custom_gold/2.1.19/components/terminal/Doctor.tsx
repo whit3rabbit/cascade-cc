@@ -60,10 +60,13 @@ export const Doctor: React.FC<DoctorProps> = ({ onExit }) => {
 
             <Box flexDirection="column" marginBottom={1}>
                 <Text bold>Updates</Text>
-                <Text>└ Auto-updates: {diagnostics.packageManager ? 'Managed by package manager' : diagnostics.autoUpdates}</Text>
-                <Text>└ Auto-update channel: {diagnostics.updateChannel}</Text>
-                <Text>└ Stable version: {diagnostics.stableVersion || 'unknown'}</Text>
-                <Text>└ Latest version: {diagnostics.latestVersion || 'unknown'}</Text>
+                <Text>└ Auto-updates: {diagnostics.packageManager ? 'Managed by package manager' : diagnostics.autoUpdates || 'latest'}</Text>
+                <Text>└ Update permissions: {diagnostics.hasUpdatePermissions ? 'Yes' : 'No (requires sudo or admin)'}</Text>
+                <Text>└ Auto-update channel: {diagnostics.autoUpdatesChannel || 'latest'}</Text>
+                <Box marginLeft={2} flexDirection="column">
+                    <Text>└ Stable: {diagnostics.stableVersion || 'Checking...'}</Text>
+                    <Text>└ Latest: {diagnostics.latestVersion || 'Checking...'}</Text>
+                </Box>
             </Box>
 
             <Box flexDirection="column" marginBottom={1}>

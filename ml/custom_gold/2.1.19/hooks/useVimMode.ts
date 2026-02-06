@@ -150,6 +150,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
         for (let i = 0; i < count; i++) {
             if (k >= value.length) break;
             const char = value[k];
+            if (char === undefined) break;
             if (isWordChar(char)) {
                 while (k < value.length && isWordChar(value[k])) k++;
             } else if (isPunctuation(char)) {
@@ -157,8 +158,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
             }
             while (k < value.length && isWhitespace(value[k])) k++;
         }
-        const maxOffset = Math.max(0, value.length - 1);
-        return Math.min(k, maxOffset);
+        return Math.min(k, value.length);
     }, [value]);
 
     const movePrevVimWord = useCallback((offset: number, count: number) => {
@@ -181,10 +181,13 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
     const moveEndOfVimWord = useCallback((offset: number, count: number) => {
         let k = offset;
         for (let i = 0; i < count; i++) {
-            if (k >= value.length - 1) break;
+            if (k >= value.length) break;
+            if (value[k] === undefined) break;
             k++;
             while (k < value.length && isWhitespace(value[k])) k++;
-            if (k >= value.length) break;
+            if (k >= value.length) {
+                return value.length;
+            }
             const char = value[k];
             if (isWordChar(char)) {
                 while (k < value.length - 1 && isWordChar(value[k + 1])) k++;
@@ -192,8 +195,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
                 while (k < value.length - 1 && isPunctuation(value[k + 1])) k++;
             }
         }
-        const maxOffset = Math.max(0, value.length - 1);
-        return Math.min(k, maxOffset);
+        return Math.min(k, value.length);
     }, [value]);
 
     const moveNextWORD = useCallback((offset: number, count: number) => {
@@ -202,8 +204,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
             while (k < value.length && !isWhitespace(value[k])) k++;
             while (k < value.length && isWhitespace(value[k])) k++;
         }
-        const maxOffset = Math.max(0, value.length - 1);
-        return Math.min(k, maxOffset);
+        return Math.min(k, value.length);
     }, [value]);
 
     const movePrevWORD = useCallback((offset: number, count: number) => {
@@ -219,14 +220,23 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
 
     const moveEndOfWORD = useCallback((offset: number, count: number) => {
         let k = offset;
+        const isOverWhitespace = (idx: number) => /\s/.test(value[idx] ?? '');
         for (let i = 0; i < count; i++) {
-            if (k >= value.length - 1) break;
-            k++;
-            while (k < value.length && isWhitespace(value[k])) k++;
-            while (k < value.length - 1 && !isWhitespace(value[k + 1])) k++;
+            if (k >= value.length) break;
+            if (!isOverWhitespace(k) && (k + 1 >= value.length || isOverWhitespace(k + 1))) {
+                k++;
+                i--;
+                continue;
+            }
+            if (isOverWhitespace(k)) {
+                while (k < value.length && isOverWhitespace(k)) k++;
+            }
+            if (k >= value.length) {
+                return value.length;
+            }
+            while (k + 1 < value.length && !isOverWhitespace(k + 1)) k++;
         }
-        const maxOffset = Math.max(0, value.length - 1);
-        return Math.min(k, maxOffset);
+        return Math.min(k, value.length);
     }, [value]);
 
     const getTextObjectRange = useCallback((offset: number, obj: string, scope: 'inner' | 'around') => {
@@ -379,7 +389,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
         };
 
         const clampCount = (count: number) => Math.min(count, MAX_COUNT);
-        const maxOffset = Math.max(0, value.length - 1);
+        const maxOffset = Math.max(0, value.length);
 
         const executeMotion = (motion: string, count: number, startOffset: number = cursorOffset) => {
             let offset = startOffset;
@@ -430,7 +440,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
                 }
                 case '$': {
                     const { end } = getLogicalLineBounds(startOffset);
-                    offset = Math.max(0, end - 1);
+                    offset = Math.max(0, end);
                     break;
                 }
                 case 'G': {
@@ -670,8 +680,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
         const applyOperatorMotion = (op: VimOperator, motion: string, count: number, record: boolean = true) => {
             const startOffset = cursorOffset;
             const motionOffset = executeMotion(motion, count, startOffset);
-            const allowSameSpot = (op === 'change' && (motion === 'w' || motion === 'W')) || motion === 'e' || motion === 'E' || motion === '$';
-            if (motionOffset === startOffset && !allowSameSpot) return;
+            if (motionOffset === startOffset) return;
             const range = computeOperatorRange(op, motion, count, startOffset, motionOffset);
             performOperator(op, range.from, range.to, range.linewise, {
                 type: 'operator',
@@ -684,6 +693,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
         const applyOperatorToLine = (op: VimOperator, motion: 'G' | 'gg', count: number, record: boolean = true) => {
             const startOffset = cursorOffset;
             const motionOffset = executeMotion(motion, count, startOffset);
+            if (motionOffset === startOffset) return;
             const range = computeOperatorRange(op, motion, count, startOffset, motionOffset);
             performOperator(op, range.from, range.to, range.linewise, {
                 type: 'operator',
@@ -1066,7 +1076,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
     const handleVisualModeInput = useCallback((key: any, input: string) => {
         // Very basic visual mode for now
         if (input === 'h' || key.leftArrow) setCursorOffset(Math.max(0, cursorOffset - 1));
-        if (input === 'l' || key.rightArrow) setCursorOffset(Math.min(value.length - 1, cursorOffset + 1));
+        if (input === 'l' || key.rightArrow) setCursorOffset(Math.min(value.length, cursorOffset + 1));
         if (input === 'j' || key.downArrow) {
             const { line, column } = getPosition(cursorOffset);
             setCursorOffset(getOffset(line + 1, column));
@@ -1100,6 +1110,7 @@ export function useVimMode({ enabled, onModeChange, value, onChange, cursorOffse
 
     const handleKey = useCallback((input: string, key: any) => {
         if (!enabled) return false;
+        if (key.ctrl || key.return) return false;
 
         if (mode === 'INSERT') {
             if (key.escape) {

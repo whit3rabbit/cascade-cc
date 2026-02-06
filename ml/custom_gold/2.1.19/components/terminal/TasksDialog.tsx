@@ -49,14 +49,20 @@ export const TasksDialog: React.FC<TasksDialogProps> = ({ onClose }) => {
                 {tasks.length === 0 ? (
                     <Text dimColor>No active tasks</Text>
                 ) : (
-                    tasks.map((task, index) => (
-                        <Box key={task.id}>
-                            <Text color={index === selectedIndex ? 'blue' : undefined}>
-                                {index === selectedIndex ? '> ' : '  '}
-                                [{task.status.padEnd(10)}] {task.type.padEnd(12)} - {task.description}
-                            </Text>
-                        </Box>
-                    ))
+                    tasks.map((task, index) => {
+                        const blockedCount = task.blockedBy?.length ?? 0;
+                        const statusLabel = blockedCount > 0 ? 'blocked' : task.status;
+                        const dependencySuffix = blockedCount > 0 ? ` deps:${blockedCount}` : '';
+
+                        return (
+                            <Box key={task.id}>
+                                <Text color={index === selectedIndex ? 'blue' : undefined}>
+                                    {index === selectedIndex ? '> ' : '  '}
+                                    [{statusLabel.padEnd(10)}] {task.type.padEnd(12)} - {task.description}{dependencySuffix}
+                                </Text>
+                            </Box>
+                        );
+                    })
                 )}
             </Box>
             <Box marginTop={1}>

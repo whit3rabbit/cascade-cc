@@ -26,6 +26,7 @@ export function SettingsMenu({ onExit, initialTab = 'Status' }: SettingsMenuProp
     const [settings, setSettings] = useState(getSettings());
     const [searchQuery, setSearchQuery] = useState('');
     const [statusInfo, setStatusInfo] = useState<any>({});
+    const [dateRange, setDateRange] = useState<'all' | '7d' | '30d'>('all');
 
     // Load status info on mount
     useEffect(() => {
@@ -56,8 +57,17 @@ export function SettingsMenu({ onExit, initialTab = 'Status' }: SettingsMenuProp
             cycleTab(-1);
         } else if (key.rightArrow || key.tab) {
             cycleTab(1);
+        } else if (input === 'r' && activeTab === 'Usage') {
+            cycleDateRange();
         }
     });
+
+    const cycleDateRange = () => {
+        const ranges: ('all' | '7d' | '30d')[] = ['all', '7d', '30d'];
+        const currentIndex = ranges.indexOf(dateRange);
+        const nextIndex = (currentIndex + 1) % ranges.length;
+        setDateRange(ranges[nextIndex]);
+    };
 
     const cycleTab = (direction: number) => {
         const tabs: Tab[] = ['Status', 'Config', 'Usage'];
@@ -196,10 +206,17 @@ export function SettingsMenu({ onExit, initialTab = 'Status' }: SettingsMenuProp
     const renderUsageTab = () => {
         const usageData = costService.getUsage();
         const cost = costService.calculateCost();
+        const dateRangeLabels = {
+            all: 'All time',
+            '7d': 'Last 7 days',
+            '30d': 'Last 30 days'
+        };
+
         return (
             <Box flexDirection="column" paddingX={2}>
-                <Box marginBottom={1}>
+                <Box marginBottom={1} justifyContent="space-between">
                     <Text bold underline>Session Usage Details</Text>
+                    <Text color="gray">{dateRangeLabels[dateRange]}</Text>
                 </Box>
                 <Box flexDirection="column">
                     <Box justifyContent="space-between">
@@ -218,13 +235,21 @@ export function SettingsMenu({ onExit, initialTab = 'Status' }: SettingsMenuProp
                         <Text>Cache Read Tokens:</Text>
                         <Text color="cyan">{(usageData.cacheReadTokens || 0).toLocaleString()}</Text>
                     </Box>
+
+                    {dateRange !== 'all' && (
+                        <Box marginTop={1} flexDirection="column">
+                            <Text bold>Tokens per Day</Text>
+                            <Text dimColor> (Historical data not available in this session)</Text>
+                        </Box>
+                    )}
+
                     <Box marginTop={1} borderStyle="single" borderColor="green" paddingX={1} justifyContent="space-between">
                         <Text bold>Estimated Cost:</Text>
                         <Text bold color="green">${cost.toFixed(4)}</Text>
                     </Box>
                 </Box>
                 <Box marginTop={1}>
-                    <Text dimColor>Rates vary by model. Calculations are estimates.</Text>
+                    <Text dimColor>r to cycle dates · Rates vary by model. Calculations are estimates.</Text>
                 </Box>
             </Box>
         );

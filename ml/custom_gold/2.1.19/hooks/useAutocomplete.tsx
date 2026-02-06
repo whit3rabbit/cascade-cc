@@ -11,7 +11,7 @@ import {
     suggestDirectories
 } from '../services/terminal/FileIndexService.js';
 import { Suggestion } from '../services/terminal/FileIndexService.js';
-import { getBashHistory } from '../utils/terminal/bashHistory.js';
+import { getBashHistoryCompletion } from '../utils/terminal/bashHistory.js';
 
 const DEBOUNCE_DELAY_MS = 200;
 
@@ -28,6 +28,7 @@ export interface UseAutocompleteProps {
     input: string;
     cursorOffset: number;
     mode: string;
+    agents?: any[];
     suggestionsState: SuggestionsState;
     setSuggestionsState: Dispatch<SetStateAction<SuggestionsState>>;
     suppressSuggestions?: boolean;
@@ -43,14 +44,16 @@ export function useAutocomplete({
     input,
     cursorOffset,
     mode,
+    agents = [],
     suggestionsState,
     setSuggestionsState,
     suppressSuggestions = false
 }: UseAutocompleteProps): null {
     const [, setSuggestionSourceType] = useState<string>("none");
     const lastFetchInputRef = useRef<string>("");
+    const [historyCompletion, setHistoryCompletion] = useState<{ fullCommand: string; suffix: string } | null>(null);
 
-    const clearSuggestions = useCallback(() => {
+    const clearSuggestionsOnly = useCallback(() => {
         setSuggestionsState({
             commandArgumentHint: undefined,
             suggestions: [],
@@ -58,6 +61,21 @@ export function useAutocomplete({
         });
         setSuggestionSourceType("none");
     }, [setSuggestionsState]);
+
+    const clearSuggestions = useCallback(() => {
+        clearSuggestionsOnly();
+        setHistoryCompletion(null);
+    }, [clearSuggestionsOnly]);
+
+    const getBashPrefix = useCallback((text: string) => {
+        const leadingWhitespace = text.match(/^\s*/)?.[0] ?? "";
+        const trimmed = text.slice(leadingWhitespace.length);
+        if (!trimmed.startsWith("!")) return null;
+        return {
+            leadingWhitespace,
+            prefix: trimmed.slice(1)
+        };
+    }, []);
 
     /**
      * Updates the suggestions based on the current input context and cursor position.
@@ -70,6 +88,21 @@ export function useAutocomplete({
 
         lastFetchInputRef.current = text;
         const snapshotInput = text;
+
+        const bashPrefix = getBashPrefix(text);
+        if (mode === 'prompt' && bashPrefix) {
+            if (bashPrefix.prefix.trim().length >= 2) {
+                const completion = await getBashHistoryCompletion(bashPrefix.prefix);
+                if (snapshotInput !== lastFetchInputRef.current) return;
+                setHistoryCompletion(completion);
+            } else {
+                setHistoryCompletion(null);
+            }
+            clearSuggestionsOnly();
+            return;
+        } else {
+            setHistoryCompletion(null);
+        }
 
         const textBeforeCursor = text.substring(0, offset);
         const isTrailingSpace = offset === text.length && offset > 0 && text[offset - 1] === ' ';
@@ -93,9 +126,19 @@ export function useAutocomplete({
 
         // 2. Slash command completion
         if (mode === 'prompt' && text.startsWith('/') && !text.includes(' ') && !isTrailingSpace) {
-            const suggestions = await suggestSlashCommands(text, commands);
+            const commandSuggestions = await suggestSlashCommands(text, commands);
             if (snapshotInput !== lastFetchInputRef.current) return;
 
+            const partial = text.slice(1).toLowerCase();
+            const agentSuggestions = agents
+                .filter(a => a?.name && a.name.toLowerCase().startsWith(partial))
+                .map(a => ({
+                    id: `agent-${a.name}`,
+                    displayText: `/${a.name}`,
+                    description: 'agent'
+                }));
+
+            const suggestions = [...commandSuggestions, ...agentSuggestions];
             setSuggestionsState(prev => ({
                 ...prev,
                 suggestions,
@@ -123,33 +166,8 @@ export function useAutocomplete({
             }
         }
 
-        // 4. Shell history completion (if nothing else matched)
-        if (mode === 'prompt' && text.length >= 3) {
-            const history = await getBashHistory();
-            if (snapshotInput !== lastFetchInputRef.current) return;
-
-            const filteredHistory = history
-                .filter(cmd => cmd.toLowerCase().includes(text.toLowerCase()))
-                .slice(0, 10)
-                .map((cmd, idx) => ({
-                    id: `history-${idx}`,
-                    displayText: cmd,
-                    description: 'from shell history'
-                }));
-
-            if (filteredHistory.length > 0) {
-                setSuggestionsState(prev => ({
-                    ...prev,
-                    suggestions: filteredHistory,
-                    selectedSuggestionIndex: calculateNextSelectedIndex(prev.suggestions, prev.selectedSuggestionIndex, filteredHistory)
-                }));
-                setSuggestionSourceType('history');
-                return;
-            }
-        }
-
         clearSuggestions();
-    }, [mode, commands, suppressSuggestions, clearSuggestions, setSuggestionsState]);
+    }, [mode, commands, agents, suppressSuggestions, clearSuggestions, clearSuggestionsOnly, getBashPrefix, setSuggestionsState]);
 
     // Debounce the suggestion updates to avoid excessive processing
     useEffect(() => {
@@ -183,12 +201,31 @@ export function useAutocomplete({
         clearSuggestions();
     }, [suggestionsState, input, cursorOffset, onInputChange, setCursorOffset, clearSuggestions]);
 
+    const applyHistoryCompletion = useCallback(() => {
+        if (!historyCompletion) return false;
+
+        const bashPrefix = getBashPrefix(input);
+        if (!bashPrefix) return false;
+
+        const newInput = `${bashPrefix.leadingWhitespace}!${historyCompletion.fullCommand}`;
+        onInputChange(newInput);
+        setCursorOffset(newInput.length);
+        clearSuggestions();
+        return true;
+    }, [historyCompletion, input, onInputChange, setCursorOffset, clearSuggestions, getBashPrefix]);
+
     // Intercept keyboard input for navigation and selection
     useInput((_, key) => {
         const { suggestions } = suggestionsState;
+        const isTab = key.tab && !key.shift;
+        if (isTab && historyCompletion) {
+            if (applyHistoryCompletion()) {
+                return;
+            }
+        }
         if (suggestions.length === 0) return;
 
-        if (key.return || key.tab) {
+        if (key.return || isTab) {
             applySelectedSuggestion();
             return;
         }

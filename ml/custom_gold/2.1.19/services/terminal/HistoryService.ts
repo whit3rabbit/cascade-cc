@@ -3,12 +3,52 @@
  * Role: Manages project-specific command history persistence and retrieval.
  */
 
-import { join } from 'node:path';
-import { readFileSync, appendFileSync, existsSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
+import { readFileSync, appendFileSync, existsSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { getBaseConfigDir } from '../../utils/shared/runtimeAndEnv.js';
+import { findGitRoot } from '../../utils/fs/paths.js';
 
 const HISTORY_FILE = 'history.jsonl';
 const MAX_ENTRIES_PER_PROJECT = 100;
+
+function normalizePath(p: string): string {
+    try {
+        return realpathSync(p);
+    } catch {
+        return resolve(p);
+    }
+}
+
+function getGitWorktreePaths(projectPath: string): string[] {
+    const gitRoot = findGitRoot(projectPath);
+    if (!gitRoot) return [];
+
+    try {
+        const output = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+            cwd: gitRoot,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore']
+        });
+        return output
+            .split(/\r?\n/)
+            .filter(line => line.startsWith('worktree '))
+            .map(line => normalizePath(line.slice(9).trim()))
+            .filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+function resolveProjectPath(projectPath: string): string {
+    const gitRoot = findGitRoot(projectPath);
+    return normalizePath(gitRoot || projectPath);
+}
+
+function isPathWithin(candidate: string, root: string): boolean {
+    if (candidate === root) return true;
+    return candidate.startsWith(root + sep);
+}
 
 export interface HistoryEntry {
     display: string;
@@ -28,6 +68,10 @@ export async function getProjectHistory(projectPath: string): Promise<HistoryEnt
     if (!existsSync(historyPath)) return [];
 
     try {
+        const resolvedProjectPath = resolveProjectPath(projectPath);
+        const worktreeRoots = getGitWorktreePaths(resolvedProjectPath);
+        const matchRoots = new Set<string>([resolvedProjectPath, ...worktreeRoots]);
+
         const content = readFileSync(historyPath, 'utf8');
         const lines = content.split('\n').filter(Boolean);
 
@@ -39,7 +83,16 @@ export async function getProjectHistory(projectPath: string): Promise<HistoryEnt
                     return null;
                 }
             })
-            .filter((entry): entry is HistoryEntry => entry && entry.project === projectPath);
+            .filter((entry): entry is HistoryEntry => {
+                if (!entry || !entry.project) return false;
+                const entryProject = normalizePath(entry.project);
+                for (const root of matchRoots) {
+                    if (isPathWithin(entryProject, root)) {
+                        return true;
+                    }
+                }
+                return false;
+            });
 
         // Deduplicate: keep only the most recent occurrence of each command
         const uniqueEntriesMap = new Map<string, HistoryEntry>();
@@ -78,8 +131,10 @@ export async function addToPromptHistory(entry: HistoryEntry): Promise<void> {
     if (EnvService.isTruthy("CLAUDE_CODE_SKIP_PROMPT_HISTORY")) return;
 
     const historyPath = join(getBaseConfigDir(), HISTORY_FILE);
+    const resolvedProject = resolveProjectPath(entry.project || process.cwd());
     const data: HistoryEntry = {
         ...entry,
+        project: resolvedProject,
         timestamp: Date.now()
     };
 

@@ -7,6 +7,24 @@ import { PersistentTaskStore } from './PersistentTaskStore.js';
 import { InMemoryTaskMessageQueue } from './InMemoryTaskMessageQueue.js';
 import { randomUUID } from 'node:crypto';
 
+function isDependencySatisfied(status: TaskStatus | undefined): boolean {
+    return status === 'completed';
+}
+
+function computeBlockedBy(task: Task, tasksById: Map<string, Task>): string[] {
+    const dependencies = task.dependsOn ?? [];
+    if (dependencies.length === 0) return [];
+
+    const blockedBy: string[] = [];
+    for (const depId of dependencies) {
+        const dependency = tasksById.get(depId);
+        if (!isDependencySatisfied(dependency?.status)) {
+            blockedBy.push(depId);
+        }
+    }
+    return blockedBy;
+}
+
 export class TaskManager {
     private store: TaskStore;
     private messageQueue: TaskMessageQueue;
@@ -16,30 +34,51 @@ export class TaskManager {
         this.messageQueue = messageQueue || new InMemoryTaskMessageQueue();
     }
 
-    async createTask(type: TaskType, description: string, shellCommand?: any): Promise<Task> {
+    async createTask(
+        type: TaskType,
+        description: string,
+        shellCommand?: any,
+        options?: { dependsOn?: string[] }
+    ): Promise<Task> {
         const id = randomUUID();
+        const dependsOn = options?.dependsOn ? Array.from(new Set(options.dependsOn.filter(Boolean))) : [];
         const task: Task = {
             id,
             type,
             status: 'pending',
             description,
             shellCommand,
-            startTime: Date.now()
+            startTime: Date.now(),
+            ...(dependsOn.length > 0 ? { dependsOn } : {})
         };
 
         await this.store.addTask(task);
-
 
         return task;
     }
 
     async getTask(taskId: string): Promise<Task | undefined> {
-        return this.store.getTask(taskId);
+        const task = await this.store.getTask(taskId);
+        if (!task) return undefined;
+        const { tasks } = await this.store.listTasks();
+        const tasksById = new Map(tasks.map(t => [t.id, t]));
+        const blockedBy = computeBlockedBy(task, tasksById);
+        return {
+            ...task,
+            ...(blockedBy.length > 0 ? { blockedBy } : { blockedBy: [] })
+        };
     }
 
     async listTasks(): Promise<Task[]> {
         const result = await this.store.listTasks();
-        return result.tasks;
+        const tasksById = new Map(result.tasks.map(task => [task.id, task]));
+        return result.tasks.map(task => {
+            const blockedBy = computeBlockedBy(task, tasksById);
+            return {
+                ...task,
+                ...(blockedBy.length > 0 ? { blockedBy } : { blockedBy: [] })
+            };
+        });
     }
 
     async updateTaskStatus(taskId: string, status: TaskStatus, message?: string): Promise<void> {

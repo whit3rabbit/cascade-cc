@@ -148,8 +148,16 @@ export class SlashCommandDispatcher {
                 return true;
 
             case '/compact':
-                context.setCurrentMenu('compact');
+                context.setCurrentMenu('config', { tab: 'Status' });
                 return true;
+
+            case '/usage':
+            case '/stats':
+            case '/status': {
+                const tab = cmd === '/usage' ? 'Usage' : 'Status';
+                context.setCurrentMenu('config', { tab });
+                return true;
+            }
 
             case '/context':
             case '/cost':

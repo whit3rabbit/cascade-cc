@@ -18,6 +18,8 @@ export interface Task {
     description: string;
     shellCommand?: any; // Should be a BashCommand object
     isBackgrounded?: boolean;
+    dependsOn?: string[];
+    blockedBy?: string[];
     result?: TaskResult;
     startTime: number;
     endTime?: number;

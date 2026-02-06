@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNotifications } from '../services/terminal/NotificationService.js';
 import { useDoubleAction } from './useDoubleAction.js';
 import { useUndoRedo } from './useUndoRedo.js';
 import { useArrowKeyHistory } from './useArrowKeyHistory.js';
-import { useSuggestions } from './useSuggestions.js';
+import { useAutocomplete, SuggestionsState } from './useAutocomplete.js';
 import { useMacros } from './useMacros.js';
 import { useKillRing } from './useKillRing.js';
 import { useVimMode, VimMode } from './useVimMode.js';
@@ -64,17 +64,28 @@ export function useTerminalInput({
         onCursorOffsetChange: setCursorOffset
     });
 
-    const {
-        suggestions,
-        selectedSuggestion,
-        onNextSuggestion,
-        onPrevSuggestion,
-        resetSuggestions
-    } = useSuggestions({
-        input: value,
-        commands,
-        agents
+    const [suggestionsState, setSuggestionsState] = useState<SuggestionsState>({
+        commandArgumentHint: undefined,
+        suggestions: [],
+        selectedSuggestionIndex: -1
     });
+
+    useAutocomplete({
+        commands,
+        agents,
+        onInputChange: onChange,
+        setCursorOffset,
+        input: value,
+        cursorOffset,
+        mode: 'prompt',
+        suggestionsState,
+        setSuggestionsState
+    });
+
+    const suggestions = suggestionsState.suggestions;
+    const selectedSuggestion = suggestionsState.selectedSuggestionIndex >= 0
+        ? suggestionsState.suggestions[suggestionsState.selectedSuggestionIndex]
+        : undefined;
 
     const stash = useStash({
         value,
@@ -193,6 +204,12 @@ export function useTerminalInput({
         const currentKeyIsYank = key.ctrl && char === 'y';
         if (!currentKeyIsYank) {
             lastKeyWasYank.current = false;
+        }
+
+        if (suggestions.length > 0) {
+            if (key.return || key.tab || key.upArrow || key.downArrow || key.escape) {
+                return;
+            }
         }
 
         if (key.ctrl) {
@@ -380,23 +397,23 @@ export function useTerminalInput({
             return;
         }
 
+        if (key.tab) {
+            return;
+        }
+
         if (char === '@' && !key.ctrl && !key.meta) {
             macros.playMacro('q');
             return;
         }
 
         if (key.upArrow && !key.shift) {
-            if (suggestions.length > 0) {
-                onPrevSuggestion();
-            } else {
+            if (suggestions.length === 0) {
                 internalOnHistoryUp();
             }
             return;
         }
         if (key.downArrow && !key.shift) {
-            if (suggestions.length > 0) {
-                onNextSuggestion();
-            } else {
+            if (suggestions.length === 0) {
                 internalOnHistoryDown();
             }
             return;
@@ -445,10 +462,7 @@ export function useTerminalInput({
         onExit,
         undo,
         redo,
-        suggestions,
-        onNextSuggestion,
-        onPrevSuggestion,
-        resetSuggestions,
+        suggestions.length,
         macros,
         killRing,
         stash,
@@ -460,12 +474,6 @@ export function useTerminalInput({
     useEffect(() => {
         handleInputRef.current = handleInput;
     }, [handleInput]);
-
-    useEffect(() => {
-        if (!value.startsWith('/')) {
-            resetSuggestions();
-        }
-    }, [value, resetSuggestions]);
 
     return {
         onInput: handleInput,

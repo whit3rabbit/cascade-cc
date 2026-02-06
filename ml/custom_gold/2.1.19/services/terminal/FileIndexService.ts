@@ -7,6 +7,7 @@ export interface Suggestion {
     id: string;
     displayText: string;
     description?: string;
+    metadata?: Record<string, any>;
 }
 
 /**

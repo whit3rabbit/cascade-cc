@@ -9,6 +9,7 @@ import { clearIterm2Progress } from "./terminal/iterm2ProgressBar.js";
 type CleanupTask = () => void | Promise<void>;
 const cleanupTasks: CleanupTask[] = [];
 let isCleaningUp = false;
+let handlersInitialized = false;
 
 /**
  * Registers a function to be called during application cleanup.
@@ -44,6 +45,9 @@ export async function runCleanup(): Promise<void> {
  * Sets up listeners for common signals to ensure cleanup runs.
  */
 export function setupCleanupHandlers(): void {
+    if (handlersInitialized) return;
+    handlersInitialized = true;
+
     const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
     // Ensure iterm2 progress bar is cleared on exit
@@ -54,6 +58,18 @@ export function setupCleanupHandlers(): void {
             await runCleanup();
             process.exit(0);
         });
+    });
+
+    process.on('beforeExit', async () => {
+        await runCleanup();
+    });
+
+    process.on('exit', () => {
+        try {
+            clearIterm2Progress();
+        } catch {
+            // ignore
+        }
     });
 
     // Handle unexpected errors if possible
